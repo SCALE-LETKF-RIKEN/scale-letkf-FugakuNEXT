@@ -100,7 +100,7 @@ contains
 
        select case ( ATMOS_PHY_RD_TYPE )
        case ( "MSTRNX" )
-          call ATMOS_PHY_RD_MSTRNX_setup( KA, KS, KE, CZ(:), FZ(:) )
+          call ATMOS_PHY_RD_MSTRNX_setup( KA, KS, KE, IS, IE, JS, JE, CZ(:), FZ(:) )
        case ( "OFFLINE" )
           call ATMOS_PHY_RD_offline_setup
        case default
