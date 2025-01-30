@@ -2900,8 +2900,8 @@ contains
        topomg = (updet(k_top) - upent(k_top))*deltap(k_top)*emsd(k_top)
        if( abs(topomg - omg(k_top-1)) > 1.e-3_RP) then ! not same omega velocity error
           LOG_ERROR("CP_kf_compensational",*) "KF omega is not consistent",ncount
-          LOG_ERROR_CONT(*) "omega error",abs(topomg - omg(k_top-1)),k_top,topomg,omg(k_top-1)
 #ifndef _OPENACC
+          LOG_ERROR_CONT(*) "omega error",abs(topomg - omg(k_top-1)),k_top,topomg,omg(k_top-1)
           call PRC_abort
 #endif
           error = .true.
@@ -3190,6 +3190,7 @@ contains
        ! write error message
        ! moisture budget error
        LOG_ERROR("CP_kf_compensational",*) "@KF,MOISTURE i,j=",i,j
+#ifndef _OPENACC
        LOG_ERROR_CONT(*) "--------------------------------------"
        LOG_ERROR_CONT('("vert accum rho*qhyd : ",ES20.12)') qhydr
        LOG_ERROR_CONT('("vert accum rho*qv   : ",ES20.12)') qvfnl-qinit
@@ -3197,7 +3198,6 @@ contains
        LOG_ERROR_CONT('("conserv qhyd + qv   : ",ES20.12)') qhydr + qpfnl
        LOG_ERROR_CONT('("conserv total       : ",ES20.12)') qfinl-qinit
        LOG_ERROR_CONT(*) "--------------------------------------"
-#ifndef _OPENACC
        call PRC_abort
 #endif
        error = .true.

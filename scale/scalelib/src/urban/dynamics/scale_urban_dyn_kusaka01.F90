@@ -1333,6 +1333,7 @@ contains
     max_itr1 = max(max_itr1, iteration - 1)
 #endif
 
+#ifndef _OPENACC
     ! output for debug
     if ( iteration > itr_max .and. debug ) then
        LOG_WARN("URBAN_DYN_kusaka01_SLC_main",*) 'iteration for TR was not converged',PRC_myrank,i,j
@@ -1372,6 +1373,7 @@ contains
        LOG_WARN_CONT(*) 'DEBUG Message --- Z0HR: Thermal roughness length of roof            [m] :', Z0HR
        LOG_WARN_CONT(*) '---------------------------------------------------------------------------------'
      endif
+#endif
 
     !--- update only fluxes ----
      THS   = TR / EXN
@@ -1723,6 +1725,7 @@ contains
      max_itr2 = max(max_itr2, iteration - 1)
 #endif
 
+#ifndef _OPENACC
      ! output for debug
      if ( iteration > itr_max .and. debug ) then
        LOG_WARN("URBAN_DYN_Kusaka01_main",*) 'iteration for TB/TG was not converged',PRC_myrank,i,j
@@ -1776,6 +1779,7 @@ contains
        LOG_WARN_CONT(*) 'DEBUG Message --- dt        : Time step                           [s] :', dt_RP
        LOG_WARN_CONT(*) '---------------------------------------------------------------------------------'
      endif
+#endif
 
      !--- update only fluxes ----
 
