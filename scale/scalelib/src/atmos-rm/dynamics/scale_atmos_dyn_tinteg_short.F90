@@ -87,12 +87,12 @@ module scale_atmos_dyn_tinteg_short
        real(RP), intent(in)    :: RFDX(IA-1)
        real(RP), intent(in)    :: RFDY(JA-1)
 
-       real(RP), intent(in)    :: PHI  (KA,IA,JA)   !< geopotential
-       real(RP), intent(in)    :: GSQRT(KA,IA,JA,7) !< vertical metrics {G}^1/2
-       real(RP), intent(in)    :: J13G (KA,IA,JA,7) !< (1,3) element of Jacobian matrix
-       real(RP), intent(in)    :: J23G (KA,IA,JA,7) !< (2,3) element of Jacobian matrix
-       real(RP), intent(in)    :: J33G              !< (3,3) element of Jacobian matrix
-       real(RP), intent(in)    :: MAPF (IA,JA,2,4)  !< map factor
+       real(RP), intent(in)    :: PHI  (KA,IA,JA)           !< geopotential
+       real(RP), intent(in)    :: GSQRT(KA,IA,JA,I_XYZ_MAX) !< vertical metrics {G}^1/2
+       real(RP), intent(in)    :: J13G (KA,IA,JA,I_XYZ_MAX) !< (1,3) element of Jacobian matrix
+       real(RP), intent(in)    :: J23G (KA,IA,JA,I_XYZ_MAX) !< (2,3) element of Jacobian matrix
+       real(RP), intent(in)    :: J33G                      !< (3,3) element of Jacobian matrix
+       real(RP), intent(in)    :: MAPF (IA,JA,2,I_XY_MAX)   !< map factor
 
        real(RP), intent(in)    :: REF_pres(KA,IA,JA)   !< reference pressure
        real(RP), intent(in)    :: REF_dens(KA,IA,JA)

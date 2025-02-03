@@ -1697,8 +1697,8 @@ contains
       logical,  intent(in)  :: TwoD
       real(RP), intent(in)  :: dt
 
-      real(RP), intent(in)  :: GSQRT   (KA,IA,JA,7) !< vertical metrics {G}^1/2
-      real(RP), intent(in)  :: MAPF    (IA,JA,2,4)  !< map factor
+      real(RP), intent(in)  :: GSQRT   (KA,IA,JA,I_XYZ_MAX) !< vertical metrics {G}^1/2
+      real(RP), intent(in)  :: MAPF    (IA,JA,2,I_XY_MAX)   !< map factor
 
       real(RP), intent(in)  :: REF_dens(KA,IA,JA)
       real(RP), intent(in)  :: REF_pott(KA,IA,JA)
@@ -2396,8 +2396,8 @@ contains
     real(RP), intent(in) :: RCDZ(KA)
     real(RP), intent(in) :: RCDX(IA)
     real(RP), intent(in) :: RCDY(JA)
-    real(RP), intent(in)  :: GSQRT(KA,IA,JA,7) !< vertical metrics {G}^1/2
-    real(RP), intent(in)  :: MAPF(IA,JA,2,4)   !< map factor
+    real(RP), intent(in)  :: GSQRT(KA,IA,JA,I_XYZ_MAX) !< vertical metrics {G}^1/2
+    real(RP), intent(in)  :: MAPF(IA,JA,2,I_XY_MAX)    !< map factor
     logical, intent(in) :: TwoD
     real(RP), intent(in) :: dt
 
@@ -2479,8 +2479,8 @@ contains
     real(RP), intent(in) :: RFDZ(KA-1)
     real(RP), intent(in) :: RCDX(IA)
     real(RP), intent(in) :: RCDY(JA)
-    real(RP), intent(in)  :: GSQRT(KA,IA,JA,7) !< vertical metrics {G}^1/2
-    real(RP), intent(in)  :: MAPF(IA,JA,2,4)   !< map factor
+    real(RP), intent(in)  :: GSQRT(KA,IA,JA,I_XYZ_MAX) !< vertical metrics {G}^1/2
+    real(RP), intent(in)  :: MAPF(IA,JA,2,I_XY_MAX)    !< map factor
     logical, intent(in) :: TwoD
     real(RP), intent(in) :: dt
 
@@ -2562,8 +2562,8 @@ contains
     real(RP), intent(in) :: RCDZ(KA)
     real(RP), intent(in) :: RFDX(IA-1)
     real(RP), intent(in) :: RCDY(JA)
-    real(RP), intent(in)  :: GSQRT(KA,IA,JA,7) !< vertical metrics {G}^1/2
-    real(RP), intent(in)  :: MAPF(IA,JA,2,4)   !< map factor
+    real(RP), intent(in)  :: GSQRT(KA,IA,JA,I_XYZ_MAX) !< vertical metrics {G}^1/2
+    real(RP), intent(in)  :: MAPF(IA,JA,2,I_XY_MAX)    !< map factor
     logical, intent(in) :: TwoD
     real(RP), intent(in) :: dt
 
@@ -2645,9 +2645,9 @@ contains
     real(RP), intent(in) :: RCDZ(KA)
     real(RP), intent(in) :: RCDX(IA)
     real(RP), intent(in) :: RFDY(JA-1)
-    real(RP), intent(in)  :: GSQRT(KA,IA,JA,7) !< vertical metrics {G}^1/2
-    real(RP), intent(in)  :: MAPF(IA,JA,2,4)   !< map factor
-    logical, intent(in) :: TwoD
+    real(RP), intent(in) :: GSQRT(KA,IA,JA,I_XYZ_MAX) !< vertical metrics {G}^1/2
+    real(RP), intent(in) :: MAPF(IA,JA,2,I_XY_MAX)    !< map factor
+    logical,  intent(in) :: TwoD
     real(RP), intent(in) :: dt
 
     integer :: i, j, k

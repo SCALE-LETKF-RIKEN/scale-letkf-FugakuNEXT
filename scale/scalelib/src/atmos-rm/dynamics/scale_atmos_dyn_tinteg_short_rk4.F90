@@ -7,13 +7,13 @@
 !!
 !! @author Team SCALE
 !!
-!! This module provides a 4th order and 4 stage classical runge=kutta method which is widely used. 
+!! This module provides a 4th order and 4 stage classical runge=kutta method which is widely used.
 !!   y_n+1 = y_n + (k1 + 2*k2 + 2*k3 + k4)/6
 !!  where
-!!   k1 = h f(xn,yn), 
-!!   k2 = h f(xn +  h/2, yn + k1/2), 
-!!   k3 = h f(xn +  h/2, yn + k2/2), 
-!!   k4 = h f(xn +  h  , yn + k3  ). 
+!!   k1 = h f(xn,yn),
+!!   k2 = h f(xn +  h/2, yn + k1/2),
+!!   k3 = h f(xn +  h/2, yn + k2/2),
+!!   k4 = h f(xn +  h  , yn + k3  ).
 !<
 !-------------------------------------------------------------------------------
 #include "scalelib.h"
@@ -262,7 +262,7 @@ contains
        DENS, MOMZ, MOMX, MOMY, RHOT, PROG,      &
        mflx_hi,  tflx_hi,                       &
        DENS_t, MOMZ_t, MOMX_t, MOMY_t, RHOT_t,  &
-       DPRES0, CVtot, CORIOLI,                  &
+       DPRES0, RT2P, CORIOLI,                   &
        num_diff, wdamp_coef, divdmp_coef, DDIV, &
        FLAG_FCT_MOMENTUM, FLAG_FCT_T,           &
        FLAG_FCT_ALONG_STREAM,                   &
@@ -298,7 +298,7 @@ contains
     real(RP), intent(in)    :: RHOT_t(KA,IA,JA)
 
     real(RP), intent(in)    :: DPRES0(KA,IA,JA)
-    real(RP), intent(in)    :: CVtot(KA,IA,JA)
+    real(RP), intent(in)    :: RT2P(KA,IA,JA)
     real(RP), intent(in)    :: CORIOLI(IA,JA)
     real(RP), intent(in)    :: num_diff(KA,IA,JA,5,3)
     real(RP), intent(in)    :: wdamp_coef(KA)
@@ -320,12 +320,12 @@ contains
     real(RP), intent(in)    :: RFDX(IA-1)
     real(RP), intent(in)    :: RFDY(JA-1)
 
-    real(RP), intent(in)    :: PHI  (KA,IA,JA)   !< geopotential
-    real(RP), intent(in)    :: GSQRT(KA,IA,JA,7) !< vertical metrics {G}^1/2
-    real(RP), intent(in)    :: J13G (KA,IA,JA,7) !< (1,3) element of Jacobian matrix
-    real(RP), intent(in)    :: J23G (KA,IA,JA,7) !< (2,3) element of Jacobian matrix
-    real(RP), intent(in)    :: J33G              !< (3,3) element of Jacobian matrix
-    real(RP), intent(in)    :: MAPF (IA,JA,2,4)  !< map factor
+    real(RP), intent(in)    :: PHI  (KA,IA,JA)           !< geopotential
+    real(RP), intent(in)    :: GSQRT(KA,IA,JA,I_XYZ_MAX) !< vertical metrics {G}^1/2
+    real(RP), intent(in)    :: J13G (KA,IA,JA,I_XYZ_MAX) !< (1,3) element of Jacobian matrix
+    real(RP), intent(in)    :: J23G (KA,IA,JA,I_XYZ_MAX) !< (2,3) element of Jacobian matrix
+    real(RP), intent(in)    :: J33G                      !< (3,3) element of Jacobian matrix
+    real(RP), intent(in)    :: MAPF (IA,JA,2,I_XY_MAX)   !< map factor
 
     real(RP), intent(in)    :: REF_pres(KA,IA,JA)   !< reference pressure
     real(RP), intent(in)    :: REF_dens(KA,IA,JA)
@@ -358,7 +358,7 @@ contains
     !$acc data copy(DENS, MOMZ, MOMX, MOMY, RHOT, PROG, mflx_hi) &
     !$acc      copyout(tflx_hi) &
     !$acc      copyin(DENS_t, MOMZ_t, MOMX_t, MOMY_t, RHOT_t, &
-    !$acc             DPRES0, CVtot, CORIOLI, num_diff, wdamp_coef, DDIV, &
+    !$acc             DPRES0, RT2P, CORIOLI, num_diff, wdamp_coef, DDIV, &
     !$acc             CDZ, FDZ, FDX, FDY, RCDZ, RCDX, RCDY, RFDZ, RFDX, RFDY, &
     !$acc             PHI, GSQRT, J13G, J23G, MAPF, &
     !$acc             REF_pres, REF_dens) &
@@ -482,7 +482,7 @@ contains
                           DENS,     MOMZ,     MOMX,     MOMY,     RHOT,     & ! [IN]
                           DENS_t,   MOMZ_t,   MOMX_t,   MOMY_t,   RHOT_t,   & ! [IN]
                           PROG0, PROG,                                      & ! [IN]
-                          DPRES0, CVtot, CORIOLI,                           & ! [IN]
+                          DPRES0, RT2P, CORIOLI,                            & ! [IN]
                           num_diff, wdamp_coef, divdmp_coef, DDIV,          & ! [IN]
                           FLAG_FCT_MOMENTUM, FLAG_FCT_T,                    & ! [IN]
                           FLAG_FCT_ALONG_STREAM,                            & ! [IN]
@@ -535,7 +535,7 @@ contains
                           DENS_RK1, MOMZ_RK1, MOMX_RK1, MOMY_RK1, RHOT_RK1, & ! [IN]
                           DENS_t,   MOMZ_t,   MOMX_t,   MOMY_t,   RHOT_t,   & ! [IN]
                           PROG0, PROG_RK1,                                  & ! [IN]
-                          DPRES0, CVtot, CORIOLI,                           & ! [IN]
+                          DPRES0, RT2P, CORIOLI,                            & ! [IN]
                           num_diff, wdamp_coef, divdmp_coef, DDIV,          & ! [IN]
                           FLAG_FCT_MOMENTUM, FLAG_FCT_T,                    & ! [IN]
                           FLAG_FCT_ALONG_STREAM,                            & ! [IN]
@@ -588,7 +588,7 @@ contains
                           DENS_RK2, MOMZ_RK2, MOMX_RK2, MOMY_RK2, RHOT_RK2, & ! [IN]
                           DENS_t,   MOMZ_t,   MOMX_t,   MOMY_t,   RHOT_t,   & ! [IN]
                           PROG0, PROG_RK2,                                  & ! [IN]
-                          DPRES0, CVtot, CORIOLI,                           & ! [IN]
+                          DPRES0, RT2P, CORIOLI,                            & ! [IN]
                           num_diff, wdamp_coef, divdmp_coef, DDIV,          & ! [IN]
                           FLAG_FCT_MOMENTUM, FLAG_FCT_T,                    & ! [IN]
                           FLAG_FCT_ALONG_STREAM,                            & ! [IN]
@@ -641,7 +641,7 @@ contains
                           DENS_RK3, MOMZ_RK3, MOMX_RK3, MOMY_RK3, RHOT_RK3, & ! [IN]
                           DENS_t,   MOMZ_t,   MOMX_t,   MOMY_t,   RHOT_t,   & ! [IN]
                           PROG0, PROG_RK3,                                  & ! [IN]
-                          DPRES0, CVtot, CORIOLI,                           & ! [IN]
+                          DPRES0, RT2P, CORIOLI,                            & ! [IN]
                           num_diff, wdamp_coef, divdmp_coef, DDIV,          & ! [IN]
                           FLAG_FCT_MOMENTUM, FLAG_FCT_T,                    & ! [IN]
                           FLAG_FCT_ALONG_STREAM,                            & ! [IN]

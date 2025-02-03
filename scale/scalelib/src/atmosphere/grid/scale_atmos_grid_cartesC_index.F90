@@ -88,22 +88,24 @@ module scale_atmos_grid_cartesC_index
   integer, public :: JSGB        !< start point of the inner domain: y, global
   integer, public :: JEGB        !< end   point of the inner domain: y, global
 
-  integer,  public :: I_XYZ = 1 ! at (x,y,z)
-  integer,  public :: I_XYW = 2 ! at (x,y,w)
-  integer,  public :: I_UYW = 3 ! at (u,y,w)
-  integer,  public :: I_XVW = 4 ! at (x,v,w)
-  integer,  public :: I_UYZ = 5 ! at (u,y,z)
-  integer,  public :: I_XVZ = 6 ! at (x,v,z)
-  integer,  public :: I_UVZ = 7 ! at (u,v,z)
+  integer,  public :: I_XYZ_MAX = 7 ! 3 for 2D
+  integer,  public, parameter :: I_XYZ = 1 ! at (x,y,z)
+  integer,  public, parameter :: I_XYW = 2 ! at (x,y,w)
+  integer,  public, parameter :: I_XVZ = 3 ! at (x,v,z)
+  integer,  public, parameter :: I_XVW = 4 ! at (x,v,w)
+  integer,  public            :: I_UYZ = 5 ! at (u,y,z)
+  integer,  public            :: I_UYW = 6 ! at (u,y,w)
+  integer,  public            :: I_UVZ = 7 ! at (u,v,z)
 
-  integer,  public :: I_XY  = 1 ! at (x,y)
-  integer,  public :: I_UY  = 2 ! at (u,y)
-  integer,  public :: I_XV  = 3 ! at (x,v)
-  integer,  public :: I_UV  = 4 ! at (u,v)
+  integer,  public :: I_XY_MAX = 4 ! 2 for 2D
+  integer,  public, parameter :: I_XY  = 1 ! at (x,y)
+  integer,  public, parameter :: I_XV  = 2 ! at (x,v)
+  integer,  public            :: I_UY  = 3 ! at (u,y)
+  integer,  public            :: I_UV  = 4 ! at (u,v)
 
-  integer,  public :: I_FYZ = 1 ! y-z face limiting x-flux
-  integer,  public :: I_FXZ = 2 ! x-z face limiting y-flux
-  integer,  public :: I_FXY = 3 ! x-y face limiting z-flux
+  integer,  public, parameter :: I_FYZ = 1 ! y-z face limiting x-flux
+  integer,  public, parameter :: I_FXZ = 2 ! x-z face limiting y-flux
+  integer,  public, parameter :: I_FXY = 3 ! x-y face limiting z-flux
 
 contains
 
@@ -131,17 +133,14 @@ contains
          KHALO, IHALO, JHALO, &
          IBLOCK, JBLOCK       )
 
+    I_XYZ_MAX = 7
     if ( PRC_TwoD ) then
-       I_XYZ = 1
-       I_XYW = 2
-       I_XVW = 3
-       I_XVZ = 4
+       I_XYZ_MAX = 4
        I_UYW = I_XYW
        I_UYZ = I_XYZ
        I_UVZ = I_XVZ
 
-       I_XY  = 1
-       I_XV  = 2
+       I_XY_MAX = 2
        I_UY  = I_XY
        I_UV  = I_XV
     end if
