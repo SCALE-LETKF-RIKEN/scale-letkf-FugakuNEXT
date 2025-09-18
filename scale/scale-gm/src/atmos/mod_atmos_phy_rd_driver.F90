@@ -87,7 +87,7 @@ contains
           do k = KS-1, KE
              FZ(k) = GRD_gzh(k+1)
           end do
-          call ATMOS_PHY_RD_MSTRNX_setup( KA, KS, KE, GRD_gz(:), FZ(:) )
+          call ATMOS_PHY_RD_MSTRNX_setup( KA, KS, KE, IS, IE, JS, JE, GRD_gz(:), FZ(:) )
        case ( "OFFLINE" )
           call ATMOS_PHY_RD_offline_setup
        case default
