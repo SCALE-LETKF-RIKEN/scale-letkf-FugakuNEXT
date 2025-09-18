@@ -397,7 +397,7 @@ contains
        ! at (x, y, w)
        if ( TwoD ) then
           !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ &
-          !$omp shared(JJS,JJE,IS,KS,KE,GSQRT,I_XYW,MOMY,J23G,mflx_hi,MAPF,I_XY,num_diff)
+          !$omp shared(JJS,JJE,IS,KS,KE,GSQRT,MOMY,J23G,mflx_hi,MAPF,num_diff)
           !$acc kernels
           do j = JJS, JJE
              mflx_hi(KS-1,IS,j,ZDIR) = 0.0_RP
@@ -418,7 +418,7 @@ contains
           !$acc end kernels
        else
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
-          !$omp shared(JJS,JJE,IIS,IIE,KS,KE,GSQRT,I_XYW,MOMX,MOMY,J13G,J23G,mflx_hi,MAPF,I_XY,num_diff)
+          !$omp shared(JJS,JJE,IIS,IIE,KS,KE,GSQRT,MOMX,MOMY,J13G,J23G,mflx_hi,MAPF,num_diff)
           !$acc kernels
           do j = JJS, JJE
           do i = IIS-1, IIE
@@ -482,7 +482,7 @@ contains
 
        ! at (x, v, z)
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
-       !$omp shared(JJS,JS,JFS_OFF,JJE,JEH,IIS,IIE,KS,KE,GSQRT,I_XVZ,MOMY,num_diff,mflx_hi,MAPF,I_XV)
+       !$omp shared(JJS,JS,JFS_OFF,JJE,JEH,IIS,IIE,KS,KE,GSQRT,MOMY,num_diff,mflx_hi,MAPF)
        !$acc kernels
        do j = max(JJS-1,JS-JFS_OFF), min(JJE,JEH)
        do i = IIS, IIE
@@ -512,7 +512,7 @@ contains
 #endif
           !$omp shared(JJS,JJE,IS,KS,KE) &
           !$omp shared(DENS0,Sr,mflx_hi,DENS_t) &
-          !$omp shared(RCDZ,RCDY,MAPF,GSQRT,I_XY,I_XYZ)
+          !$omp shared(RCDZ,RCDY,MAPF,GSQRT)
           !$acc kernels
           do j = JJS, JJE
           do k = KS, KE
@@ -541,7 +541,7 @@ contains
 #endif
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE) &
           !$omp shared(DENS0,Sr,mflx_hi,DENS_t) &
-          !$omp shared(RCDZ,RCDX,RCDY,MAPF,GSQRT,I_XY,I_XYZ)
+          !$omp shared(RCDZ,RCDX,RCDY,MAPF,GSQRT)
           !$acc kernels
           do j = JJS, JJE
           do i = IIS, IIE
@@ -633,7 +633,7 @@ contains
           !$omp shared(JJS,JJE,IS,KS,KE) &
           !$omp shared(qflx_hi,qflx_J23,DDIV,MOMZ0,MOMZ_t,Sw) &
           !$omp shared(RFDZ,RCDY,FDZ,dtrk,wdamp_coef,divdmp_coef) &
-          !$omp shared(MAPF,GSQRT,I_XY,I_XYW)
+          !$omp shared(MAPF,GSQRT)
           !$acc kernels
           do j = JJS, JJE
 !OCL NORECURRENCE
@@ -678,7 +678,7 @@ contains
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE) &
           !$omp shared(qflx_hi,qflx_J13,qflx_J23,DDIV,MOMZ0,MOMZ_t,Sw) &
           !$omp shared(RFDZ,RCDX,RCDY,FDZ,dtrk,wdamp_coef,divdmp_coef) &
-          !$omp shared(MAPF,GSQRT,I_XY,I_XYW)
+          !$omp shared(MAPF,GSQRT)
           !$acc kernels
           do j = JJS, JJE
           do i = IIS, IIE
@@ -782,7 +782,7 @@ contains
 #endif
           !$omp shared(JJS,JJE,IS,KS,KE) &
           !$omp shared(tflx_hi,RHOT_t,St,RCDZ,RCDY) &
-          !$omp shared(MAPF,GSQRT,I_XY,I_XYZ)
+          !$omp shared(MAPF,GSQRT)
           !$acc kernels
           do j = JJS, JJE
           do k = KS, KE
@@ -812,7 +812,7 @@ contains
 #endif
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE) &
           !$omp shared(tflx_hi,RHOT_t,St,RCDZ,RCDX,RCDY) &
-          !$omp shared(MAPF,GSQRT,I_XY,I_XYZ)
+          !$omp shared(MAPF,GSQRT)
           !$acc kernels
           do j = JJS, JJE
           do i = IIS, IIE
@@ -870,7 +870,7 @@ contains
        !$omp shared(DENS_RK,RHOT_RK,DENS0,RHOT0,DENS,MOMZ,POTT,DPRES) &
        !$omp shared(GRAV,dtrk,REF_dens,Sr,Sw,St,RT2P) &
        !$omp shared(ATMOS_DYN_FVM_flux_valueW_Z) &
-       !$omp shared(MAPF,GSQRT,J33G,I_XY,I_XYZ,I_XYW,CDZ,RCDZ,RFDZ)
+       !$omp shared(MAPF,GSQRT,J33G,CDZ,RCDZ,RFDZ)
 #else
        !$omp parallel do default(shared) private(i,j,k,ii,l) OMP_SCHEDULE_ &
        !$omp private(A,B,Ci,Co,F1,F2,F3,PT,pg,advcv)
@@ -1097,7 +1097,7 @@ contains
           !$omp shared(MOMX_RK,DENS,MOMX,MOMY,MOMX0,MOMX_t) &
           !$omp shared(qflx_hi,qflx_J23) &
           !$omp shared(RCDZ,RCDY,CDZ) &
-          !$omp shared(MAPF,GSQRT,I_XY,I_UY,I_XYZ,I_UYZ) &
+          !$omp shared(MAPF,GSQRT,I_UY,I_UYZ) &
           !$omp shared(dtrk,CORIOLI)
           !$acc kernels
           do j = JJS, JJE
@@ -1143,7 +1143,7 @@ contains
           !$omp shared(MOMX_RK,DPRES,DENS,MOMX,MOMY,DDIV,MOMX0,MOMX_t) &
           !$omp shared(qflx_hi,qflx_J13,qflx_J23) &
           !$omp shared(RCDZ,RCDY,RFDX,CDZ,FDX) &
-          !$omp shared(MAPF,GSQRT,J13G,I_XY,I_UY,I_UV,I_XYZ,I_UYW,I_UYZ) &
+          !$omp shared(MAPF,GSQRT,J13G,I_UY,I_UV,I_UYW,I_UYZ) &
           !$omp shared(dtrk,CORIOLI,divdmp_coef)
           !$acc kernels
           do j = JJS, JJE
@@ -1270,7 +1270,7 @@ contains
           !$omp shared(MOMY_RK,DPRES,DENS,MOMX,MOMY,DDIV,MOMY0,MOMY_t) &
           !$omp shared(qflx_hi,qflx_J23) &
           !$omp shared(RCDZ,RFDY,CDZ,FDY) &
-          !$omp shared(MAPF,GSQRT,J23G,I_XV,I_XYZ,I_XVW,I_XVZ) &
+          !$omp shared(MAPF,GSQRT,J23G) &
           !$omp shared(dtrk,CORIOLI,divdmp_coef)
           !$acc kernels
           do j = JJS, min(JJE,JEH)
@@ -1335,7 +1335,7 @@ contains
           !$omp shared(MOMY_RK,DPRES,DENS,MOMX,MOMY,DDIV,MOMY0,MOMY_t) &
           !$omp shared(qflx_hi,qflx_J13,qflx_J23) &
           !$omp shared(RCDZ,RCDX,RFDY,CDZ,FDY) &
-          !$omp shared(MAPF,GSQRT,J23G,I_XY,I_XV,I_UV,I_XYZ,I_XVW,I_XVZ) &
+          !$omp shared(MAPF,GSQRT,J23G,I_UV) &
           !$omp shared(dtrk,CORIOLI,divdmp_coef)
           !$acc kernels
           do j = JJS, min(JJE,JEH)
