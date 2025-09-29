@@ -1,0 +1,40 @@
+# Version flags
+SCALE_USER_VER = T
+
+# Precision
+LETKF_SINGLE_FP = F
+
+# MP-PAWR decoder
+
+USE_PAWR_DECODER = F
+
+#ENABLE_SAITAMA_MPW = T
+ENABLE_SAITAMA_MPW = F
+
+# Libraries
+#-----------------
+
+#LAPACK_LIB = -I/usr/local/include -llapack -lblas
+LAPACK_LIB = $(SCALE_MATHLIB_LIBS)
+
+# NCEP_BUFR_LIB is available from https://github.com/NOAA-EMC/NCEPLIBS
+#NCEPBUFR_LIB   = /mnt/humet-hdd01/honda/work/NCEPLIBS-bufr/lib64
+#BUFR_LIB   = -L$(NCEPBUFR_LIB) -lbufr_4 -lbufr_8 -lbufr_d
+BUFR_LIB   = -L/data/opt/bufrlib/10.1.0_intel/lib -lbufrlib
+
+USE_MTX_KEVD = F
+SINGLE_EVP = F
+
+# Compiler flags
+#-----------------
+
+FOPTS_SCALE = $(FFLAGS)
+
+FOPTS     = $(FOPTS_SCALE)
+
+FOPTS_EXE  = $(FOPTS)
+
+FBYTESWAP = -convert little_endian
+FFREE     = -free
+FFIXED    = -fixed
+

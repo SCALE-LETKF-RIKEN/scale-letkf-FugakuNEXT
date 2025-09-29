@@ -1,0 +1,37 @@
+!-------------------------------------------------------------------------------
+!> module Index
+!!
+!! @par Description
+!!          Index module
+!!
+!! @author Team SCALE
+!<
+!-------------------------------------------------------------------------------
+#include "scalelib.h"
+module scale_index
+  !-----------------------------------------------------------------------------
+  !
+  !++ used modules
+  !
+  use scale_io
+  !-----------------------------------------------------------------------------
+  implicit none
+  private
+  !-----------------------------------------------------------------------------
+  !
+  !++ Public procedure
+  !
+  !-----------------------------------------------------------------------------
+  !
+  !++ Public parameters & variables
+  !
+  integer, public, parameter :: I_DENS = 1
+  integer, public, parameter :: I_MOMZ = 2
+  integer, public, parameter :: I_MOMX = 3
+  integer, public, parameter :: I_MOMY = 4
+  integer, public, parameter :: I_RHOT = 5
+  integer, public, parameter :: I_QTRC = 6
+
+  integer, public            :: VA ! number of the additional prognostic variables
+
+end module scale_index

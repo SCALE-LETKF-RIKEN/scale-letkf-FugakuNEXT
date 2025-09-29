@@ -1,0 +1,275 @@
+\section{Dynamical Core for Cartesian C-grid} \label{sec:atmos_dyn_cartesC}
+%------------------------------------------------------
+In this section, the dynamical core for the Cartesian C-grid is described.
+The Cartesian C-grid is employed in \scalerm.
+In the Cartesian C-grid, scalar quantities, such as density, thermodynamics variable and vapor, is defined at the cell center, while components of vector quantities, such as the momentums and fluxes, are defined at staggered point.
+See the description document of \scalerm for more details.
+
+
+
+\subsection{Setting Integration Numerical Method}  %\label{subsec:atmos_dyn_sover}
+%------------------------------------------------------
+The numerical method for time integration in the dynamical process is specified in \nmitem{ATMOS_DYN_TYPE} in \namelist{PARAM_ATMOS} in the configuration file.
+\editboxtwo{
+\verb|&PARAM_ATMOS  | & \\
+\verb| ATMOS_DYN_TYPE    = "HEVE", | & ; Choose from Table \ref{tab:nml_dyn}.\\
+\verb|/             | & \\
+}
+
+Time step depends on the sound speed in the case of using the explicit method, while it does not in the case of using the implicit method.
+In most real atmospheric simulations, vertical grid spacing is much smaller than the horizontal ones.
+Thus, fully explicit scheme, that is ``HEVE'', requires a quite small time step, which depends on vertical grid spacing and sound speed.
+Therefore, ``HEVI'' is often used for the real atmospheric simulations.
+
+
+
+\begin{table}[bth]
+\begin{center}
+  \caption{Options of methods for time integration in dynamical process}
+  \label{tab:nml_dyn}
+  \begin{tabularx}{150mm}{llX} \hline
+    \rowcolor[gray]{0.9}  Scheme name & Description of scheme & Note\\ \hline
+      \verb|HEVE|  & Fully explicit method & \\
+      \verb|HEVI|  & Horizontally explicit and vertically implicit methods & Recommended for real experiment\\
+    \hline
+  \end{tabularx}
+\end{center}
+\end{table}
+
+
+\subsection{Setting Temporal and Spatial Schemes} \label{subsec:atmos_dyn_scheme}
+%------------------------------------------------------
+
+The temporal and spatial schemes are configured in \namelist{PARAM_ATMOS_DYN}.
+An example of setting, which is recommended for real atmospheric simulations,
+is shown below.
+\editboxtwo{
+ \verb|&PARAM_ATMOS_DYN  | & \\
+ \verb|ATMOS_DYN_TINTEG_SHORT_TYPE          = RK4,|          & ; Choose from temporal schemes in Table \ref{tab:nml_atm_dyn}\\
+ \verb|ATMOS_DYN_TINTEG_TRACER_TYPE         = RK3WS2002,|    & ; Choose from temporal schemes\\
+ \verb|ATMOS_DYN_FVM_FLUX_TYPE              = UD3,|          & ; Choose from temporal spatial schemes in Table \ref{tab:nml_atm_dyn}\\
+ \verb|ATMOS_DYN_FVM_FLUX_TRACER_TYPE       = UD3KOREN1993,| & ; Choose from spatial schemes\\
+ \verb|ATMOS_DYN_FLAG_FCT_TRACER            = .false.,|      & ; Use FCT scheme (.true.) or not (.false.)\\
+ \verb|ATMOS_DYN_NUMERICAL_DIFF_COEF        = 0.D0, |        & \\
+ \verb|ATMOS_DYN_NUMERICAL_DIFF_COEF_TRACER = 0.D0, |        & \\
+ \verb|ATMOS_DYN_wdamp_height               = 15.D3,|        & ; height [m] of the bottom of sponge layer (for Rayleigh damping)\\
+\verb|/             | & \\
+}
+
+The other options for temporal and spatial schemes are shown in Table \ref{tab:nml_atm_dyn}.
+Note that the time step should be set according to the used schemes in order to ensure numerical stability.
+An criteria to determine the time step is described in Section \ref{sec:timeintiv}.
+
+
+\begin{table}[bth]
+\begin{center}
+  \caption{Setting temporal and spatial schemes}
+  \label{tab:nml_atm_dyn}
+  \begin{tabularx}{150mm}{lllX} \hline
+    \rowcolor[gray]{0.9} & \multicolumn{1}{l}{Scheme name} & \multicolumn{1}{l}{Description of scheme} & \\ \hline
+    \multicolumn{3}{l}{Temporal scheme} &  \\ \hline
+    & \multicolumn{1}{l}{\verb|RK3|}       & \multicolumn{2}{l}{Heun-type 3 stage and 3rd-order Runge--Kutta scheme} \\
+    & \multicolumn{1}{l}{\verb|RK3WS2002|} & \multicolumn{2}{l}{3 stage and generraly 2nd-order Runge--Kutta scheme in \citet{Wicker_2002}} \\
+    & \multicolumn{1}{l}{\verb|RK4|}       & \multicolumn{2}{l}{4 stage and 4th-order Runge--Kutta scheme} \\
+    & \multicolumn{1}{l}{\verb|RK7s6o|}    & \multicolumn{2}{l}{7 stage and 6th-order Runge--Kutta scheme in Lawson (1967) (supported only for HEVE)} \\
+    & \multicolumn{1}{l}{\verb|RK11s8o|}   & \multicolumn{2}{l}{11 stage and 8th-order Runge--Kutta scheme in Cooper and Verner (1972)} \\
+    & \multicolumn{1}{l}{}                 & \multicolumn{2}{l}{~~~~~(supported only for HEVE)} \\
+    \hline
+    \multicolumn{3}{l}{Spatial scheme} & \multicolumn{1}{l}{Minimum number of halos}\\ \hline
+    & \multicolumn{1}{l}{\verb|CD2|} & \multicolumn{1}{l}{2nd-order central flux} & \multicolumn{1}{l}{1}\\
+    & \multicolumn{1}{l}{\verb|CD4|} & \multicolumn{1}{l}{4th-order central flux} & \multicolumn{1}{l}{2}\\
+    & \multicolumn{1}{l}{\verb|CD6|} & \multicolumn{1}{l}{6th-order central flux} & \multicolumn{1}{l}{3}\\
+    & \multicolumn{1}{l}{\verb|CD8|} & \multicolumn{1}{l}{8th-order central flux} & \multicolumn{1}{l}{3}\\
+    & \multicolumn{1}{l}{\verb|UD3|} & \multicolumn{1}{l}{3rd-order upwind flux} & \multicolumn{1}{l}{2}\\
+    & \multicolumn{1}{l}{\verb|UD5|} & \multicolumn{1}{l}{5th-order upwind flux} & \multicolumn{1}{l}{3}\\
+    & \multicolumn{1}{l}{\verb|UD7|} & \multicolumn{1}{l}{7th-order upwind flux} & \multicolumn{1}{l}{3}\\
+    & \multicolumn{1}{l}{\verb|UD3KOREN1993|} & \multicolumn{1}{l}{3rd-order upwind flux + \citet{Koren_1993}'s filter} & \multicolumn{1}{l}{2}\\
+\hline
+  \end{tabularx}
+\end{center}
+\end{table}
+
+The default setting for advection scheme used for the prognostic variables in dynamics, spcified by \nmitem{ATMOS_DYN_FVM_FLUX_TYPE}),
+is the 4th-order central flux (\verb|CD4|) in the \scalerm.
+When using \verb|CD4| in a simulation with a steep terrain,
+an artificial grid-scale vertical flow is often seen at the peak of mountains.
+This grid-scale flow may be reduced by using \verb|UD3|.
+So, the use of \verb|UD3| is recommended for experiments with steep terrains.
+
+
+\subsection{Numerical Diffusions} \label{subsec:numdiff}
+
+The numerical stability depends on schemes for the dynamical process used in simulations (Sec. \ref{subsec:atmos_dyn_scheme}).
+The stability would be improved by applying numerical diffusion.
+\scalerm has the hyper-diffusion and divergence dumping as the explicit numerical diffusion.
+
+The setting for them is the following:
+\editboxtwo{
+ \verb|&PARAM_ATMOS_DYN  | & \\
+ \verb|ATMOS_DYN_NUMERICAL_DIFF_LAPLACIAN_NUM = 2,    |        & \\
+ \verb|ATMOS_DYN_NUMERICAL_DIFF_COEF          = 1.D-4,|        & \\
+ \verb|ATMOS_DYN_NUMERICAL_DIFF_COEF_TRACER   = 0.D0, |        & \\
+ \verb|ATMOS_DYN_DIVDMP_COEF                  = 0.D0, |        & \\
+\verb|/                  | & \\
+}
+
+The hyper-diffusion reduces the high frequency component of a target variable; it is mainly used to remove numerical noise.
+The hyper-diffusion of a variable $\phi$ is defined as
+\begin{equation}
+  \nu \Delta^n \rho ( \phi - \phi_0 ),
+\end{equation}
+where $\nu$ is diffusion coefficient, $\phi_0$ is the reference state (See Section \ref{subsec:refstat}), and $\Delta$ is the Laplacian operator,
+\begin{equation}
+  \Delta^n = \nabla^{2n} = \frac{\partial^{2n}}{\partial x^{2n}} + \frac{\partial^{2n}}{\partial y^{2n}} + \frac{\partial^{2n}}{\partial z^{2n}}.
+\end{equation}
+The order of the Laplacian operator is specified by \\
+\nmitem{ATMOS_DYN_NUMERICAL_DIFF_LAPLACIAN_NUM}. 
+\nmitem{ATMOS_DYN_NUMERICAL_DIFF_COEF} and \\
+\nmitem{ATMOS_DYN_NUMERICAL_DIFF_COEF_TRACER} is a non-dimensional coefficient of the hyper-diffusion.
+\nmitem{ATMOS_DYN_NUMERICAL_DIFF_COEF} is a coefficient for the dynamical prognostic variables, such as density, momentum and potential temperature, \\
+and \nmitem{ATMOS_DYN_NUMERICAL_DIFF_COEF_TRACER} is a coefficient for the tracer variables, such as specific humidity, hydrometeors, and turbulent kinetic energy.
+The two-grid scale noise is dumped to $1/e$ in a one time step if the coefficient is unity.
+The dumping is stronger for a larger coefficient.
+The hyper-diffusion itself may cause numerical instability if the coefficient is larger than 1.
+\nmitem{ATMOS_DYN_NUMERICAL_DIFF_COEF} can be set to zero when using the upwind schemes, such as \verb|UD3, UD5|, because they have implicit numerical diffusion.
+
+
+The divergence dumping can also be available to improve numerical stability.
+The divergence dumping reduces the three-dimensional divergence component; it is mainly used to remove sound waves.
+Its coefficient can be set by \nmitem{ATMOS_DYN_DIVDMP_COEF}.
+
+
+\subsection{Positive Definite}
+
+For tracer advection, guaranteeing a non-negative value is required in most cases.\\
+The \verb|UD3KOREN1993| scheme guarantees a non-negative value, whereas other schemes do not.
+When schemes other than \verb|UD3KOREN1993| are used the FCT filter can be used to guarantee the non-negative value.
+The advection scheme is specified by \nmitem{ATMOS_DYN_FVM_FLUX_TRACER_TYPE}, and switch for the FCT filter is \nmitem{ATMOS_DYN_FLAG_FCT_TRACER}$=$\verb|.true.|.
+
+
+\subsection{Halos}
+
+The necessary number of halos grid depends on the spatial difference scheme as shown in Table \ref{tab:nml_atm_dyn}.
+Set \nmitem{IHALO} and \nmitem{JHALO} in \namelist{PARAM_ATMOS_GRID_CARTESC_INDEX} for the number of halos grid for the x- and y-directions, respectively.
+By default, the number of the grid is 2, which is suitable for ``UD3'', ``UD3KOREN1993'', and ``CD4''.
+For example, the configuration of the halo for the fifth-order upwind difference scheme is as follows:
+
+\editboxtwo{
+ \verb|&PARAM_ATMOS_GRID_CARTESC_INDEX | &  \\
+ \verb| IHALO = 3,|   &\\
+ \verb| JHALO = 3,|   &\\
+ \verb|/ | & \\
+}
+
+
+\subsection{Setting for Coriolis Force} \label{subsec:coriolis}
+%----------------------------------------------------------
+
+In this subsection, treatments of the Coriolis force in \scalerm is explained.
+The Coriolis parameter is zero as the default, so that you have to set (some) parameter(s) to introduce the Coriolis force in the simulation.
+There are two types of setting for the Coriolis parameter: $f$-/$\beta$-plane and sphere.
+The type can be specified by \nmitem{CORIOLIS_type} in \namelist{PARAM_CORIOLIS}.
+
+\subsubsection{$f$-/$\beta$-plane}
+If \nmitem{CORIOLIS_type} is set to ``PLANE'', the Coriolis parameter $f$ is $f=f_0 + \beta (y-y_0)$.
+When $f_0=0$ and $\beta=0$, which is default, no Coriolis force is taken into account.
+
+The plane for $\beta=0$ is called $f$-plane, otherwise it is called $\beta$-plane.
+The parameters of $f_0, \beta$ and $y_0$ is set with the parameters of \namelist{PARAM_CORIOLIS} as follows:
+\editbox{
+  \verb|&PARAM_CORIOLIS| \\
+  \verb| CORIOLIS_type = 'PLANE',| ! PLANE or SPHERE \\
+  \verb| CORIOLIS_f0   = 1.0D-5, | ! $f_0$ \\
+  \verb| CORIOLIS_beta = 0.0D0,  | ! $\beta$ \\
+  \verb| CORIOLIS_y0   = 0.0D0,  | ! $y_0$ \\
+  \verb|/| \\
+}
+
+The default values of the \nmitem{CORIOLIS_f0}, \nmitem{CORIOLIS_beta}, 
+and \nmitem{CORIOLIS_y0} are 0.0, 0.0, and $y$ at the domain center, respectively.
+
+If you want to add the geostrophic pressure gradient force that is in balance with the Coriolis force accompanied by the geostrophic wind, you need to modify the user specific file \verb|mod_user.f90| (see Section \ref{sec:mod_user}).
+The test case of \verb|scale-rm/test/case/inertial_oscillation/20km| is an example of a simulation on the $f$-plane with the geostrophic pressure gradient force.
+
+
+\subsubsection{Sphere}
+On the sphere, the Coriolis parameter depends on the latitude as $f = 2\Omega \sin(\phi)$, where $\Omega$ and $\phi$ are angular velocity of the sphere and latitude, respectively.
+In this case, you have to set \nmitem{CORIOLIS_type} = ``SPHERE''.
+The angular velocity of the sphere is set by \nmitem{CONST_OHM} parameter of \namelist{PARAM_CONST} (see Section \ref{subsec:const}).
+The latitude of the individual grids is determined depending on the map projection, which is explained in Section \ref{subsec:adv_mapproj}.
+
+
+
+\subsubsection{Lateral Boundary Condition for Coriolis Force}
+
+If there exists geostrophic wind, the periodic boundary conditions cannot be applied in its perpendicular direction, since the wind is not periodic.
+For the $f$-plane, the double periodic boundary conditions can be applied with no geostrophic wind.
+For the $\beta$-plane or sphere, the periodic boundary condition cannot be used in the y-direction, since the Coriolis parameter differs at the southern and northern boundaries.
+In the absent of meridional geostrophic wind, the periodic boundary in the x-direction is allowed for the all the settings (i.e., the $f$-plane, $\beta$-plane, and sphere).
+
+
+The nudge lateral boundary conditions at the south and north boundaries might be used for $f$- and $\beta$-plane experiment.
+For the details of the nudging boundary, see Sections \ref{subsec:buffer}.
+The test case of \verb|scale-rm/test/case/rossby_wave/beta-plane| is an example of a simulation on the $\beta$-plane with the south and north nudging boundaries.
+
+
+
+
+\subsection{Setting for Reference State} \label{subsec:refstat}
+%----------------------------------------------------------
+
+As explained in Section \ref{subsec:numdiff}, the reference state is used in the calculation of numerical diffusion in the dynamical processes.
+It is also used to calculate the pressure gradients in the momentum equations.
+Since the reference state is defined under the hydrostatic balance, the deviation from the reference state can be used to calculate the pressure gradients.
+
+
+
+The settings for the reference state are the following:
+\editboxtwo{
+ \verb|&PARAM_ATMOS_REFSTATE  | & \\
+ \verb|ATMOS_REFSTATE_IN_BASENAME  = "",                 | & ! input file name \\
+ \verb|ATMOS_REFSTATE_OUT_BASENAME = "",                 | & ! output file name \\
+ \verb|ATMOS_REFSTATE_OUT_TITLE    = "SCALE-RM RefState, | & ! title in the output file \\
+ \verb|ATMOS_REFSTATE_OUT_DTYPE    = "DEFAULT",          | & ! data type in the output file \\
+ \verb|ATMOS_REFSTATE_TYPE         = "UNIFORM",          | & ! type of reference state \\
+ \verb|ATMOS_REFSTATE_TEMP_SFC     = 300.0D0,            | & ! surface potential temperature \\
+ \verb|ATMOS_REFSTATE_RH           = 0.0D0,              | & ! relative humidity \\
+ \verb|ATMOS_REFSTATE_POTT_UNIFORM = 300.0D0,            | & ! potential temperature \\
+ \verb|ATMOS_REFSTATE_UPDATE_DT    = -1.0D0,             | & ! update interval [sec] \\
+\verb|/                                                  | & \\
+}
+
+If \nmitem{ATMOS_REFSTATE_IN_BASENAME} is specified, the reference state is read from the file.
+Otherwise, the reference state is generated at the initial time of a simulation with the type specified by \nmitem{ATMOS_REFSTATE_TYPE}.
+It can be \verb|"ISA"|, \verb|"UNIFORM"|, \verb|"ZERO"|, or \verb|"INIT"|:
+\begin{description}
+\item[ISA]
+  The international standard atmosphere where the surface potential temperature, \\
+  relative humidity, and the surface pressure are specified by \nmitem{ATMOS_REFSTATE_TEMP_SFC}, \nmitem{ATMOS_REFSTATE_RH}, and \nmitem{CONST_Pstd} (See Section \ref{subsec:const}), respectively.
+\item[UNIFORM]
+  The constant potential temperature and relative humidity profile specified \\
+  by \nmitem{ATMOS_REFSTATE_POTT_UNIFORM} and \nmitem{ATMOS_REFSTATE_RH}, respectively.
+\item[ZERO]
+  The profile with all variables set to zero.
+\item[INIT]
+  The horizontally averaged initial state.
+\end{description}
+
+When \nmitem{ATMOS_REFSTATE_TYPE} is \verb|"INIT"|,
+the reference state can be updated during the simulation.
+The update interval is specified by \nmitem{ATMOS_REFSTATE_UPDATE_DT}. \\The unit of \nmitem{ATMOS_REFSTATE_UPDATE_DT} is seconds.
+The updated reference state is the horizontally averaged value at the update time.
+If \nmitem{ATMOS_REFSTATE_UPDATE_DT} is set to a negative value, the reference state is not updated during the simulation.
+
+
+For a restart simulation, you need to pay attention to the setting of the reference state.
+In order for the result of a restart simulation to be the same as that of the continuous simulation,
+it is necessary to set so that the reference state of both are the same.
+%
+If you use an \verb|"INIT"|-type and update the reference state (\nmitem{ATMOS_REFSTATE_UPDATE_DT} $>$ 0),
+the reference states of the two simulations will be identical
+by setting the update interval (\nmitem{ATMOS_REFSTATE_UPDATE_DT}) to a divisor of the restart interval.
+%
+If you use an \verb|"INIT"|-type and do not update the reference state (\nmitem{ATMOS_REFSTATE_UPDATE_DT} $<$ 0),
+you can use the same reference state by outputting the state to a file specified by \nmitem{ATMOS_REFSTATE_OUT_BASENAME} in the run before the restart and inputting the state from the file by specifying \nmitem{ATMOS_REFSTATE_IN_BASENAME} in the run after the restart.
+

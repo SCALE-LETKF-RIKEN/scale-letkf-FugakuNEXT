@@ -1,0 +1,1374 @@
+% # -*- f90 -*-
+% # vi: set sw=4 ts=8:
+<%
+fname ||= ENV["fname"] # for ruby <= 1.8
+if /((?:ud|cd)(\d+)(?:[^\d]\w*)?)\.F90/ =~ fname
+  @scheme = $1
+  order = $2.to_i
+  modname = "scale_atmos_dyn_fvm_flux_#{@scheme}"
+  nh = (order+1)/2 - 1
+  if order >= 2
+    def num_diff(k="k",i="i",j="j")
+                  "&
+                   + GSQRT(#{k},#{i},#{j}) * num_diff(#{k},#{i},#{j})"
+    end
+  else
+    def num_diff(*arg)
+      nil
+    end
+  end
+else
+  raise "set fname="
+end
+class String
+  def +(other)
+    if Fixnum === other
+      if /\A(\w+)?([+-]?\d+)?\Z/ =~ self
+        off = $2.to_i + other
+        if off == 0
+          return $1
+        else
+          return "#{$1}#{off}"
+        end
+      end
+    end
+    return "#{self}#{other}"
+  end
+  def -(other)
+    self+(-other)
+  end
+  def inspect
+    if /\A(\w+)?[+-]?0\Z/ =~ self
+      return $1
+    else
+      self.to_s
+    end
+  end
+end
+class Fixnum
+  alias :_inspect :inspect
+  def inspect
+    0==self ? "" : self>0 ? "+"+_inspect : _inspect
+  end
+  alias :_to_s :to_s
+  def to_s
+    0==self ? "" : self>0 ? "+"+_to_s : _to_s
+  end
+end
+def flux1(idx0)
+  "val(#{idx0})"
+end
+def flux2(idx1,idx0)
+  "F2 * ( val(#{idx1})+val(#{idx0}) )"
+end
+def flux3(idx1,idx0,idxn1)
+  "( 2.0_RP * val(#{idx1}) + 5.0_RP * val(#{idx0}) - val(#{idxn1}) ) / 6.0_RP"
+end
+def flux3k(idx1,idx0,idxn1)
+                      "( val(#{idx0}) &
+                       + 0.5_RP * phi(val(#{idx1}),val(#{idx0}),val(#{idxn1})) * ( val(#{idx0})-val(#{idxn1}) ) )"
+end
+def flux4(idx2,idx1,idx0,idxn1)
+                      "F41 * ( val(#{idx1})+val(#{idx0}) ) &
+                     + F42 * ( val(#{idx2})+val(#{idxn1}) )"
+end
+def flux5(idx2,idx1,idx0,idxn1,idxn2)
+                      "( -  3.0_RP * val(#{idx2})  &
+                         + 27.0_RP * val(#{idx1})  &
+                         + 47.0_RP * val(#{idx0})  &
+                         - 13.0_RP * val(#{idxn1}) &
+                         + 2.0_RP * val(#{idxn2}) ) / 60.0_RP"
+end
+def flux6(idx3,idx2,idx1,idx0,idxn1,idxn2)
+                      "F61 * ( val(#{idx1})+val(#{idx0}) ) &
+                     + F62 * ( val(#{idx2})+val(#{idxn1}) ) &
+                     + F63 * ( val(#{idx3})+val(#{idxn2}) )"
+end
+def flux7(idx3,idx2,idx1,idx0,idxn1,idxn2,idxn3)
+                      "(     4.0_RP * val(#{idx3})   &
+                         -  38.0_RP * val(#{idx2})   &
+                         + 214.0_RP * val(#{idx1})   &
+                         + 319.0_RP * val(#{idx0})   &
+                         - 101.0_RP * val(#{idxn1})  &
+                         +  25.0_RP * val(#{idxn2})  &
+                         - 3.0_RP * val(#{idxn3}) ) / 420.0_RP"
+end
+def flux8(idx4,idx3,idx2,idx1,idx0,idxn1,idxn2,idxn3)
+                      "F81 * ( val(#{idx1})+val(#{idx0}) ) &
+                     + F82 * ( val(#{idx2})+val(#{idxn1}) ) &
+                     + F83 * ( val(#{idx3})+val(#{idxn2}) ) &
+                     + F84 * ( val(#{idx4})+val(#{idxn3}) )"
+end
+
+def flux(vel, order, dir, k="k", i="i", j="j", dim=3)
+  if dim==3
+    idx = [k,i,j]
+  elsif dim==1
+    idx = [k]
+  end
+  idx0 = idx.join(",")
+  idx1 = idx.dup
+  idx1[dir] = idx1[dir]+1
+  idx1 = idx1.join(",")
+  idxn1 = idx.dup
+  idxn1[dir] = idxn1[dir]-1
+  idxn1 = idxn1.join(",")
+  idx2 = idx.dup
+  idx2[dir] = idx2[dir]+2
+  idx2 = idx2.join(",")
+  idxn2 = idx.dup
+  idxn2[dir] = idxn2[dir]-2
+  idxn2 = idxn2.join(",")
+  idx3 = idx.dup
+  idx3[dir] = idx3[dir]+3
+  idx3 = idx3.join(",")
+  idxn3 = idx.dup
+  idxn3[dir] = idxn3[dir]-3
+  idxn3 = idxn3.join(",")  
+  idx4 = idx.dup
+  idx4[dir] = idx4[dir]+4
+  idx4 = idx4.join(",")  
+  if Array===order && order.max % 2 == 0
+    order = order.min
+  end
+  case order
+  when Array
+    ou = order[0]
+    od = order[1]
+    case ou
+    when 1, -1
+      fu = flux1(idx0)
+    when 2
+      if @scheme=="ud3Koren1993"
+#        fu = flux1(idx0)
+        fu = flux2(idx1,idx0)
+      else
+        fu = flux2(idx1,idx0)
+      end
+    when 3
+      if @scheme=="ud3Koren1993"
+        fu = flux3k(idxn1,idx0,idx1)
+      else
+        fu = flux3(idx1,idx0,idxn1)
+      end
+    when 4
+       fu = flux4(idx2,idx1,idx0,idxn1)
+    when 5
+       fu = flux5(idx2,idx1,idx0,idxn1,idxn2)
+    when 6
+       fu = flux6(idx3,idx2,idx1,idx0,idxn1,idxn2) 
+    when 7
+       fu = flux7(idx3,idx2,idx1,idx0,idxn1,idxn2,idxn3)         
+    else
+       raise "invalid order: #{order}"
+    end
+    case od
+    when 1, -1
+      fd = flux1(idx1)
+    when 2
+      if @scheme=="ud3Koren1993"
+#        fd = flux1(idx1)
+        fd = flux2(idx1,idx0)
+      else
+        fd = flux2(idx1,idx0)
+      end
+    when 3
+      if @scheme=="ud3Koren1993"
+        fd = flux3k(idx0,idx1,idx2)
+      else
+        fd = flux3(idx0,idx1,idx2)
+      end
+    when 4
+       fd = flux4(idx2,idx1,idx0,idxn1)
+    when 5
+       fd = flux5(idxn1,idx0,idx1,idx2,idx3)
+    when 6
+       fd = flux6(idx3,idx1,idx0,idxn1,idxn2,idxn3) 
+    when 7
+       fd = flux7(idxn2,idxn1,idx0,idx1,idx2,idx3,idx4)            
+    else
+       raise "invalid order: #{order}"
+    end
+                 "#{fu} &
+                     * ( 0.5_RP + sign(0.5_RP,#{vel}) ) &
+                + #{fd} &
+                     * ( 0.5_RP - sign(0.5_RP,#{vel}) )"
+  when 1
+    "F1 * ( val(#{idx1})+val(#{idx0}) ) - sign(F1,#{vel}) * ( val(#{idx1})-val(#{idx0}) )"
+  when 2
+    "#{flux2(idx1,idx0)}"
+  when 3
+    if @scheme=="ud3Koren1993"
+                      "( val(#{idx0}) &
+                       + 0.5_RP * phi(val(#{idx1}),val(#{idx0}),val(#{idxn1})) * ( val(#{idx0})-val(#{idxn1}) ) ) &
+                       * ( 0.5_RP + sign(0.5_RP,#{vel}) ) &
+                     + ( val(#{idx1}) &
+                       + 0.5_RP * phi(val(#{idx0}),val(#{idx1}),val(#{idx2 })) * ( val(#{idx1})-val(#{idx2 }) ) ) &
+                       * ( 0.5_RP - sign(0.5_RP,#{vel}) )"
+    else
+                      "( F31 * ( val(#{idx2})+val(#{idxn1}) ) + F32 * ( val(#{idx1})+val(#{idx0}) ) ) &
+                     - ( F31 * ( val(#{idx2})-val(#{idxn1}) ) + F33 * ( val(#{idx1})-val(#{idx0}) ) ) * sign(1.0_RP,#{vel})"
+    end
+  when 4
+                      "#{flux4(idx2,idx1,idx0,idxn1)}"
+  when 5
+                      "( F51 * ( val(#{idx3})+val(#{idxn2}) ) &
+                       + F52 * ( val(#{idx2})+val(#{idxn1}) ) &
+                       + F53 * ( val(#{idx1})+val(#{idx0}) ) ) &
+                     - ( F51 * ( val(#{idx3})-val(#{idxn2}) ) &
+                       + F54 * ( val(#{idx2})-val(#{idxn1}) ) &
+                       + F55 * ( val(#{idx1})-val(#{idx0}) ) ) * sign(1.0_RP,#{vel})"
+  when 6
+                      "#{flux6(idx3,idx2,idx1,idx0,idxn1,idxn2)}"
+  when 7
+                      "( F71 * ( val(#{idx4})+val(#{idxn3}) ) &
+                       + F72 * ( val(#{idx3})+val(#{idxn2}) ) &
+                       + F73 * ( val(#{idx2})+val(#{idxn1}) ) &
+                       + F74 * ( val(#{idx1})+val(#{idx0}) ) ) &
+                     - ( F71 * ( val(#{idx4})-val(#{idxn3}) ) &
+                       + F75 * ( val(#{idx3})-val(#{idxn2}) ) &
+                       + F76 * ( val(#{idx2})-val(#{idxn1}) ) &
+                       + F77 * ( val(#{idx1})-val(#{idx0}) ) ) * sign(1.0_RP,#{vel})"
+  when 8
+                      "#{flux8(idx4,idx3,idx2,idx1,idx0,idxn1,idxn2,idxn3)}"                         
+  else
+    raise "invalid order: #{order}"
+  end
+end
+
+def interp(val, src, dst, k="k", i="i", j="j")
+  ret = nil
+  case
+  when src == dst
+    ret = "#{val}(#{k},#{i},#{j})"
+  when src[2] == dst[2] # z==z
+    ret = interpH(val, src[0..1], dst[0..1], k, i, j)
+  when src[2..2] == "Z" # Z->W
+    v0 = interpH(val, src[0..1], dst[0..1], k  , i, j)
+    v1 = interpH(val, src[0..1], dst[0..1], k+1, i, j)
+    ret = "F2H(#{k},1,I_#{dst[0..1]}Z) &
+             * #{v1} &
+             + F2H(#{k},2,I_#{dst[0..1]}Z) &
+             * #{v0}"
+  else # W=>Z
+    v0 = interpH(val, src[0..1], dst[0..1], k-1, i, j)
+    v1 = interpH(val, src[0..1], dst[0..1], k  , i, j)
+    ret = "0.5_RP * ( #{v0} &
+                        + #{v1} )"
+  end
+  return ret ? "( #{ret} )" : raise("BUG")
+end
+
+def interpH(val, src, dst, k="k", i="i", j="j")
+  case
+  when src == dst
+    return "#{val}(#{k},#{i},#{j})"
+  when src[0] == dst[0] # x==x, y!=y
+    if src[1..1]=="Y" # Y->V
+      jo = 1
+    else # V->Y
+      jo = -1
+    end
+    return "0.5_RP * ( #{val}(#{k},#{i},#{j})+#{val}(#{k},#{i},#{j+jo}) )"
+  when src[1] == dst[1] # x!=x, y==y
+    if src[0..0]=="X" # X->U
+      io = 1
+    else # U->X
+      io = -1
+    end
+    return "0.5_RP * ( #{val}(#{k},#{i},#{j})+#{val}(#{k},#{i+io},#{j}) )"
+  else # x!=x, y!=y
+    if src[0..0]=="X" # X->U
+      io = 1
+    else # U->X
+      io = -1
+    end
+    if src[1..1]=="Y" # Y->V
+      jo = 1
+    else # V->Y
+      jo = -1
+    end
+    "0.25_RP * ( #{val}(#{k},#{i},#{j})+#{val}(#{k},#{i+io},#{j})+#{val}(#{k},#{i},#{j+jo})+#{val}(#{k},#{i+io},#{j+jo}) )"
+  end
+end
+%>
+!-------------------------------------------------------------------------------
+!> module <%= modname %>
+!!
+!! @par Description
+!!          FVM flux scheme with the <%=@scheme%> order
+!!
+!! @author Team SCALE
+!!
+!<
+!-------------------------------------------------------------------------------
+! Warning: This file was generated from <%=__FILE__%>.
+!          Do not edit this file.
+!-------------------------------------------------------------------------------
+#include "scalelib.h"
+module <%= modname %>
+  !-----------------------------------------------------------------------------
+  !
+  !++ used modules
+  !
+  use scale_precision
+  use scale_io
+  use scale_prof
+  use scale_atmos_grid_cartesC_index
+  use scale_index
+  use scale_tracer
+  use scale_prc
+#ifdef DEBUG
+  use scale_debug, only: &
+     CHECK
+  use scale_const, only: &
+     UNDEF  => CONST_UNDEF, &
+     IUNDEF => CONST_UNDEF2
+#endif
+  !-----------------------------------------------------------------------------
+  implicit none
+  private
+  !-----------------------------------------------------------------------------
+  !
+  !++ Public procedure
+  !
+  public :: ATMOS_DYN_FVM_flux_valueW_Z_<%=@scheme%>
+
+  public :: ATMOS_DYN_FVM_fluxZ_XYZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxX_XYZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxY_XYZ_<%=@scheme%>
+
+  public :: ATMOS_DYN_FVM_fluxZ_XYW_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxJ13_XYW_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxJ23_XYW_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxX_XYW_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxY_XYW_<%=@scheme%>
+
+  public :: ATMOS_DYN_FVM_fluxZ_UYZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxJ13_UYZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxJ23_UYZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxX_UYZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxY_UYZ_<%=@scheme%>
+
+  public :: ATMOS_DYN_FVM_fluxZ_XVZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxJ13_XVZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxJ23_XVZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxX_XVZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxY_XVZ_<%=@scheme%>
+
+  !-----------------------------------------------------------------------------
+  !
+  !++ Public parameters & variables
+  !
+  !-----------------------------------------------------------------------------
+  !
+  !++ Private procedure
+  !
+#if 1
+#define F2H(k,p,q) (CDZ(k+p-1)*GSQRT(k+p-1,i,j)/(CDZ(k)*GSQRT(k,i,j)+CDZ(k+1)*GSQRT(k+1,i,j)))
+#else
+#define F2H(k,p,q) 0.5_RP
+#endif
+  !-----------------------------------------------------------------------------
+  !
+  !++ Private parameters & variables
+  !
+<% if order == 1 %>
+  real(RP), parameter :: F1  =  0.5_RP
+<% end %>
+  real(RP), parameter :: F2  =  0.5_RP          ! F2 is always used to calculate flux near boundary.
+<% if order%2 == 0 %>
+<%   if order >= 4 %>
+  real(RP), parameter :: F41 =  7.0_RP/12.0_RP
+  real(RP), parameter :: F42 = -1.0_RP/12.0_RP
+<%   end %>
+<%   if order >= 6 %>
+  real(RP), parameter :: F61 = 37.0_RP/60.0_RP
+  real(RP), parameter :: F62 = -8.0_RP/60.0_RP
+  real(RP), parameter :: F63 =  1.0_RP/60.0_RP
+<%   end %>
+<%   if order >= 8 %>
+  real(RP), parameter :: F81 =  533.0_RP/840.0_RP
+  real(RP), parameter :: F82 = -139.0_RP/840.0_RP
+  real(RP), parameter :: F83 =   29.0_RP/840.0_RP
+  real(RP), parameter :: F84 =   -3.0_RP/840.0_RP
+<%   end %>
+<% else %>
+<%   if order >= 3 %>
+  real(RP), parameter :: F31  = -1.0_RP/12.0_RP
+  real(RP), parameter :: F32  =  7.0_RP/12.0_RP
+  real(RP), parameter :: F33  =  3.0_RP/12.0_RP
+<%   end %>
+<%   if order >= 5 %>
+  real(RP), parameter :: F51  =  1.0_RP/60.0_RP
+  real(RP), parameter :: F52  = -8.0_RP/60.0_RP
+  real(RP), parameter :: F53  = 37.0_RP/60.0_RP
+  real(RP), parameter :: F54  = -5.0_RP/60.0_RP
+  real(RP), parameter :: F55  = 10.0_RP/60.0_RP
+<%   end %>
+<%   if order >= 7 %>
+  real(RP), parameter :: F71  =   -3.0_RP/840.0_RP
+  real(RP), parameter :: F72  =   29.0_RP/840.0_RP
+  real(RP), parameter :: F73  = -139.0_RP/840.0_RP
+  real(RP), parameter :: F74  =  533.0_RP/840.0_RP
+  real(RP), parameter :: F75  =   21.0_RP/840.0_RP
+  real(RP), parameter :: F76  =  -63.0_RP/840.0_RP
+  real(RP), parameter :: F77  =  105.0_RP/840.0_RP
+<%   end %>
+<% end %>
+
+contains
+  !-----------------------------------------------------------------------------
+  !> value at XYW
+!OCL SERIAL
+  subroutine ATMOS_DYN_FVM_flux_valueW_Z_<%=@scheme%>( &
+       valW,             &
+       mflx, val, GSQRT, &
+       CDZ               )
+    !$acc routine vector
+    implicit none
+
+    real(RP), intent(out) :: valW (KA)
+    real(RP), intent(in)  :: mflx (KA)
+    real(RP), intent(in)  :: val  (KA)
+    real(RP), intent(in)  :: GSQRT(KA)
+    real(RP), intent(in)  :: CDZ  (KA)
+
+    integer  :: k
+    !---------------------------------------------------------------------------
+
+    do k = KS<%=nh%>, KE<%=-(nh+1)%>
+#ifdef DEBUG
+       call CHECK( __LINE__, mflx(k) )
+<% (nh+1).times do |k| %>
+       call CHECK( __LINE__, val(k<%=-k%>) )
+       call CHECK( __LINE__, val(k<%=k+1%>) )
+<% end %>
+#endif
+       valW(k)       = <%= flux("mflx(k)", order, 0, "k", nil, nil, 1) %>
+    enddo
+#ifdef DEBUG
+    k = IUNDEF
+#endif
+
+#ifdef DEBUG
+<% nh.times do |k| %>
+       call CHECK( __LINE__, mflx(KS<%=k%>) )
+       call CHECK( __LINE__, val(KS<%=k*2%>  ) )
+       call CHECK( __LINE__, val(KS<%=k*2+1%>) )
+       call CHECK( __LINE__, mflx(KE<%=-k-1%>) )
+       call CHECK( __LINE__, val(KE<%=-k*2%>  ) )
+       call CHECK( __LINE__, val(KE<%=-k*2-1%>) )
+<% end %>
+#endif
+<% nh.times do |k| %>
+       valW(KS<%=k%>) = <%= flux("mflx(KS#{k})", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k, nil, nil, 1) %>
+       valW(KE<%=-k-1%>) = <%= flux("mflx(KE#{-(k+1)})", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1), nil, nil, 1) %>
+<% end %>
+
+    return
+  end subroutine ATMOS_DYN_FVM_flux_ValueW_Z_<%=@scheme%>
+
+  !-----------------------------------------------------------------------------
+  !> calculation z-flux at XYZ
+  subroutine ATMOS_DYN_FVM_fluxZ_XYZ_<%=@scheme%>( &
+       flux,              &
+       mflx, val, GSQRT,  &
+       num_diff,          &
+       CDZ,               &
+       IIS, IIE, JJS, JJE )
+    use scale_const, only: &
+      EPS => CONST_EPS
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(in)  :: mflx    (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel default(none) private(i,j,k, vel)                    &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff,EPS)
+    
+    !$acc data copy(flux) copyin(mflx, val, GSQRT, num_diff, CDZ)
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS<%=nh%>, KE<%=-(nh+1)%>
+#ifdef DEBUG
+       call CHECK( __LINE__, mflx(k,i,j) )
+<% (nh+1).times do |k| %>
+       call CHECK( __LINE__, val(k<%=-k%>,i,j) )
+       call CHECK( __LINE__, val(k<%=k+1%>,i,j) )
+<% end %>
+#endif
+       vel = mflx(k,i,j)
+       flux(k,i,j) = vel &
+                   * ( <%= flux("vel", order,0) %> ) <%= num_diff() %>
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+<% nh.times do |k| %>
+       call CHECK( __LINE__, mflx(KS<%=k%>,i,j) )
+       call CHECK( __LINE__, val(KS<%=k*2%>  ,i,j) )
+       call CHECK( __LINE__, val(KS<%=k*2+1%>,i,j) )
+       call CHECK( __LINE__, mflx(KE<%=-k-1%>,i,j) )
+       call CHECK( __LINE__, val(KE<%=-k*2%>  ,i,j) )
+       call CHECK( __LINE__, val(KE<%=-k*2-1%>,i,j) )
+<% end %>
+#endif
+       flux(KS-1,i,j) = 0.0_RP
+<% nh.times do |k| %>
+       vel = mflx(KS<%=k%>,i,j)
+       flux(KS<%=k%>,i,j) = vel &
+                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> ) <%= num_diff("KS"+k) %>
+       vel = mflx(KE<%=-(k+1)%>,i,j)
+       flux(KE<%=-k-1%>,i,j) = vel &
+                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> ) <%= num_diff("KE"-(k+1)) %>
+<% end %>
+       flux(KE  ,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+    
+    !$acc end data
+
+    !$omp end parallel    
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    return
+  end subroutine ATMOS_DYN_FVM_fluxZ_XYZ_<%=@scheme%>
+<% [
+     ["X", 1, 0],
+     ["Y", 0, 1]
+   ].each do |dir,i,j|
+%>
+  !-----------------------------------------------------------------------------
+  !> calculation <%=dir%>-flux at XYZ
+  subroutine ATMOS_DYN_FVM_flux<%=dir%>_XYZ_<%=@scheme%>( &
+       flux,              &
+       mflx, val, GSQRT,  &
+       num_diff,          &
+       CDZ,               &
+       IIS, IIE, JJS, JJE )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(in)  :: mflx    (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ(KA)
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
+    !$omp private(vel) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff)
+    !$acc kernels
+    do j = JJS<%=-j%>, JJE
+    do i = IIS<%=-i%>, IIE
+    do k = KS, KE
+#ifdef DEBUG
+       call CHECK( __LINE__, mflx(k,i,j) )
+<% (nh+1).times do |n| %>
+       call CHECK( __LINE__, val(k,i<%=-n*i%>,j<%=-n*j%>) )
+       call CHECK( __LINE__, val(k,i<%=(n+1)*i%>,j<%=(n+1)*j%>) )
+<% end %>
+#endif
+       vel = mflx(k,i,j)
+       flux(k,i,j) = vel &
+                   * ( <%=flux("vel", order, i+j*2)%> ) <%= num_diff() %>
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    return
+  end subroutine ATMOS_DYN_FVM_flux<%=dir%>_XYZ_<%=@scheme%>
+<% end %>
+<%# end X Y loop %>
+  !-----------------------------------------------------------------------------
+  !> calculation z-flux at XYW
+  subroutine ATMOS_DYN_FVM_fluxZ_XYW_<%=@scheme%>( &
+       flux,              &
+       mom, val, DENS,    &
+       GSQRT, J33G,       &
+       num_diff,          &
+       CDZ, FDZ,          &
+       dtrk,              &
+       IIS, IIE, JJS, JJE )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(in)  :: mom     (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: J33G
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    real(RP), intent(in)  :: FDZ     (KA-1)
+    real(RP), intent(in)  :: dtrk
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    ! note than z-index is added by -1
+
+    !$omp parallel default(none) private(i,j,k,vel)  &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,flux,J33G,GSQRT,num_diff,DENS,FDZ,dtrk)
+
+    !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, num_diff, CDZ, FDZ)
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS<%=nh+1%>, KE<%=-[nh,1].max%>
+#ifdef DEBUG
+       call CHECK( __LINE__, mom(k-1,i,j) )
+       call CHECK( __LINE__, mom(k  ,i,j) )
+<% (nh+1).times do |k| %>
+       call CHECK( __LINE__, val(k<%=-k-1%>,i,j) )
+       call CHECK( __LINE__, val(k<%=k%>,i,j) )
+<% end %>
+#endif
+       vel = <%= interp("mom", "XYW", "XYZ") %> &
+           / DENS(k,i,j)
+       flux(k-1,i,j) = J33G * vel &
+                   * ( <%= flux("vel", order, 0, "k-1") %> ) <%= num_diff() %>
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+<% if nh >= 1 %>
+<%- 0.upto(2*nh-1+order%2) do |k| -%>
+       call CHECK( __LINE__, val(KS<%=k%>,i,j) )
+<%- end -%>
+<% end %>
+<% if nh >= 2 %>
+<%- (2*nh-1+order%2).downto(1) do |k| -%>
+       call CHECK( __LINE__, val(KE<%=-k%>,i,j) )
+<%- end -%>
+<% end %>
+#endif
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS.
+       ! The flux at KS can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(KS-1,i,j) = 0.0_RP ! k = KS
+<% nh.times do |k| %>
+       vel = <%= interp("mom", "XYW", "XYZ", "KS"+(k+1)) %> &
+           / DENS(KS<%=k+1%>,i,j)
+       flux(KS<%=k%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> ) <%= num_diff("KS"+(k+1)) %> ! k = KS<%=k+1%>
+<% end %>
+
+<% (nh-2).downto(0) do |k| %>
+       vel = <%= interp("mom", "XYW", "XYZ", "KE"-(k+1)) %> &
+           / DENS(KE-1,i,j)
+       flux(KE<%=-(k+2)%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-(k+2))*2,[order,2].min].max,[order-(nh-(k+1))*2,[order,2].min].max], 0, "KE"-(k+2)) %> ) <%= num_diff("KE"-(k+1)) %> ! k = KE<%=-(k+1)%>
+<% end %>
+       flux(KE-1,i,j) = 0.0_RP ! k = KE
+       flux(KE  ,i,j) = 0.0_RP ! k = KE+1
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+    
+    !$acc end data
+
+    !$omp end parallel
+
+    return
+  end subroutine ATMOS_DYN_FVM_fluxZ_XYW_<%=@scheme%>
+
+<% [
+     ["J13", "UYZ", 1,0],
+     ["J23", "XVZ", 0,1]
+   ].each do |dir, uv, i, j|
+%>
+  !-----------------------------------------------------------------------------
+  !> calculation <%=dir%>-flux at XYW
+  subroutine ATMOS_DYN_FVM_flux<%=dir%>_XYW_<%=@scheme%>( &
+       flux,              &
+       mom, val, DENS,    &
+       GSQRT, <%=dir%>G, MAPF, &
+       CDZ, TwoD,         &
+       IIS, IIE, JJS, JJE )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(in)  :: mom     (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: <%=dir%>G    (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2)
+    real(RP), intent(in)  :: CDZ     (KA)
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,<%=dir%>G,MAPF)
+
+    !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, <%=dir%>G, MAPF, CDZ)
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS<%=[nh,2].max%>, KE<%=-[nh,1].max%>
+       vel = <%= interp("mom", uv, "XYZ") %> &
+           / DENS(k,i,j)
+       vel = vel * <%=dir%>G(k,i,j)
+       flux(k-1,i,j) = vel / MAPF(i,j,<%=i*2+j%>) &
+                   * ( <%= flux("vel", order, 0, "k-1") %> )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+    
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS.
+       ! The flux at KS can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(KS-1,i,j) = 0.0_RP ! k = KS
+
+       ! physically incorrect but for numerical stability
+       vel = ( <%= interp("mom", uv, "XYZ", "KS+1") %> / DENS(KS+1,i,j) &
+             + <%= interp("mom", uv, "XYZ", "KS"  ) %> / DENS(KS  ,i,j) ) * 0.5_RP
+!       vel = <%= interp("mom", uv, "XYZ", "KS+1") %> &
+!           / DENS(KS+1,i,j)
+       vel = vel * <%=dir%>G(KS+1,i,j)
+       flux(KS,i,j) =  vel / MAPF(i,j,<%=i*2+j%>) &
+                   * ( <%= flux("vel", [[order-nh*2,[order,2].min].max,[order-(nh-1)*2,[order,2].min].max], 0, "KS") %> ) ! k = KS+1
+<%   for k in 1...(nh-1) %>
+       vel = <%= interp("mom", uv, "XYZ", "KS"+(k+1)) %> &
+           / DENS(KS<%=k+1%>,i,j)
+       vel = vel * <%=dir%>G(KS<%k+1%>,i,j)
+       flux(KS<%=k%>,i,j) = vel / MAPF(i,j,<%=i*2+j%>) &
+                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> ) ! k = KS<%=k+1%>
+<%   end %>
+<%   (nh-1).times do |k| %>
+       vel = <%= interp("mom", uv, "XYZ", "KE"-(k+1)) %> &
+           / DENS(KE<%=-k-1%>,i,j)
+       vel = vel * <%=dir%>G(KE<%=-k-1%>,i,j)
+       flux(KE<%=-k-2%>,i,j) = vel / MAPF(i,j,<%=i*2+j%>) &
+                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+2)) %> ) ! k = KE<%=-k-3%>
+<%   end %>
+       flux(KE-1,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+    
+    !$acc end data
+
+    !$omp end parallel
+
+    return
+  end subroutine ATMOS_DYN_FVM_flux<%=dir%>_XYW_<%=@scheme%>
+<% end # J13, J23 loop %>
+
+<% [
+     ["X", "UY", 1, 0],
+     ["Y", "XV", 0, 1]
+   ].each do |dir, xyz, i, j|
+%>
+  !-----------------------------------------------------------------------------
+  !> calculation <%=dir%>-flux at XYW
+  subroutine ATMOS_DYN_FVM_flux<%=dir%>_XYW_<%=@scheme%>( &
+       flux,              &
+       mom, val, DENS,    &
+       GSQRT, MAPF,       &
+       num_diff,          &
+       CDZ, TwoD,         &
+       IIS, IIE, JJS, JJE )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(in)  :: mom     (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2)
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel default(none) private(i,j,k,vel)                           &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,MAPF,num_diff) &
+    !$omp shared(CDZ)
+
+    !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, MAPF, num_diff, CDZ)
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS<%=-j%>, JJE
+    do i = IIS<%=-i%>, IIE
+    do k = KS, KE-1
+#ifdef DEBUG
+       call CHECK( __LINE__, mom(k  ,i,j) )
+       call CHECK( __LINE__, mom(k+1,i,j) )
+<% (nh+1).times do |n| %>
+       call CHECK( __LINE__, val(k,i<%=-n*i%>,j<%=-n*j%>) )
+       call CHECK( __LINE__, val(k,i<%= (n+1)*i%>,j<%= (n+1)*j%>) )
+<% end %>
+#endif
+       vel = <%= interp("mom", xyz+"Z", xyz+"W") %> &
+           / <%= interp("DENS", "XYZ", xyz+"W") %>
+       flux(k,i,j) = GSQRT(k,i,j) / MAPF(i,j,<%=i*2+j%>) * vel &
+                   * ( <%= flux("vel", order, i+2*j) %> ) <%= num_diff() %>
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS<%=-j%>, JJE
+    do i = IIS<%=-i%>, IIE
+       flux(KE,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+    
+    !$acc end data
+
+    !$omp end parallel
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    return
+  end subroutine ATMOS_DYN_FVM_flux<%=dir%>_XYW_<%=@scheme%>
+<% end # X Y loop %>
+
+<% [
+     ["UY", 1, 0],
+     ["XV", 0, 1],
+   ].each do |uv, i, j|
+%>
+  !-----------------------------------------------------------------------------
+  !> calculation z-flux at <%=uv%>
+  subroutine ATMOS_DYN_FVM_fluxZ_<%=uv%>Z_<%=@scheme%>( &
+       flux,              &
+       mom, val, DENS,    &
+       GSQRT, J33G,       &
+       num_diff,          &
+       CDZ, TwoD,         &
+       IIS, IIE, JJS, JJE )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(in)  :: mom     (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: J33G
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel default(none) private(i,j,k,vel)                           &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,J33G,GSQRT,num_diff) &
+    !$omp shared(CDZ,TwoD)
+
+    !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, num_diff, CDZ)
+
+<% if i==1 %>
+    if ( TwoD ) then
+
+    !$omp do OMP_SCHEDULE_
+    !$acc kernels
+    do j = JJS, JJE
+    do k = KS<%=nh%>, KE<%=-nh-1%>
+       i = IIS
+#ifdef DEBUG
+       call CHECK( __LINE__, mom(k,i,j) )
+<% (nh+1).times do |k| %>
+       call CHECK( __LINE__, val(k<%=-k%>,i,j) )
+       call CHECK( __LINE__, val(k<%=k+1%>,i,j) )
+<% end %>
+#endif
+       vel = <%= interp("mom", "XYW", "XYW") %> &
+           / <%= interp("DENS", "XYZ", "XYW") %>
+       flux(k,i,j) = J33G * vel &
+                   * ( <%= flux("vel", order, 0) %> ) <%= num_diff() %>
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_
+    !$acc kernels
+    do j = JJS, JJE
+       i = IIS
+#ifdef DEBUG
+<% nh.times do |k| %>
+       call CHECK( __LINE__, mom(KS<%=k%>,i  ,j) )
+       call CHECK( __LINE__, val(KS<%=k*2+1%>,i,j) )
+       call CHECK( __LINE__, val(KS<%=k*2%>,i,j) )
+<% end %>
+#endif
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(KS-1,i,j) = 0.0_RP
+<% nh.times do |k| %>
+       vel = <%= interp("mom", "XYW", "XYW", "KS"+k) %> &
+           / <%= interp("DENS", "XYZ", "XYW", "KS"+k) %>
+       flux(KS<%=k%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> ) <%= num_diff("KS"+k) %>
+       vel = <%= interp("mom", "XYW", "XYW", "KE"-(k+1)) %> &
+           / <%= interp("DENS", "XYZ", "XYW", "KE"-(k+1)) %>
+       flux(KE<%=-k-1%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> ) <%= num_diff("KE"-(k+1)) %>
+<% end %>
+       flux(KE,i,j) = 0.0_RP
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    else
+
+<% end %>
+    !$omp do OMP_SCHEDULE_ collapse(2) 
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS<%=nh%>, KE<%=-nh-1%>
+#ifdef DEBUG
+       call CHECK( __LINE__, mom(k,i,j) )
+       call CHECK( __LINE__, mom(k,i<%=i%>,j<%=j%>) )
+<% (nh+1).times do |k| %>
+       call CHECK( __LINE__, val(k<%=-k%>,i,j) )
+       call CHECK( __LINE__, val(k<%=k+1%>,i,j) )
+<% end %>
+#endif
+       vel = <%= interp("mom", "XYW", uv+"W") %> &
+           / <%= interp("DENS", "XYZ", uv+"W") %>
+       flux(k,i,j) = J33G * vel &
+                   * ( <%= flux("vel", order, 0) %> ) <%= num_diff() %>
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2) 
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+<% nh.times do |k| %>
+       call CHECK( __LINE__, mom(KS<%=k%>,i  ,j) )
+       call CHECK( __LINE__, mom(KS<%=k%>,i<%=i%>,j<%=j%>) )
+       call CHECK( __LINE__, val(KS<%=k*2+1%>,i,j) )
+       call CHECK( __LINE__, val(KS<%=k*2%>,i,j) )
+<% end %>
+#endif
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(KS-1,i,j) = 0.0_RP
+<% nh.times do |k| %>
+       vel = <%= interp("mom", "XYW", uv+"W", "KS"+k) %> &
+           / <%= interp("DENS", "XYZ", uv+"W", "KS"+k) %>
+       flux(KS<%=k%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> ) <%= num_diff("KS"+k) %>
+       vel = <%= interp("mom", "XYW", uv+"W", "KE"-(k+1)) %> &
+           / <%= interp("DENS", "XYZ", uv+"W", "KE"-(k+1)) %>
+       flux(KE<%=-k-1%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> ) <%= num_diff("KE"-(k+1)) %>
+<% end %>
+       flux(KE,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+<% if i==1 %>
+    end if    
+<% end %>
+
+    !$acc end data
+
+    !$omp end parallel
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    return
+  end subroutine ATMOS_DYN_FVM_fluxZ_<%=uv%>Z_<%=@scheme%>
+<% [
+     ["J13", "UYZ", 2],
+     ["J23", "XVZ", 1]
+   ].each do |dir, xyz, im|
+%>
+  !-----------------------------------------------------------------------------
+  !> calculation <%=dir%>-flux at <%=uv%>Z
+  subroutine ATMOS_DYN_FVM_flux<%=dir%>_<%=uv%>Z_<%=@scheme%>( &
+       flux,              &
+       mom, val, DENS,    &
+       GSQRT, <%=dir%>G, MAPF, &
+       CDZ, TwoD,         &
+       IIS, IIE, JJS, JJE )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(in)  :: mom     (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: <%=dir%>G    (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2)
+    real(RP), intent(in)  :: CDZ     (KA)
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel default(none) private(i,j,k,vel)                      &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,<%=dir%>G,MAPF) &
+    !$omp shared(GSQRT,CDZ,TwoD)
+  
+    !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, <%=dir%>G, MAPF, CDZ)
+
+<% if i==1 && im==1 %>
+    if ( TwoD ) then
+
+    !$omp do OMP_SCHEDULE_
+    !$acc kernels
+    do j = JJS, JJE
+    do k = KS<%=nh%>, KE<%=-nh-1%>
+       i = IIS
+       vel = <%= interp("mom", xyz, "XYW") %> &
+           / <%= interp("DENS", "XYZ", "XYW") %>
+       vel = vel * <%=dir%>G(k,i,j)
+       flux(k,i,j) = vel * ( <%= flux("vel", order, 0) %> )
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    !$omp do OMP_SCHEDULE_
+    !$acc kernels
+    do j = JJS, JJE
+       i = IIS
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(KS-1,i,j) = 0.0_RP
+<% nh.times do |k| %>
+       vel = <%= interp("mom", xyz, "XYW", "KS"+k) %> &
+           / <%= interp("DENS", "XYZ", "XYW", "KS"+k) %>
+       vel = vel * <%=dir%>G(KS<%=k%>,i,j)
+       flux(KS<%=k%>,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> )
+
+       vel = <%= interp("mom", xyz, "XYW", "KE"-(k+1)) %> &
+           / <%= interp("DENS", "XYZ", "XYW", "KE"-(k+1)) %>
+       vel = vel * <%=dir%>G(KE<%=-k-1%>,i,j)
+       flux(KE<%=-k-1%>,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> )
+<% end %>
+       flux(KE  ,i,j) = 0.0_RP
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    else
+<% end %>
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS<%=nh%>, KE<%=-nh-1%>
+       vel = <%= interp("mom", xyz, uv+"W") %> &
+           / <%= interp("DENS", "XYZ", uv+"W") %>
+       vel = vel * <%=dir%>G(k,i,j)
+       flux(k,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", order, 0) %> )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(KS-1,i,j) = 0.0_RP
+<% nh.times do |k| %>
+       vel = <%= interp("mom", xyz, uv+"W", "KS"+k) %> &
+           / <%= interp("DENS", "XYZ", uv+"W", "KS"+k) %>
+       vel = vel * <%=dir%>G(KS<%=k%>,i,j)
+       flux(KS<%=k%>,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> )
+
+       vel = <%= interp("mom", xyz, uv+"W", "KE"-(k+1)) %> &
+           / <%= interp("DENS", "XYZ", uv+"W", "KE"-(k+1)) %>
+       vel = vel * <%=dir%>G(KE<%=-k-1%>,i,j)
+       flux(KE<%=-k-1%>,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> )
+<% end %>
+       flux(KE  ,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+    
+<% if i==1 && im==1 %>
+    end if
+<% end %>
+
+    !$acc end data
+
+    !$omp end parallel
+    return
+  end subroutine ATMOS_DYN_FVM_flux<%=dir%>_<%=uv%>Z_<%=@scheme%>
+<% end # J13 J23 loop %>
+<% [
+     ["X", 1, 0],
+     ["Y", 0, 1]
+   ].each do |dir, ii, jj|
+%>
+  !-----------------------------------------------------------------------------
+  !> calculation <%=dir%>-flux at <%=uv%>
+  subroutine ATMOS_DYN_FVM_flux<%=dir%>_<%=uv%>Z_<%=@scheme%>( &
+       flux,              &
+       mom, val, DENS,    &
+       GSQRT, MAPF,       &
+       num_diff,          &
+       CDZ, TwoD,         &
+       IIS, IIE, JJS, JJE )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(in)  :: mom     (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2)
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+<% if uv=="UY" && dir=="X" %>
+    ! note that x-index is added by -1
+<%
+     io = 1
+   else
+     io = 0
+   end
+   if uv=="XV" && dir=="Y"
+%>
+    ! note that y-index is added by -1
+<%
+     jo = 1
+   else
+     jo = 0
+   end
+
+   dst = uv
+   if dir=="X"
+     dst = dst[0..0]=="X" ? "U"+dst[1..1] : "X"+dst[1..1]
+   else # dir=="Y"
+     dst = dst[1..1]=="Y" ? dst[0..0]+"V" : dst[0..0]+"Y"
+   end
+%>
+
+<% if i==1 && jj==1 %>
+    if ( TwoD ) then
+
+    !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ &
+    !$omp private(vel) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,MAPF,num_diff,TwoD)
+    !$acc kernels
+    do j = JJS<%=-jj+jo%>, JJE<%=jo%>
+    do k = KS, KE
+       i = IIS
+#ifdef DEBUG
+       call CHECK( __LINE__, mom(k,i  ,j) )
+<% (nh+1).times do |n| %>
+       call CHECK( __LINE__, val(k,i<%=-n*ii-io%>,j<%=-n*jj-jo%>) )
+       call CHECK( __LINE__, val(k,i<%=(n+1)*ii-io%>,j<%=(n+1)*jj-jo%>) )
+<% end %>
+#endif
+       vel = <%= interp("mom", dir=="X" ? "UYZ" : "XVZ", "XVZ") %> &
+           / <%= interp("DENS", "XYZ", "XVZ") %>
+       flux(k,i<%=-io%>,j<%=-jo%>) = GSQRT(k,i,j) / MAPF(i,j,<%=ii*2+jj%>) * vel &
+                   * ( <%= flux("vel", order, ii+jj*2, "k", "i"-io, "j"-jo) %> ) <%= num_diff() %>
+    enddo
+    enddo
+    !$acc end kernels
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    else
+
+<% end %>
+    !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
+    !$omp private(vel) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,MAPF,num_diff)
+    !$acc kernels
+    do j = JJS<%=-jj+jo%>, JJE<%=jo%>
+    do i = IIS<%=-ii+io%>, IIE<%=io%>
+    do k = KS, KE
+#ifdef DEBUG
+       call CHECK( __LINE__, mom(k,i  ,j) )
+       call CHECK( __LINE__, mom(k,i<%=-i%>,j<%=-j%>) )
+<% (nh+1).times do |n| %>
+       call CHECK( __LINE__, val(k,i<%=-n*ii-io%>,j<%=-n*jj-jo%>) )
+       call CHECK( __LINE__, val(k,i<%=(n+1)*ii-io%>,j<%=(n+1)*jj-jo%>) )
+<% end %>
+#endif
+       vel = <%= interp("mom", dir=="X" ? "UYZ" : "XVZ", dst+"Z") %> &
+           / <%= interp("DENS", "XYZ", dst+"Z") %>
+       flux(k,i<%=-io%>,j<%=-jo%>) = GSQRT(k,i,j) / MAPF(i,j,<%=ii*2+jj%>) * vel &
+                   * ( <%= flux("vel", order, ii+jj*2, "k", "i"-io, "j"-jo) %> ) <%= num_diff() %>
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+<% if i==1 && jj==1 %>
+    end if
+<% end %>
+
+    return
+  end subroutine ATMOS_DYN_FVM_flux<%=dir%>_<%=uv%>Z_<%=@scheme%>
+<% end %>
+<%# -- X Y loop ------- %>
+<% end %>
+<%# -- U V loop ------- %>
+
+<% if @scheme == "ud3Koren1993" %>
+  !-----------------------------------------------------------------------------
+  function phi(v1, v2, v3)
+    use scale_const, only: &
+       EPS => CONST_EPS
+    !$acc routine seq
+    implicit none
+
+    real(RP)              :: phi
+#ifdef _OPENACC
+    real(RP), intent(in), value :: v1
+    real(RP), intent(in), value :: v2
+    real(RP), intent(in), value :: v3
+#else
+    real(RP), intent(in) :: v1
+    real(RP), intent(in) :: v2
+    real(RP), intent(in) :: v3
+#endif
+    
+    real(RP) :: r2
+    real(RP) :: zerosw1, zerosw2
+    !---------------------------------------------------------------------------
+
+    zerosw1 = EPS - sign(EPS, abs(v1-v2)-EPS)
+    zerosw2 = EPS - sign(EPS, abs(v2-v3)-EPS)
+    r2 = 2.0_RP * (v1-v2+zerosw1*zerosw2) / (v2-v3+zerosw2)
+
+    phi = max(0.0_RP, min(r2, min((1.0_RP+r2)/3.0_RP, 2.0_RP) ) )
+
+  end function phi
+<% end %>
+
+end module <%= modname %>
+
+!--
+! vi<%=":"%>set readonly sw=4 ts=8
+!
+!Local Variables<%=":"%>
+!mode: f90
+!buffer-read-only: t
+!End:
+!
+!++

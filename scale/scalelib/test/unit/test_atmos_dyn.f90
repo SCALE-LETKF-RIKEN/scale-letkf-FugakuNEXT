@@ -1,0 +1,814 @@
+module test_atmos_dyn
+
+  !-----------------------------------------------------------------------------
+  use scale_precision
+  use scale_atmos_grid_cartesC_index
+  use scale_index
+  use scale_tracer
+  use scale_atmos_dyn, only: &
+     ATMOS_DYN
+  use dc_test, only: &
+     AssertEqual, &
+     AssertGreaterThan, &
+     AssertLessThan
+  use scale_io, only: &
+     H_SHORT
+  use scale_comm_cartesC, only: &
+     COMM_vars8, &
+     COMM_wait
+  use scale_atmos_grid_cartesC, only: &
+     DOMAIN_CENTER_Y => ATMOS_GRID_CARTESC_DOMAIN_CENTER_Y, &
+     CY              => ATMOS_GRID_CARTESC_CY,              &
+     CZ              => ATMOS_GRID_CARTESC_CZ,              &
+     FZ              => ATMOS_GRID_CARTESC_FZ,              &
+     CDZ             => ATMOS_GRID_CARTESC_CDZ,             &
+     CDX             => ATMOS_GRID_CARTESC_CDX,             &
+     CDY             => ATMOS_GRID_CARTESC_CDY,             &
+     FDZ             => ATMOS_GRID_CARTESC_FDZ,             &
+     FDX             => ATMOS_GRID_CARTESC_FDX,             &
+     FDY             => ATMOS_GRID_CARTESC_FDY,             &
+     RCDZ            => ATMOS_GRID_CARTESC_RCDZ,            &
+     RCDX            => ATMOS_GRID_CARTESC_RCDX,            &
+     RCDY            => ATMOS_GRID_CARTESC_RCDY,            &
+     RFDZ            => ATMOS_GRID_CARTESC_RFDZ,            &
+     RFDX            => ATMOS_GRID_CARTESC_RFDX,            &
+     RFDY            => ATMOS_GRID_CARTESC_RFDY
+  use scale_atmos_hydrometeor, only: &
+     I_QV
+  !-----------------------------------------------------------------------------
+  implicit none
+  private
+  !-----------------------------------------------------------------------------
+  public :: test_atmos_dyn_run
+
+  !-----------------------------------------------------------------------------
+  real(RP), allocatable :: DENS(:,:,:)
+  real(RP), allocatable :: MOMZ(:,:,:)
+  real(RP), allocatable :: MOMX(:,:,:)
+  real(RP), allocatable :: MOMY(:,:,:)
+  real(RP), allocatable :: RHOT(:,:,:)
+  real(RP), allocatable :: QTRC(:,:,:,:)
+  real(RP), allocatable :: PROG(:,:,:,:)
+
+  real(RP), allocatable :: DENS_av(:,:,:)
+  real(RP), allocatable :: MOMZ_av(:,:,:)
+  real(RP), allocatable :: MOMX_av(:,:,:)
+  real(RP), allocatable :: MOMY_av(:,:,:)
+  real(RP), allocatable :: RHOT_av(:,:,:)
+  real(RP), allocatable :: QTRC_av(:,:,:,:)
+
+  real(RP), allocatable :: DENS_tp(:,:,:)
+  real(RP), allocatable :: MOMZ_tp(:,:,:)
+  real(RP), allocatable :: MOMX_tp(:,:,:)
+  real(RP), allocatable :: MOMY_tp(:,:,:)
+  real(RP), allocatable :: RHOT_tp(:,:,:)
+  real(RP), allocatable :: QTRC_tp(:,:,:,:)
+
+  real(RP), allocatable :: DENS_o(:,:,:)
+  real(RP), allocatable :: MOMZ_o(:,:,:)
+  real(RP), allocatable :: MOMX_o(:,:,:)
+  real(RP), allocatable :: MOMY_o(:,:,:)
+  real(RP), allocatable :: RHOT_o(:,:,:)
+  real(RP), allocatable :: QTRC_o(:,:,:,:)
+
+  real(RP), allocatable :: CORIOLIS(:,:)
+
+  real(RP), allocatable :: REF_dens(:,:,:)
+  real(RP), allocatable :: REF_pott(:,:,:)
+  real(RP), allocatable :: REF_qv  (:,:,:)
+  real(RP), allocatable :: REF_pres(:,:,:)
+
+  real(RP), allocatable :: DAMP_var(:,:,:,:)
+  real(RP), allocatable :: DAMP_alpha(:,:,:,:)
+  real(RP), allocatable :: MFLUX_OFFSET_X(:,:,:)
+  real(RP), allocatable :: MFLUX_OFFSET_Y(:,:,:)
+
+  real(RP), allocatable :: PHI(:,:,:)
+  real(RP), allocatable :: GSQRT(:,:,:,:)
+  real(RP), allocatable :: J13G(:,:,:,:)
+  real(RP), allocatable :: J23G(:,:,:,:)
+  real(RP) :: J33G
+  real(RP), allocatable :: MAPF(:,:,:,:)
+
+  real(RP), allocatable :: AQ_R(:)
+  real(RP), allocatable :: AQ_CV(:)
+  real(RP), allocatable :: AQ_CP(:)
+  real(RP), allocatable :: AQ_MASS(:)
+
+  integer  :: BND_QA
+  integer, allocatable  :: BND_IQ(:)
+  real(RP) :: BND_SMOOTHER_FACT
+
+  integer  :: nd_order
+  real(RP) :: nd_coef
+  real(RP) :: nd_sfc_fact
+  logical  :: nd_use_rs
+
+  real(RP) :: divdmp_coef
+
+  logical  :: flag_tracer_split_tend = .false.
+
+  logical  :: flag_fct_momentum = .true.
+  logical  :: flag_fct_t        = .true.
+  logical  :: flag_fct_tracer   = .true.
+  logical  :: flag_fct_along_stream = .true.
+
+  real(RP), allocatable :: ZERO(:,:,:)
+
+  integer :: KME ! end of main region
+
+  character(len=H_SHORT) :: DYN_TYPE
+
+  character(len=H_SHORT) :: DYN_Tinteg_Short_TYPE
+  character(len=H_SHORT) :: DYN_Tinteg_Tracer_TYPE
+  character(len=H_SHORT) :: DYN_Tinteg_Large_TYPE
+  character(len=H_SHORT) :: DYN_Tstep_Tracer_TYPE
+  character(len=H_SHORT) :: DYN_Tstep_Large_TYPE
+  character(len=H_SHORT) :: DYN_FVM_FLUX_TYPE
+  character(len=H_SHORT) :: DYN_FVM_FLUX_TYPE_TRACER
+  real(RP)               :: wdamp_tau
+  real(RP)               :: wdamp_height
+
+  integer :: k, i, j, iq
+  character(len=11) :: message
+  !-----------------------------------------------------------------------------
+contains
+
+  subroutine test_atmos_dyn_run
+  !-----------------------------------------------------------------------------
+  !
+  !++ used modules
+  !
+  use scale_io
+  use scale_atmos_dyn, only: &
+     ATMOS_DYN_setup
+  use scale_atmos_dyn_Tstep_short, only: &
+     ATMOS_DYN_Tstep_short_regist
+  use scale_atmos_grid_cartesC, only: &
+     CBFZ => ATMOS_GRID_CARTESC_CBFZ
+  use scale_const, only: &
+     GRAV => CONST_GRAV
+  !-----------------------------------------------------------------------------
+  implicit none
+  !-----------------------------------------------------------------------------
+  !
+  !++ parameters & variables
+  !
+  !-----------------------------------------------------------------------------
+  real(RP) :: lat(IA,JA)
+  character(len=H_SHORT) :: CSDUMMY(1)
+  character(len=H_MID)   :: CMDUMMY(1)
+  integer :: j
+  !=============================================================================
+
+  !########## Initial setup ##########
+
+  ! allocate
+  allocate( DENS(KA,IA,JA) )
+  allocate( MOMZ(KA,IA,JA) )
+  allocate( MOMX(KA,IA,JA) )
+  allocate( MOMY(KA,IA,JA) )
+  allocate( RHOT(KA,IA,JA) )
+  allocate( QTRC(KA,IA,JA,QA) )
+
+  allocate( DENS_av(KA,IA,JA) )
+  allocate( MOMZ_av(KA,IA,JA) )
+  allocate( MOMX_av(KA,IA,JA) )
+  allocate( MOMY_av(KA,IA,JA) )
+  allocate( RHOT_av(KA,IA,JA) )
+  allocate( QTRC_av(KA,IA,JA,QA) )
+
+  allocate( DENS_tp(KA,IA,JA) )
+  allocate( MOMZ_tp(KA,IA,JA) )
+  allocate( MOMX_tp(KA,IA,JA) )
+  allocate( MOMY_tp(KA,IA,JA) )
+  allocate( RHOT_tp(KA,IA,JA) )
+  allocate( QTRC_tp(KA,IA,JA,QA) )
+
+  allocate( DENS_o(KA,IA,JA) )
+  allocate( MOMZ_o(KA,IA,JA) )
+  allocate( MOMX_o(KA,IA,JA) )
+  allocate( MOMY_o(KA,IA,JA) )
+  allocate( RHOT_o(KA,IA,JA) )
+  allocate( QTRC_o(KA,IA,JA,QA) )
+
+  allocate( CORIOLIS(IA,JA) )
+
+  allocate( REF_dens(KA,IA,JA) )
+  allocate( REF_pott(KA,IA,JA) )
+  allocate( REF_qv  (KA,IA,JA) )
+  allocate( REF_pres(KA,IA,JA) )
+
+  allocate( DAMP_var(KA,IA,JA,5+QA) )
+  allocate( DAMP_alpha(KA,IA,JA,5+QA) )
+  allocate( MFLUX_OFFSET_X(KA,JA,2) )
+  allocate( MFLUX_OFFSET_Y(KA,IA,2) )
+
+  allocate( PHI(KA,IA,JA) )
+  allocate( GSQRT(KA,IA,JA,7) )
+  allocate( J13G(KA,IA,JA,7) )
+  allocate( J23G(KA,IA,JA,7) )
+
+  allocate( MAPF(IA,JA,2,4) )
+
+  allocate( AQ_R(QA) )
+  allocate( AQ_CV(QA) )
+  allocate( AQ_CP(QA) )
+  allocate( AQ_MASS(QA) )
+
+  allocate( ZERO(KA,IA,JA) )
+
+  allocate( PROG(KA,IA,JA,1) )
+
+  allocate( BND_IQ(QA) )
+  BND_QA            = 0
+  BND_IQ(:)         = -1 ! dummy
+  BND_SMOOTHER_FACT = 0.2_RP
+
+  ZERO(:,:,:) = 0.0_RP
+
+  CORIOLIS(:,:) = 0.0_RP
+
+  nd_order = 2
+  nd_coef = 0.01_RP
+  nd_sfc_fact = 1.0_RP
+  nd_use_rs = .true.
+  do j = 1, JA
+     lat(:,j) = real(j, RP)
+  end do
+
+  DYN_TYPE = "FVM-HEVE"
+  call ATMOS_DYN_Tstep_short_regist( DYN_TYPE, & !(in)
+                                     VA, CSDUMMY, CMDUMMY, CSDUMMY ) ! (out)
+
+  DYN_Tinteg_Short_TYPE = "RK4"
+  DYN_Tinteg_Tracer_TYPE = "RK3WS2002"
+  DYN_Tinteg_Large_TYPE = "EULER"
+  DYN_Tstep_Tracer_TYPE = "FVM-HEVE"
+  DYN_Tstep_Large_TYPE = "FVM-HEVE"
+  DYN_FVM_FLUX_TYPE = "CD4"
+  DYN_FVM_FLUX_TYPE_TRACER = "UD3KOREN1993"
+  wdamp_tau = 10.0_RP
+  wdamp_height = 0.0_RP
+
+  call ATMOS_DYN_setup( &
+       DYN_Tinteg_Short_TYPE,              & ! (in)
+       DYN_Tinteg_Tracer_TYPE,             & ! (in)
+       DYN_Tinteg_Large_TYPE,              & ! (in)
+       DYN_Tstep_Tracer_TYPE,              & ! (in)
+       DYN_Tstep_Large_TYPE,               & ! (in)
+       DYN_TYPE,                           & ! (in)
+       DYN_FVM_FLUX_TYPE,                  & ! (in)
+       DYN_FVM_FLUX_TYPE_TRACER,           & ! (in)
+       DENS, MOMZ, MOMX, MOMY, RHOT, QTRC, & ! (in)
+       PROG,                               & ! (in)
+       CDZ, CDX, CDY, FDZ, FDX, FDY,       & ! (in)
+       wdamp_tau, wdamp_height, FZ         ) ! (in)
+
+  do k = KS+1, KE
+     if ( CBFZ(k) > 0.0_RP ) then
+        KME = k - 1
+        exit
+     end if
+  end do
+
+  MOMZ(KE,:,:) = 0.0_RP
+
+  AQ_R(:) = 1.0_RP
+  AQ_CV(:) = 1.0_RP
+  AQ_CP(:) = 1.0_RP
+  AQ_MASS(:) = 1.0_RP
+
+  do j = 1, JA
+  do i = 1, IA
+     PHI(:,i,j) = CZ(:) * GRAV
+  end do
+  end do
+  GSQRT(:,:,:,:) = 1.0_RP
+  J13G(:,:,:,:) = 0.0_RP
+  J23G(:,:,:,:) = 0.0_RP
+  J33G          = 1.0_RP
+  MAPF(:,:,:,:) = 1.0_RP
+
+  divdmp_coef = 0.0_RP
+
+  DENS_tp(:,:,:) = 0.0_RP
+  MOMZ_tp(:,:,:) = 0.0_RP
+  MOMX_tp(:,:,:) = 0.0_RP
+  MOMY_tp(:,:,:) = 0.0_RP
+  RHOT_tp(:,:,:) = 0.0_RP
+  QTRC_tp(:,:,:,:) = 0.0_RP
+
+  !########## test ##########
+
+
+  call test_undef
+
+  call test_const
+
+  call test_conserve
+
+  call test_cwc
+
+  call test_fctminmax
+
+end subroutine test_atmos_dyn_run
+!=============================================================================
+
+
+subroutine test_undef
+
+  real(RP) :: BIG(KA,IA,JA)
+
+  BIG(:,:,:) = 9.99E9_RP
+
+  write(*,*) "Test undef"
+
+  do j = 1, JA
+  do i = 1, IA
+  do k = 1, KA
+     MOMZ(k,i,j) = k + i + j
+     MOMX(k,i,j) = k + i - j
+     MOMY(k,i,j) = k - i + j
+     RHOT(k,i,j) = k - i - j + KA + IA + JA
+     DENS(k,i,j) = k + i + j + 1.0_RP
+     do iq = 1, QA
+        QTRC(k,i,j,iq) = 1.0_RP*(k + i + j + iq) / (KA + IA + JA + QA) / QA
+     end do
+  end do
+  end do
+  end do
+
+  do j = 1, JA
+  do i = 1, IA
+  do k = 1, KA
+     REF_dens(k,i,j) = KA - k + 1
+     REF_pott(k,i,j) = k
+     REF_qv  (k,i,j) = KA - k + 1
+     REF_pres(k,i,j) = KA - k + 1
+  end do
+  end do
+  end do
+
+  DAMP_var  (:,:,:,:) = -9.999E30_RP
+  DAMP_alpha(:,:,:,:) = 0.0_RP
+
+  MFLUX_OFFSET_X(:,:,:) = 0.0_RP
+  MFLUX_OFFSET_Y(:,:,:) = 0.0_RP
+
+  do i = 1, 2
+     call ATMOS_DYN( &
+          DENS, MOMZ, MOMX, MOMY, RHOT, QTRC,          & ! (inout)
+          PROG,                                        & ! (inout)
+          DENS_av, MOMZ_av, MOMX_av, MOMY_av, RHOT_av, QTRC_av, & ! (out)
+          DENS_tp, MOMZ_tp, MOMX_tp, MOMY_tp, RHOT_tp, QTRC_tp, & ! (in)
+          CORIOLIS,                                    & ! (in)
+          CDZ, CDX, CDY, FDZ, FDX, FDY,                & ! (in)
+          RCDZ, RCDX, RCDY, RFDZ, RFDX, RFDY,          & ! (in)
+          PHI, GSQRT, J13G, J23G, J33G, MAPF,          & ! (in)
+          AQ_R, AQ_CV, AQ_CP, AQ_MASS,                 & ! (in)
+          REF_dens, REF_pott, REF_qv, REF_pres,        & ! (in)
+          nd_coef, nd_coef, nd_order, nd_sfc_fact, nd_use_rs, & ! (in)
+          BND_QA, BND_IQ, BND_SMOOTHER_FACT,                  & ! (in)
+          DAMP_var(:,:,:,1), DAMP_var(:,:,:,2), DAMP_var(:,:,:,3), DAMP_var(:,:,:,4), DAMP_var(:,:,:,5), DAMP_var(:,:,:,6:6+QA-1), & ! (in)
+          DAMP_alpha(:,:,:,1), DAMP_alpha(:,:,:,2), DAMP_alpha(:,:,:,3), DAMP_alpha(:,:,:,4), DAMP_alpha(:,:,:,5), & ! (in)
+          DAMP_alpha(:,:,:,6:6+QA-1),                  & ! (in)
+          MFLUX_OFFSET_X(:,:,:), MFLUX_OFFSET_Y(:,:,:), & ! (in)
+          divdmp_coef,                                 & ! (in)
+          flag_tracer_split_tend,                      & ! (in)
+          flag_fct_momentum, flag_fct_t, flag_fct_tracer, & ! (in)
+          flag_fct_along_stream,                       & ! (in)
+          .false.,                                     & ! (in)
+          I_QV,                                        & ! (in)
+          1.0_DP, 1.0_DP                               ) ! (in)
+
+  end do
+
+  call AssertLessThan("MOMZ", BIG(KS:KE,IS:IE,JS:JE), MOMZ(KS:KE,IS:IE,JS:JE))
+  call AssertLessThan("MOMX", BIG(KS:KE,IS:IE,JS:JE), MOMX(KS:KE,IS:IE,JS:JE))
+  call AssertLessThan("MOMY", BIG(KS:KE,IS:IE,JS:JE), MOMY(KS:KE,IS:IE,JS:JE))
+  call AssertLessThan("RHOT", BIG(KS:KE,IS:IE,JS:JE), RHOT(KS:KE,IS:IE,JS:JE))
+  message = "iq = ??"
+  do iq = 1, QA
+     write(message(6:7), "(i2)") iq
+     call AssertLessThan(message, BIG(KS:KE,IS:IE,JS:JE), QTRC(KS:KE,IS:IE,JS:JE,iq))
+  end do
+
+end subroutine test_undef
+
+subroutine test_const
+  real(RP) :: answer(KA,IA,JA)
+
+  write(*,*) "Test constant"
+
+  DENS(:,:,:) = 1.0_RP
+  MOMZ(:,:,:) = 2.0_RP
+  MOMX(:,:,:) = 3.0_RP
+  MOMY(:,:,:) = 4.0_RP
+  RHOT(:,:,:) = 300.0_RP
+  QTRC(:,:,:,:) = 0.1_RP
+
+  REF_dens(:,:,:) = 1.0_RP
+  REF_pott(:,:,:) = 300.0_RP
+  REF_qv(:,:,:)   = 0.001_RP
+  REF_pres(:,:,:) = 1000._RP
+
+  DAMP_var  (:,:,:,:) = -9.999E30_RP
+  DAMP_alpha(:,:,:,:) = 0.0_RP
+
+  MFLUX_OFFSET_X(:,:,:) = 0.0_RP
+  MFLUX_OFFSET_Y(:,:,:) = 0.0_RP
+
+  call ATMOS_DYN( &
+       DENS, MOMZ, MOMX, MOMY, RHOT, QTRC,          & ! (inout)
+       PROG,                                        & ! (inout)
+       DENS_av, MOMZ_av, MOMX_av, MOMY_av, RHOT_av, QTRC_av, & ! (out)
+       DENS_tp, MOMZ_tp, MOMX_tp, MOMY_tp, RHOT_tp, QTRC_tp, & ! (in)
+       CORIOLIS,                                    & ! (in)
+       CDZ, CDX, CDY, FDZ, FDX, FDY,                & ! (in)
+       RCDZ, RCDX, RCDY, RFDZ, RFDX, RFDY,          & ! (in)
+       PHI, GSQRT, J13G, J23G, J33G, MAPF,          & ! (in)
+       AQ_R, AQ_CV, AQ_CP, AQ_MASS,                 & ! (in)
+       REF_dens, REF_pott, REF_qv, REF_pres,        & ! (in)
+       nd_coef, nd_coef, nd_order, nd_sfc_fact, nd_use_rs, & ! (in)
+       BND_QA, BND_IQ, BND_SMOOTHER_FACT,                  & ! (in)
+       DAMP_var(:,:,:,1), DAMP_var(:,:,:,2), DAMP_var(:,:,:,3), DAMP_var(:,:,:,4), DAMP_var(:,:,:,5), DAMP_var(:,:,:,6:6+QA-1), & ! (in)
+       DAMP_alpha(:,:,:,1), DAMP_alpha(:,:,:,2), DAMP_alpha(:,:,:,3), DAMP_alpha(:,:,:,4), DAMP_alpha(:,:,:,5), & ! (in)
+       DAMP_alpha(:,:,:,6:6+QA-1),                  & ! (in)
+       MFLUX_OFFSET_X(:,:,:), MFLUX_OFFSET_Y(:,:,:), & ! (in)
+       divdmp_coef,                                 & ! (in)
+       flag_tracer_split_tend,                      & ! (in)
+       flag_fct_momentum, flag_fct_t, flag_fct_tracer, & ! (in)
+       flag_fct_along_stream,                       & ! (in)
+       .false.,                                     & ! (in)
+       I_QV,                                        & ! (in)
+       1.0_DP, 1.0_DP                               ) ! (in)
+
+  do k = KS, KE
+     answer(k,:,:) = MOMZ(k,IS,JS)
+  end do
+  call AssertEqual("MOMZ", answer(KS:KE,IS:IE,JS:JE), MOMZ(KS:KE,IS:IE,JS:JE))
+  do k = KS, KE
+     answer(k,:,:) = MOMX(k,IS,JS)
+  end do
+  call AssertEqual("MOMX", answer(KS:KE,IS:IE,JS:JE), MOMX(KS:KE,IS:IE,JS:JE))
+  do k = KS, KE
+     answer(k,:,:) = MOMY(k,IS,JS)
+  end do
+  call AssertEqual("MOMY", answer(KS:KE,IS:IE,JS:JE), MOMY(KS:KE,IS:IE,JS:JE))
+  do k = KS, KE
+     answer(k,:,:) = DENS(k,IS,JS)
+  end do
+  call AssertEqual("DENS", answer(KS:KE,IS:IE,JS:JE), DENS(KS:KE,IS:IE,JS:JE))
+  do k = KS, KE
+     answer(k,:,:) = RHOT(k,IS,JS)
+  end do
+  call AssertEqual("RHOT", answer(KS:KE,IS:IE,JS:JE), RHOT(KS:KE,IS:IE,JS:JE))
+  message = "iq = ??"
+  do iq = 1, QA
+     do k = KS, KE
+        answer(k,:,:) = QTRC(k,IS,JS,iq)
+     end do
+     write(message(6:7), "(i2)") iq
+     call AssertEqual(message, answer(KS:KE,IS:IE,JS:JE), QTRC(KS:KE,IS:IE,JS:JE,iq))
+  end do
+
+end subroutine test_const
+
+subroutine test_conserve
+
+  real(RP) :: total_o, total
+
+  write(*,*) "Test conserve"
+
+  do j = 1, JA
+  do i = 1, IA
+  do k = KS, KE
+     MOMZ(k,i,j) = (k + i + j) * 1.0_RP
+     MOMX(k,i,j) = (k*2 + i + j) * 1.0_RP
+     MOMY(k,i,j) = (k + i*2 + j) * 1.0_RP
+     RHOT(k,i,j) = (k + i + j*2) * 1.0_RP
+     DENS(k,i,j) = (k*2 + i*2 + j) * 1.0_RP + 1.0_RP
+     do iq = 1, QA
+        QTRC(k,i,j,iq) = (k + i + j + iq) * 0.1_RP / (KE + IE + JE + QA)
+     end do
+  end do
+  end do
+  end do
+
+  REF_dens(:,:,:) = 1.0_RP
+  REF_pott(:,:,:) = 1.0_RP
+  REF_qv(:,:,:)   = 1.0_RP
+  REF_pres(:,:,:) = 1.0_RP
+
+  DAMP_var  (:,:,:,:) = -9.999E30_RP
+  DAMP_alpha(:,:,:,:) = 0.0_RP
+
+  MFLUX_OFFSET_X(:,:,:) = 0.0_RP
+  MFLUX_OFFSET_Y(:,:,:) = 0.0_RP
+
+  call COMM_vars8( DENS(:,:,:), 1 )
+  call COMM_vars8( MOMZ(:,:,:), 2 )
+  call COMM_vars8( MOMX(:,:,:), 3 )
+  call COMM_vars8( MOMY(:,:,:), 4 )
+  call COMM_vars8( RHOT(:,:,:), 5 )
+  call COMM_wait ( DENS(:,:,:), 1 )
+  call COMM_wait ( MOMZ(:,:,:), 2 )
+  call COMM_wait ( MOMX(:,:,:), 3 )
+  call COMM_wait ( MOMY(:,:,:), 4 )
+  call COMM_wait ( RHOT(:,:,:), 5 )
+
+  do iq = 1, QA
+     call COMM_vars8( QTRC(:,:,:,iq), iq )
+  enddo
+  do iq = 1, QA
+     call COMM_wait ( QTRC(:,:,:,iq), iq )
+  enddo
+
+  call copy
+
+  call ATMOS_DYN( &
+         DENS, MOMZ, MOMX, MOMY, RHOT, QTRC,          & ! (out)
+         PROG,                                        & ! (inout)
+         DENS_av, MOMZ_av, MOMX_av, MOMY_av, RHOT_av, QTRC_av, & ! (inout)
+         DENS_tp, MOMZ_tp, MOMX_tp, MOMY_tp, RHOT_tp, QTRC_tp, & ! (in)
+         CORIOLIS,                                    & ! (in)
+         CDZ, CDX, CDY, FDZ, FDX, FDY,                & ! (in)
+         RCDZ, RCDX, RCDY, RFDZ, RFDX, RFDY,          & ! (in)
+         PHI, GSQRT, J13G, J23G, J33G, MAPF,          & ! (in)
+         AQ_R, AQ_CV, AQ_CP, AQ_MASS,                 & ! (in)
+         REF_dens, REF_pott, REF_qv, REF_pres,        & ! (in)
+         nd_coef, nd_coef, nd_order, nd_sfc_fact, nd_use_rs, & ! (in)
+         BND_QA, BND_IQ, BND_SMOOTHER_FACT,                  & ! (in)
+         DAMP_var(:,:,:,1), DAMP_var(:,:,:,2), DAMP_var(:,:,:,3), DAMP_var(:,:,:,4), DAMP_var(:,:,:,5), DAMP_var(:,:,:,6:6+QA-1), & ! (in)
+         DAMP_alpha(:,:,:,1), DAMP_alpha(:,:,:,2), DAMP_alpha(:,:,:,3), DAMP_alpha(:,:,:,4), DAMP_alpha(:,:,:,5), & ! (in)
+         DAMP_alpha(:,:,:,6:6+QA-1),                  & ! (in)
+         MFLUX_OFFSET_X(:,:,:), MFLUX_OFFSET_Y(:,:,:), & ! (in)
+         divdmp_coef,                                 & ! (in)
+         flag_tracer_split_tend,                      & ! (in)
+         flag_fct_momentum, flag_fct_t, flag_fct_tracer, & ! (in)
+         flag_fct_along_stream,                       & ! (in)
+         .true.,                                      & ! (in)
+         I_QV,                                        & ! (in)
+         1.0_DP, 1.0_DP                               ) ! (in)
+
+  total_o = 0.0_RP
+  total = 0.0_RP
+  do j = JS, JE
+  do i = IS, IE
+  do k = KS, KE
+     total_o = total_o + DENS_o(k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+     total   = total   + DENS  (k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+  end do
+  end do
+  end do
+  call AssertEqual("DENS", total_o, total, RP*2-2, -10)
+
+  total_o = 0.0_RP
+  total = 0.0_RP
+  do j = JS, JE
+  do i = IS, IE
+  do k = KS, KE
+     total_o = total_o + MOMX_o(k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+     total   = total   + MOMX  (k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+  end do
+  end do
+  end do
+  call AssertEqual("MOMX", total_o, total, RP*2-2, -10)
+
+  total_o = 0.0_RP
+  total = 0.0_RP
+  do j = JS, JE
+  do i = IS, IE
+  do k = KS, KE
+     total_o = total_o + MOMY_o(k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+     total   = total   + MOMY  (k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+  end do
+  end do
+  end do
+  call AssertEqual("MOMY", total_o, total, RP*2-2, -10)
+
+  total_o = 0.0_RP
+  total = 0.0_RP
+  do j = JS, JE
+  do i = IS, IE
+  do k = KS, KE
+     total_o = total_o + RHOT_o(k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+     total   = total   + RHOT  (k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+  end do
+  end do
+  end do
+  call AssertEqual("RHOT", total_o, total, RP*2-2, -10)
+
+  message = "iq = ??"
+  do iq = 1, QA
+     write(message(6:7), "(i2)") iq
+     total_o = 0.0_RP
+     total = 0.0_RP
+     do j = JS, JE
+     do i = IS, IE
+     do k = KS, KE
+        total_o = total_o + RHOT_o(k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+        total   = total   + RHOT  (k,i,j) * CDZ(k) * CDX(i) * CDY(j)
+     end do
+     end do
+     end do
+     call AssertEqual(message, total_o, total, RP*2-2, -10)
+  end do
+
+end subroutine test_conserve
+
+subroutine test_cwc
+  real(RP), parameter :: POTT = 300._RP
+  real(RP), parameter :: Q = 0.01_RP
+  real(RP) :: answer(KA,IA,JA)
+
+  write(*,*) "Test CWC"
+
+  call random_number(DENS)
+  DENS(:,:,:) = DENS(:,:,:)*0.1 + 1.0_RP
+  call random_number(MOMZ)
+  call random_number(MOMX)
+  call random_number(MOMY)
+
+  RHOT(:,:,:) = POTT * DENS(:,:,:)
+  QTRC(:,:,:,:) = Q
+
+  REF_dens(:,:,:) = 1.0_RP
+  REF_pott(:,:,:) = POTT
+  REF_qv(:,:,:)   = Q
+  REF_pres(:,:,:) = 1000._RP
+
+  DAMP_var  (:,:,:,:) = -9.999E30_RP
+  DAMP_alpha(:,:,:,:) = 0.0_RP
+
+  MFLUX_OFFSET_X(:,:,:) = 0.0_RP
+  MFLUX_OFFSET_Y(:,:,:) = 0.0_RP
+
+  call COMM_vars8( DENS(:,:,:), 1 )
+  call COMM_vars8( MOMZ(:,:,:), 2 )
+  call COMM_vars8( MOMX(:,:,:), 3 )
+  call COMM_vars8( MOMY(:,:,:), 4 )
+  call COMM_vars8( RHOT(:,:,:), 5 )
+  call COMM_wait ( DENS(:,:,:), 1 )
+  call COMM_wait ( MOMZ(:,:,:), 2 )
+  call COMM_wait ( MOMX(:,:,:), 3 )
+  call COMM_wait ( MOMY(:,:,:), 4 )
+  call COMM_wait ( RHOT(:,:,:), 5 )
+
+  do iq = 1, QA
+     call COMM_vars8( QTRC(:,:,:,iq), iq )
+  enddo
+  do iq = 1, QA
+     call COMM_wait ( QTRC(:,:,:,iq), iq )
+  enddo
+
+  call ATMOS_DYN( &
+       DENS, MOMZ, MOMX, MOMY, RHOT, QTRC,          & ! (inout)
+       PROG,                                        & ! (inout)
+       DENS_av, MOMZ_av, MOMX_av, MOMY_av, RHOT_av, QTRC_av, & ! (out)
+       DENS_tp, MOMZ_tp, MOMX_tp, MOMY_tp, RHOT_tp, QTRC_tp, & ! (in)
+       CORIOLIS,                                    & ! (in)
+       CDZ, CDX, CDY, FDZ, FDX, FDY,                & ! (in)
+       RCDZ, RCDX, RCDY, RFDZ, RFDX, RFDY,          & ! (in)
+       PHI, GSQRT, J13G, J23G, J33G, MAPF,          & ! (in)
+       AQ_R, AQ_CV, AQ_CP, AQ_MASS,                 & ! (in)
+       REF_dens, REF_pott, REF_qv, REF_pres,        & ! (in)
+       nd_coef, nd_coef, nd_order, nd_sfc_fact, nd_use_rs, & ! (in)
+       BND_QA, BND_IQ, BND_SMOOTHER_FACT,                  & ! (in)
+       DAMP_var(:,:,:,1), DAMP_var(:,:,:,2), DAMP_var(:,:,:,3), DAMP_var(:,:,:,4), DAMP_var(:,:,:,5), DAMP_var(:,:,:,6:6+QA-1), & ! (in)
+       DAMP_alpha(:,:,:,1), DAMP_alpha(:,:,:,2), DAMP_alpha(:,:,:,3), DAMP_alpha(:,:,:,4), DAMP_alpha(:,:,:,5), & ! (in)
+       DAMP_alpha(:,:,:,6:6+QA-1),                  & ! (in)
+       MFLUX_OFFSET_X(:,:,:), MFLUX_OFFSET_Y(:,:,:), & ! (in)
+       divdmp_coef,                                 & ! (in)
+       flag_tracer_split_tend,                      & ! (in)
+       flag_fct_momentum, flag_fct_t, flag_fct_tracer, & ! (in)
+       flag_fct_along_stream,                       & ! (in)
+       .false.,                                     & ! (in)
+       I_QV,                                        & ! (in)
+       1.0_DP, 1.0_DP                               ) ! (in)
+
+  answer(:,:,:) = POTT
+  call AssertEqual("POTT", answer(KS:KE,IS:IE,JS:JE), RHOT(KS:KE,IS:IE,JS:JE)/DENS(KS:KE,IS:IE,JS:JE), RP*2-2, -10)
+
+  answer(:,:,:) = Q
+  message = "iq = ??"
+  do iq = 1, QA
+     if ( .not. TRACER_ADVC(iq) ) cycle
+     write(message(6:7), "(i2)") iq
+     call AssertEqual(message, answer(KS:KE,IS:IE,JS:JE), QTRC(KS:KE,IS:IE,JS:JE,iq), RP*2-2, -10)
+  end do
+
+end subroutine test_cwc
+
+subroutine test_fctminmax
+  real(RP), parameter :: POTT_MAX = 350_RP
+  real(RP), parameter :: POTT_MIN = 300_RP
+  real(RP), parameter :: Q_MAX = 0.1_RP
+  real(RP), parameter :: Q_MIN = 0_RP
+  real(RP) :: MINMAX(KA,IA,JA)
+  real(RP) :: epsilon
+  integer :: k, i, j
+
+  epsilon = 0.1_RP**(RP*2-2)
+
+  write(*,*) "Test FCT"
+
+  call random_number(DENS)
+  DENS(:,:,:) = DENS(:,:,:)*0.1 + 1.0_RP
+  call random_number(MOMZ)
+  call random_number(MOMX)
+  call random_number(MOMY)
+
+  RHOT(:,:,:) = POTT_MIN * DENS(:,:,:)
+  QTRC(:,:,:,:) = Q_MIN
+  do j = JS, JS+JMAX/2
+  do i = IS, IS+IMAX/2
+  do k = KS, KS+KMAX/2
+     RHOT(k,i,j) = POTT_MAX * DENS(k,i,j)
+     QTRC(k,i,j,:) = Q_MAX
+  end do
+  end do
+  end do
+
+  REF_dens(:,:,:) = 1.0_RP
+  REF_pott(:,:,:) = POTT_MIN
+  REF_qv(:,:,:)   = Q_MIN
+  REF_pres(:,:,:) = 1000._RP
+
+  DAMP_var  (:,:,:,:) = -9.999E30_RP
+  DAMP_alpha(:,:,:,:) = 0.0_RP
+
+  MFLUX_OFFSET_X(:,:,:) = 0.0_RP
+  MFLUX_OFFSET_Y(:,:,:) = 0.0_RP
+
+  call COMM_vars8( DENS(:,:,:), 1 )
+  call COMM_vars8( MOMZ(:,:,:), 2 )
+  call COMM_vars8( MOMX(:,:,:), 3 )
+  call COMM_vars8( MOMY(:,:,:), 4 )
+  call COMM_vars8( RHOT(:,:,:), 5 )
+  call COMM_wait ( DENS(:,:,:), 1 )
+  call COMM_wait ( MOMZ(:,:,:), 2 )
+  call COMM_wait ( MOMX(:,:,:), 3 )
+  call COMM_wait ( MOMY(:,:,:), 4 )
+  call COMM_wait ( RHOT(:,:,:), 5 )
+
+  do iq = 1, QA
+     call COMM_vars8( QTRC(:,:,:,iq), iq )
+  enddo
+  do iq = 1, QA
+     call COMM_wait ( QTRC(:,:,:,iq), iq )
+  enddo
+
+  call ATMOS_DYN( &
+       DENS, MOMZ, MOMX, MOMY, RHOT, QTRC,          & ! (inout)
+       PROG,                                        & ! (inout)
+       DENS_av, MOMZ_av, MOMX_av, MOMY_av, RHOT_av, QTRC_av, & ! (out)
+       DENS_tp, MOMZ_tp, MOMX_tp, MOMY_tp, RHOT_tp, QTRC_tp, & ! (in)
+       CORIOLIS,                                    & ! (in)
+       CDZ, CDX, CDY, FDZ, FDX, FDY,                & ! (in)
+       RCDZ, RCDX, RCDY, RFDZ, RFDX, RFDY,          & ! (in)
+       PHI, GSQRT, J13G, J23G, J33G, MAPF,          & ! (in)
+       AQ_R, AQ_CV, AQ_CP, AQ_MASS,                 & ! (in)
+       REF_dens, REF_pott, REF_qv, REF_pres,        & ! (in)
+       0.0_RP, 0.0_RP, nd_order, nd_sfc_fact, nd_use_rs, & ! (in)
+       BND_QA, BND_IQ, BND_SMOOTHER_FACT,                & ! (in)
+       DAMP_var(:,:,:,1), DAMP_var(:,:,:,2), DAMP_var(:,:,:,3), DAMP_var(:,:,:,4), DAMP_var(:,:,:,5), DAMP_var(:,:,:,6:6+QA-1), & ! (in)
+       DAMP_alpha(:,:,:,1), DAMP_alpha(:,:,:,2), DAMP_alpha(:,:,:,3), DAMP_alpha(:,:,:,4), DAMP_alpha(:,:,:,5), & ! (in)
+       DAMP_alpha(:,:,:,6:6+QA-1),                  & ! (in)
+       MFLUX_OFFSET_X(:,:,:), MFLUX_OFFSET_Y(:,:,:), & ! (in)
+       divdmp_coef,                                 & ! (in)
+       flag_tracer_split_tend,                      & ! (in)
+       flag_fct_momentum, flag_fct_t, flag_fct_tracer, & ! (in)
+       flag_fct_along_stream,                       & ! (in)
+       .false.,                                     & ! (in)
+       I_QV,                                        & ! (in)
+       1.0_DP, 1.0_DP                               ) ! (in)
+
+  message = "iq = ??"
+  do iq = 1, QA
+     if ( .not. TRACER_ADVC(iq) ) cycle
+     write(message(6:7), "(i2)") iq
+     write(message(9:11),"(a3)") "MAX"
+     MINMAX(:,:,:) = Q_MAX * ( 1_RP + epsilon )
+     call AssertLessThan(message, MINMAX(KS:KE,IS:IE,JS:JE), QTRC(KS:KE,IS:IE,JS:JE,iq))
+     write(message(9:11),"(a3)") "MIN"
+     MINMAX(:,:,:) = Q_MIN - epsilon
+     call AssertGreaterThan(message, MINMAX(KS:KE,IS:IE,JS:JE), QTRC(KS:KE,IS:IE,JS:JE,iq))
+  end do
+
+end subroutine test_fctminmax
+
+
+! private
+subroutine copy
+  DENS_o(:,:,:) = DENS(:,:,:)
+  MOMZ_o(:,:,:) = MOMZ(:,:,:)
+  MOMX_o(:,:,:) = MOMX(:,:,:)
+  MOMY_o(:,:,:) = MOMY(:,:,:)
+  RHOT_o(:,:,:) = RHOT(:,:,:)
+  QTRC_o(:,:,:,:) = QTRC(:,:,:,:)
+end subroutine copy
+
+
+end module test_atmos_dyn

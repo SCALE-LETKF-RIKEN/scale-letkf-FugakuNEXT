@@ -1,0 +1,80 @@
+\section{\SecAdvanceRestart}\label{sec:restart}
+%=======================================================================
+
+リスタート機能は、計算システムで決められたジョブ実行の時間制限のために、
+シミュレーションが途切れてしまう場合などに役立つ。
+リスタート機能を用いることで、長期間の一続きのシミュレーションを複数のランに分割できる。
+リスタートファイルは、初期のランで生成されたデータと同じ形式を持つ。
+各シミュレーションの最後にリスタートファイルを出力する以外にも、
+特定の時間間隔で複数のリスタートファイルを出力する機能もある。
+リスタートファイルに対する設定は、シミュレーション実行用の設定ファイル中の\namelist{PARAM_RESTART}と\namelist{PARAM_TIME}で行う。
+以下の例では、ファイル\verb|restart1_***|によってシミュレーションをリスタートし、
+6時間ごとにリスタートファイル\verb|restart2_***|を生成する。
+
+\editboxtwo{
+\verb|&PARAM_RESTART| & \\
+\multicolumn{2}{l}{\verb| RESTART_IN_BASENAME  = "restart1_d01_20070715-000000.000",|} \\
+                                                                             & 入力する初期値ファイルまたはリスタートファイルのベース名。\\
+                                                                             & \\
+\verb| RESTART_IN_POSTFIX_TIMELABEL  = .false.                             | & \verb|RESTART_IN_BASENAME|の後に入力時の年月日時刻を追加するか? \\
+\verb| RESTART_OUTPUT       = .true.,                                      | & リスタートファイルを出力するか? \\
+                                                                             & \verb|.true.|: 出力する、\verb|.false.|: 出力しない。\\
+\verb| RESTART_OUT_BASENAME = "restart2_d01",                              | & リスタートファイルのファイルのベース名。\\
+\verb| RESTART_OUT_POSTFIX_TIMELABEL = .true.                              | &  \verb|RESTART_OUT_BASENAME|の後に出力時の年月日時刻が追加を追加するか? \\
+\verb| RESTART_OUT_TITLE             = "",             | & リスタートファイルに書かれる題目 \\
+\verb| RESTART_OUT_DTYPE             = "DEFAULT",      | & \verb|REAL4| or \verb|REAL8| or \verb|DEFAULT| \\
+\verb|/| & \\
+\\
+\verb|&PARAM_TIME| & \\
+\verb| TIME_STARTDATE             = 2007, 7, 15, 00, 0, 0,| & リスタート計算の開始時刻 \\
+\verb| TIME_STARTMS               = 0.D0,                 | & 計算開始時刻[mili sec]\\
+\verb| TIME_DURATION              = 12.0D0,               | & 積分時間[単位は\verb|TIME_DURATION_UNIT|で設定]\\
+\verb| TIME_DURATION_UNIT         = "HOUR",               | & \verb|TIME_DURATION|の単位 \\
+\verb|  .....  略  .....                                  | & \\
+\verb| TIME_DT_ATMOS_RESTART      = 21600.D0,             | & リスタートファイル(大気)の出力間隔\\
+\verb| TIME_DT_ATMOS_RESTART_UNIT = "SEC",                | & \verb|TIME_DT_ATMOS_RESTART|の単位\\
+\verb| TIME_DT_OCEAN_RESTART      = 21600.D0,             | & リスタートファイル(海洋)の出力間隔\\
+\verb| TIME_DT_OCEAN_RESTART_UNIT = "SEC",                | & \verb|TIME_DT_OCEAN_RESTART|の単位\\
+\verb| TIME_DT_LAND_RESTART       = 21600.D0,             | & リスタートファイル(陸面)の出力間隔\\
+\verb| TIME_DT_LAND_RESTART_UNIT  = "SEC",                | & \verb|TIME_DT_LAND_RESTART|の単位\\
+\verb| TIME_DT_URBAN_RESTART      = 21600.D0,             | & リスタートファイル(都市)の出力間隔\\
+\verb| TIME_DT_URBAN_RESTART_UNIT = "SEC",                | & \verb|TIME_DT_URBAN_RESTART|の単位\\
+\verb|/| & \\
+}
+
+リスタートファイルの出力間隔は、\nmitem{TIME_DT_ATMOS_RESTART}, \nmitem{TIME_DT_OCEAN_RESTART}, \\
+ \nmitem{TIME_DT_LAND_RESTART}, \nmitem{TIME_DT_URBAN_RESTART} で指定する。
+これらが指定されていない場合は、積分時刻の最終時刻\nmitem{TIME_DURATION}にリスタートファイルが作成される。
+出力されるリスタートファイルの名前は、\nmitem{RESTART_IN_BASENAME}で指定する。
+%
+\nmitem{RESTART_OUT_POSTFIX_TIMELABEL}は、\nmitem{RESTART_OUT_BASENAME}の後のファイル名に出力時の日時を自動的に追加するかを指定する。
+デフォルト設定は、\nmitem{RESTART_OUT_POSTFIX_TIMELABEL} = \verb|.true.|である。
+
+リスタートファイルは、全てのシミュレーションに対する互換性はない。
+リスタートファイルに含まれる変数は、設定ファイルで選択したスキームによって異なる。
+整合性を担保したリスタートファイルを用意するための簡単な方法は、
+一連のシミュレーションにおいてスキームに対して同じ設定を使用することである。
+
+他の設定は、通常のランと基本的に同じである。
+\nmitem{RESTART_IN_BASENAME}は、
+大気や表面サブモデルの初期状態を含む入力ファイルの名前である。
+通常のランでは\verb|scale-rm_init|で準備した\verb|init_***|を用いるが、
+リスタートランでは前のランで出力されたリスタートファイルを用いる。
+
+%
+\nmitem{RESTART_IN_POSTFIX_TIMELABEL}は\nmitem{RESTART_OUT_POSTFIX_TIMELABEL}と同様であるが、\\
+\nmitem{RESTART_IN_BASENAME}に対する日時の付加を指定する。
+デフォルト設定では、\nmitem{RESTART_IN_POSTFIX_TIMELABEL} = \verb|.false.|である。\\
+上記の例において、\nmitem{RESTART_IN_BASENAME} = \verb|"restart1_d01_20070715-000000.000"| と設定することは、
+\nmitem{RESTART_IN_POSTFIX_TIMELABEL} = \verb|.true.|として\nmitem{RESTART_IN_BASENAME} = \verb|"restart1_d01"| と設定することと等価である。
+リスタート計算の開始日時や積分時間はそれぞれ、\nmitem{TIME_STARTDATE}と\nmitem{TIME_DURATION}で指定する。
+
+現実大気実験の場合は、初期値データに加えて\verb|scale-rm_init|で作成した境界値データが必要である。以下に例を示す。
+\editboxtwo{
+\verb|&PARAM_ATMOS_BOUNDARY| & \\
+\verb| ATMOS_BOUNDARY_TYPE           = "REAL",                            | & 現実実験の場合は\verb|"REAL"|。\\
+\verb| ATMOS_BOUNDARY_IN_BASENAME    = "../init/output/boundary_d01",     | & 境界値データのファイル名の頭。\\
+\verb|/| & \\
+}
+
+リスタート計算において、境界値データの適切な日時は、境界値ファイル\verb|boundary_***.nc| から読み込まれる。

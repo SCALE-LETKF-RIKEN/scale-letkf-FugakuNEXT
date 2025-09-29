@@ -1,0 +1,52 @@
+\documentclass[a4paper]{report}
+%##########################################################################################
+\input{00_version}
+\title{{\Huge USERS GUIDE for SCALE-GM\\
+        \vspace{2cm}{\Large Version \version} }}
+\vspace{3cm}
+\author{\Large Team SCALE\\ UGC working group}
+\vspace{3cm}
+\date{\today}
+\vspace{3cm}
+
+\usepackage[dvipdfmx]{graphicx}
+%\usepackage{amsmath}
+%\usepackage{ascmac}
+%\usepackage[round]{natbib}
+\usepackage{tabularx}
+\usepackage{color}
+\usepackage{colortbl}
+%\usepackage{fancybox}
+\usepackage{url}
+\usepackage[top=30mm,bottom=35mm,left=30mm,right=30mm]{geometry}
+
+\begin{document}
+\maketitle
+
+
+
+\clearpage
+\tableofcontents
+
+\chapter{Introduction}
+\input{01intro}
+
+\chapter{Quick Start}
+\input{02start}
+
+\chapter{Change Model Configurations}
+\input{03conf}
+
+%\clearpage
+%\input{04test}
+
+\clearpage
+\input{../gm_jp/Refs}
+
+\begin{appendix}
+\chapter{Appendix: Configuration Parameters}
+\input{Aparam}
+\end{appendix}
+
+%##########################################################################################
+\end{document}

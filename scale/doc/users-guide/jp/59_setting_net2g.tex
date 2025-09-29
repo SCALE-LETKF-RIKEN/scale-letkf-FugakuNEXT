@@ -1,0 +1,266 @@
+%-------------------------------------------------------------------------------
+\section{Netcdf2grads (net2g)} \label{sec:net2g}
+%-------------------------------------------------------------------------------
+
+\verb|net2g|には2つの役割があり、
+[i] ノード毎に分割されたヒストリファイル(\verb|history.***.nc|）を結合し、
+[ii] {\grads}で読み込めるバイナリ形式に変換することを行う。
+\verb|net2g|はMPI並列プログラムとしても実行できる。
+その他、net2gの機能として以下が利用できる。
+%
+\begin{itemize}
+ \item モデル面から任意の高度面や圧力面へのデータ内挿
+ \item 3次元変数に対する鉛直カラム中の平均値・最大値・最小値、鉛直積算値の出力
+ \item 3次元変数を鉛直層ごとに分割したファイルとして出力
+ \item 時間ステップごとに分割したファイルとして出力
+\end{itemize}
+
+net2gのインストール方法は、第\ref{sec:compile_net2g}節を参照されたい。
+なお、現行のnet2gには下記の制約が存在することに注意が必要である。
+\begin{itemize}
+ \item net2gに使用するMPIプロセス数は、
+\scalerm 実行時のMPIプロセス数の約数でなければならない。
+\item \namelist{PARAM_FILE_HISTORY_CARTESC}の\nmitem{FILE_HISTORY_CARTESC_BOUNDARY}を\verb|.false. |に設定して、
+\scalerm のヒストリファイルを出力する必要がある。
+ \item 2次元データと3次元データは同時に変換できない。
+ \item 変換できるデータはhistoryデータのみである。
+\end{itemize}
+また、MPIプロセス数を多く取りすぎると、実行速度が落ちることに注意されたい。
+
+
+MPI並列を用いる場合には、\verb|net2g|は以下のように実行する。
+\begin{verbatim}
+ $ mpirun  -n  [プロセス数]  ./net2g  net2g.conf
+\end{verbatim}
+最後の引数の\verb|net2g.conf|は、\verb|net2g|に対する設定ファイルである。
+一方、シングルプロセス版として\verb|net2g|をコンパイルした場合は、
+\begin{verbatim}
+ $ ./net2g  net2g.conf
+\end{verbatim}
+と実行する。
+
+エラーなく次のメッセージだけが表示されていれば、実行は正常に終了している。\\
+
+\noindent {\gt
+\fbox{
+\begin{tabularx}{150mm}{l}
+\verb|+++ MPI COMM: Corrective Finalize| \\
+\end{tabularx}
+}}\\
+
+次に、2次元変数や3次元変数を変換する場合の設定ファイルの記述方法を説明する。
+ここでは、\texttt{scale-\version/scale-rm/util/netcdf2grads\_h/} にあるサンプル設定ファイル
+\verb|net2g.3d.conf|と\verb|net2g.2d.conf|に基づいて説明する。
+本節では主要な設定項目だけを取り上げることにして、
+他のオプションについては、\texttt{scale-\version/scale-rm/util/netcdf2grads\_h/}にある
+ファイル\verb|README.net2g.conf|に記載されている説明を参照されたい。
+
+
+\subsubsection{設定ファイル例：3次元変数の変換}
+%------------------------------------------------------
+
+\editbox{
+\verb|&LOGOUT| \\
+\verb| LOG_BASENAME   = "LOG_d01_3d",| \\
+\verb| LOG_ALL_OUTPUT = .false.,| \\
+\verb|/| \\
+ \\
+\verb|&INFO| \\
+\verb| TIME_STARTDATE = 2000, 1, 1, 0, 0, 0,| \\
+\verb| START_TSTEP    = 1,| \\
+\verb| END_TSTEP      = 25,| \\
+\verb| DOMAIN_NUM     = 1,| \\
+\verb| CONFFILE       = "../run/run.d01.conf",| \\
+\verb| IDIR           = "../run",| \\
+\verb| Z_LEV_TYPE     = "plev",| \\
+\verb| MAPPROJ_ctl    = .true. | \\
+\verb|/| \\
+ \\
+\verb|&VARI| \\
+\verb| VNAME       = "PT","U","V","W","QHYD",| \\
+\verb| TARGET_ZLEV = 850,500,200,| \\
+\verb|/| \\
+}
+上記の例では、ある領域の3次元変数を気圧高度面へ内挿して出力する場合の設定を示している。
+各設定項目は次のとおりである。
+\begin{itemize}
+ \item \namelist{LOGOUT}（このネームリストは必須ではない）
+ \begin{itemize}
+  \item \nmitem{LOG_BASENAME}：デフォルトのLOGファイル名「LOG」を変更したいときに指定する。
+  \item \nmitem{LOG_ALL_OUTPUT}：0番以外のプロセスもLOGファイルに出力させたい場合に、
+  ``true''にする。デフォルト値は``false''である。
+ \end{itemize}
+ \item \namelist{INFO}
+ \begin{itemize}
+  \item \nmitem{TIME_STARTDATE}：変換するNetCDFデータの最初の日時を指定。
+  \item \nmitem{START_TSTEP}：変換するNetCDFデータの最初の時間ステップを指定する。
+  最初のいくつかのステップを飛ばしたい場合に適切な値を指定する。デフォルト値は1である。
+  \item \nmitem{END_TSTEP}：変換するNetCDFデータの最後の時間ステップを指定する。必ず指定すること。
+  \item \nmitem{DOMAIN_NUM}：ドメイン番号を指定する。デフォルト値は1である。
+  \item \nmitem{CONFFILE}：\scalerm 実行時の\verb|run.***.conf|のパスを指定する
+        （ファイル名を含む）。
+  \item \nmitem{IDIR}：\scalerm のヒストリファイルのパスを指定する。
+  \item \nmitem{Z_LEV_TYPE}：鉛直方向のデータ変換の種類を指定する。\verb|"original"|はモデル面を表す。
+        \verb|"plev"|は気圧面、\verb|"zlev"|は高度面に内挿して出力する。
+        \verb|"anal"|を指定すると簡易解析を行なった結果を出力する（詳細は後ほど説明）。
+        デフォルト値は\verb|"plev"|である。
+  \item \nmitem{MAPPROJ_ctl}：\verb|pdef|を使った投影図法に対応した「ctl」ファイルを出力するかどうか。現在は、ランベルト図法にのみ対応。
+ \end{itemize}
+ \item \namelist{VARI}
+ \begin{itemize}
+  \item \nmitem{VNAME}：変換したい変数の名前を指定。
+  デフォルトでは、\verb|"PT"|,\verb|"PRES"|,\verb|"U"|,\verb|"V"|, \verb|"W"|,\verb|"QHYD"|が指定される。
+  \item \nmitem{TARGET_ZLEV}：\nmitem{Z_LEV_TYPE}に応じた変換高度を指定。
+        \verb|"plev"|の場合の単位は[hPa]、
+        \verb|"zlev"|の場合の単位は[m]である。
+        また、\verb|"original"|の場合には格子点番号で指定する。
+        デフォルトでは、14層(1000hPa、975hPa、950hPa、925hPa、900hPa、850hPa、800hPa、700hPa、600hPa、500hPa、400hPa、300hPa、250hPa、200 hPa)が
+        指定される。
+ \end{itemize}
+\end{itemize}
+
+\subsubsection{設定ファイルの変更例：3次元変数の鉛直積算値を出力}
+%------------------------------------------------------
+以下では、簡易解析を利用する場合の設定ファイルの例を記述する。
+他の項目の設定は、前の設定と同じである。
+\editbox{
+\verb|&INFO| \\
+\verb|   〜  ...  〜  |\\
+\verb| Z_LEV_TYPE  = "anal",| \\
+\verb| ZCOUNT      = 1,| \\
+\verb|/| \\
+ \\
+\verb|&ANAL| \\
+\verb| ANALYSIS    = "sum",| \\
+\verb|/| \\
+ \\
+\verb|&VARI| \\
+\verb| VNAME       = "QC","QI","QG",| \\
+\verb|/| \\
+}
+
+\nmitem{Z_LEV_TYPE}を\verb|"anal"|に指定すると、
+3次元変数に対して簡易解析が行われる。
+この設定によって、\namelist{ANAL}の項目を指定できるようになる。
+出力データは水平2次元データであるので、
+\namelist{VARI}の\nmitem{TARGET_ZLEV}は指定できず、
+\textcolor{blue}{\namelist{INFO}の\nmitem{ZCOUNT}は必ず「1」と指定する。}
+
+\begin{itemize}
+ \item \namelist{ANAL}
+ \begin{itemize}
+  \item \nmitem{ANALYSIS}：鉛直次元のの簡易解析の種類を指定する。
+  \verb|"max"|と\verb|"min"|はそれぞれ鉛直カラム中の最大値と最小値を表す。
+  また、\verb|"max"|は鉛直カラム積算値、\verb|"ave"|を指定すると鉛直カラム平均値を算出する。デフォルト値は\verb|"ave"|である。
+ \end{itemize}
+\end{itemize}
+
+\subsubsection{設定ファイル例：2次元変数の変換}
+\label{subsec:net2g_2d}
+%------------------------------------------------------
+以下の例は、ある領域の2次元変数を変換する場合の設定を示している。
+\textcolor{blue}{\namelist{INFO}の\nmitem{ZCOUNT}には必ず"1"を指定する。}
+\editbox{
+\verb|&LOGOUT| \\
+\verb| LOG_BASENAME   = "LOG_d01_2d",| \\
+\verb|/| \\
+ \\
+\verb|&INFO| \\
+\verb| TIME_STARTDATE = 2000, 1, 1, 0, 0, 0,| \\
+\verb| START_TSTEP = 1,| \\
+\verb| END_TSTEP   = 25,| \\
+\verb| DOMAIN_NUM  = 1,| \\
+\verb| CONFFILE    = "../run/run.d01.conf",| \\
+\verb| IDIR        = "../run",| \\
+\verb| ZCOUNT      = 1,| \\
+\verb| MAPPROJ_ctl = .true.|\\
+\verb|/| \\
+ \\
+\verb|&VARI| \\
+\verb| VNAME       = "T2","MSLP","PREC"| \\
+\verb|/| \\
+}
+
+
+\subsubsection{設定ファイルの変更例：特殊な時間軸を持つデータの変換}
+%------------------------------------------------------
+
+第\ref{sec:output}節で説明したように、
+変数の出力間隔は基本的に\nmitem{FILE_HISTORY_DEFAULT_TINTERVAL}で定義する。
+しかし、\namelist{HISTORY_ITEM}の\nmitem{TINTERVAL}に\nmitem{HISTORY_DEFAULT_TINTERVAL}とは異なる値を与えることで、特定の変数の出力間隔を変更することができる。
+\verb|net2g|では、異なる出力間隔を持った変数のデータ変換に対応しており、
+\namelist{EXTRA}を設定すればこれを行える。
+下記の例では、第\ref{sec:output}節の最後で説明した例
+（二次元データの\verb|"RAIN"|のみ600秒の間隔で出力）において、
+追加や修正が必要なネームリストを示している。
+
+ヒストリファイルでは、複数の異なる時間間隔を持ったデータを取り扱うことができる。
+しかし、net2gでは異なる出力時間間隔をもつ変数を同時に変換することはできないため、
+その場合はこれらの変数に対して別々に\verb|net2g|を実行する必要がある。
+
+\editbox{
+\verb|&EXTRA| \\
+\verb| EXTRA_TINTERVAL = 600.0,| \\
+\verb| EXTRA_TUNIT     = "SEC",| \\
+\verb|/| \\
+ \\
+\verb|&VARI| \\
+\verb| VNAME = "RAIN",| \\
+\verb|/| \\
+}
+
+\subsubsection{緯度経度に関する注意点}
+\scalerm において、経度と緯度に対する変数名はそれぞれ「lon」と「lat」である。
+これらの名前は \grads で予約語として使われているため、\verb|net2g|による出力では経度の変数名を「long」、緯度の変数名を「lat」に置き換えている。
+
+\subsubsection{大型並列計算機における実行の注意点}
+大型計算機で計算を行った場合は、出力ファイルの数が多く、各ファイルのサイズも大きい。
+そのような場合に、手元のディスクの容量がデータを保管するには不十分であったり、
+後処理に膨大な時間がかかることがある。
+このような場合には、\scalerm 本体の計算を行ったスーパーコンピュータ上で後処理も行うことを推奨する。
+%% サポート外（今後、統合サポート予定）
+%%
+%% \subsection{バルクジョブ対応版の使用方法}
+%% %------------------------------------------------------
+
+%% \ref{sec:bulkjob}節で説明した「複数の実験を一括実行するバルクジョブ機能」を用いてSCALEを走らせた場合は、
+%% バルクジョブ対応版のnet2gを利用するのが便利である。コンパイルは、通常版のnet2gと同じである。
+%% ``scale/scale-rm/util/netcdf2grads\_bulk''の下で\ref{sec:compile_net2g}節で説明したとおりの方法で
+%% コンパイルすれば、バルクジョブ対応版のnet2gが生成される。
+
+%% 基本的な使用方法や制限事項も通常版のnet2gと同じである。net2gに渡す設定ファイルなどの記述も通常版と
+%% 同じように記述すればよい。ただし、実行にあたっては``launch.conf''が必要になることと、\ref{sec:bulkjob}節で
+%% 説明したバルクジョブ実行時のディレクトリ構造を準備する必要がある。SCALE本体をバルクジョブ機能で実行した
+%% 場合にはディレクトリ構造はすでに準備されているため新たに用意する必要はない。net2gに渡す設定ファイルだけ、
+%% 各バルク番号のディレクトリ下に設置すればよい。以下に、launch.confファイルの記述例を挙げておく。\\
+
+%% \noindent {\small {\gt
+%% \ovalbox{
+%% \begin{tabularx}{150mm}{l}
+%% \verb|&PARAM_LAUNCHER| \\
+%% \verb| NUM_BULKJOB = 31,| \\
+%% \verb| NUM_DOMAIN  = 2,| \\
+%% \verb| PRC_DOMAINS = 12,36,| \\
+%% \verb| CONF_FILES  = net2g.3d.d01.conf,net2g.3d.d02.conf,| \\
+%% \verb|/| \\
+%% \end{tabularx}
+%% }}}\\
+
+%% \noindent この例の場合、一度に31個のジョブを実行している。また1つのジョブは2段オンライン・ネスティング実験
+%% となっており、net2gの実行にあたってはdomain 1は12-MPI並列、domain 2は36-MPI並列で実行される。ここで
+%% 指定するMPIプロセス数は、SCALE本体の実行時に使用したMPIプロセス数の約数でなければならない。
+
+%% それぞれのドメインについて実行するnet2gの設定ファイルは、
+%% それぞれ``net2g.3d.d01.conf''と``net2g.3d.d02.conf''と指定されている。
+%% この設定ファイルは31個のバルク番号ディレクトリの中に
+%% 収められてことを想定している。
+
+%% この例では、1つのジョブあたり、$12 + 36 = 48$プロセスを使用し、全体で31ジョブあるので総計で1488プロセスを
+%% 必要とする。下記のコマンドのように実行する。
+
+%% \begin{verbatim}
+%%  $ mpirun  -n  1488  ./net2g  launch.conf
+%% \end{verbatim}
+
+
+%####################################################################################

@@ -1,0 +1,186 @@
+\documentclass[a4paper]{jreport}
+\input{00_version}
+\title{{\vspace{2cm}{\Large Version \version} }}
+\author{\Large Team SCALE\\ UGC working group}
+\date{\西暦{\today}}
+
+\usepackage[dvipdfmx]{graphicx, color}
+\usepackage[dvipdfmx]{hyperref}
+\usepackage{amsmath}
+\usepackage{ascmac}
+\usepackage{alltt}
+\usepackage{color}
+\usepackage{colortbl}
+\usepackage{comment}
+\usepackage{enumerate}
+\usepackage{fancybox}
+\usepackage[round]{natbib}
+\usepackage{longtable}
+\usepackage{pxjahyper}
+\usepackage{tabularx}
+\usepackage{url}
+\hypersetup{% options for hyperref
+ bookmarksopen=true,
+ bookmarksnumbered=true,
+ colorlinks=true,
+% linkcolor=red,
+ linkcolor=cyan,
+ citecolor=cyan,
+ urlcolor=cyan,
+}
+
+\makeatletter
+\@addtoreset{chapter}{part}
+\makeatother
+
+%\setlength{\textwidth}{42zw}
+%\setlength{\textheight}{40\baselineskip}
+\usepackage[top=30mm,bottom=35mm,left=30mm,right=30mm]{geometry}
+\usepackage{wallpaper}
+%\renewcommand{\thefootnote}{\fnsymbol{footnote}}
+\renewcommand{\thefootnote}{*\arabic{footnote})}
+\renewcommand{\thepart}{\arabic{part}}
+\renewcommand{\thechapter}{\arabic{part}.\arabic{chapter}}
+\renewcommand{\prechaptername}{}
+\renewcommand{\postchaptername}{}
+\input{local_macro}
+
+
+\begin{document}
+\CenterWallPaper{1.0}{../../figure/title_wallpaper.pdf}
+\maketitle
+\ClearWallPaper
+\ULCornerWallPaper{.1}{../../figure/scale_logo_final_ULWB.pdf}
+\tableofcontents
+
+%-----------------------------------------------------------------------
+% Part and chapter are defined in this main tex file.
+% Sections are defined in each input tex file.
+%-----------------------------------------------------------------------
+
+\part{概要} \label{part:overview}
+ \chapter{はじめに} \label{sec:introduction}
+ \input{11_introduction}
+ \chapter{表記上の注意} \label{sec:notation}
+ \input{12_notation}
+
+\part{インストール} \label{part:install}
+ \chapter{準備}
+ \input{21_install_prep}
+ \chapter{\scalelib のコンパイル}
+ \input{22_install_compile}
+ \chapter{後処理ツールのコンパイル}
+ \input{23_install_postp}
+
+\part{\scalerm のチュートリアル}
+\chapter{動作確認と基本操作について} \label{chap:tutorial_ideal}
+\input{31_ideal_exp_introduction}
+\input{32_ideal_exp_run}
+\input{33_ideal_exp_sno}
+\input{34_ideal_exp_last}
+
+%\chapter{理想大気実験}
+
+\chapter{現実大気実験} \label{chap:tutorial_real}
+\input{41_real_exp_introduction}
+\input{42_real_exp_data}
+\input{43_real_exp_prep}
+\input{44_real_exp_pp}
+\input{45_real_exp_init}
+\input{46_real_exp_run}
+\input{47_real_exp_sno}
+
+%\part{Tutorial for \scalegm}
+% \chapter{Operation check and basic usage}
+% \input{gm_01intro}
+% \input{gm_02basic}
+% \chapter{Ideal atomsphere experiment}
+% \input{gm_03conf}
+% \chapter{Real atomsphere experiment}
+
+\part{各種設定} \label{part:basic_usel}
+
+\chapter{前処理}
+  \input{53_setting_topo}
+  \input{54_setting_howtoinput}
+  \clearpage
+  \input{setting_userdata}
+
+ \chapter{\scalerm のフレームワーク}
+   \input{513_setting_makeconf}
+   \input{514_setting_convert4conf}
+  \clearpage
+  \input{51_setting_domain}
+  \clearpage
+  \input{52_setting_mapproj}
+  \clearpage
+  \input{55_setting_time}
+  \input{56_setting_history}
+  \input{510_setting_restart}
+  \clearpage
+  \input{511_0setting_nesting}
+  \input{511_1setting_nesting_topo}
+  \input{511_2setting_offline_nesting}
+  \input{511_3setting_online_nesting}
+
+ \chapter{力学コアの設定}
+ \input{57_setting_dynamics}
+ %input \section{Dynamical core for \scalegm} here
+
+
+ \chapter{物理過程の設定} \label{sec:basic_usel_physics}
+ \input{58_setting_physics_mp}
+ \input{58_setting_physics_cp}
+ \input{58_setting_physics_tb}
+ \input{58_setting_physics_bl}
+ \input{58_setting_physics_rd}
+ \input{58_setting_physics_sf}
+ \input{58_setting_physics_Ocn}
+ \input{58_setting_physics_Lnd}
+ \input{58_setting_physics_Urb}
+
+ \chapter{共通の設定}
+ \input{515_setting_log}
+ \input{56_setting_monitor}
+ \clearpage
+ \input{516_setting_common}
+
+
+ \chapter{後処理} \label{sec:basic_usel_post}
+ \input{59_setting_sno.tex}
+
+ \part{詳細説明 (応用編)} \label{part:advance_use}
+ \chapter{\scalelib におけるファイル入出力}
+ \input{61_detail_netcdf}
+ %\input{file_convention_scale}
+ %\input section{Binary data format for input data}
+ %\input section{Data format for topography/landuse data}
+
+ \chapter{ユーザーが作成したプログラムの組み込み方}
+ \input{62_moduser}
+ \chapter{\scalelib ライブラリの使い方}
+ \input{62_uselibrary}
+ \input{62_doxygen}
+
+ \chapter{バルクジョブの実行方法}
+ \input{63_setting_bulkjob}
+
+\bibliographystyle{plainnat}
+\bibliography{../../reference}
+
+\begin{appendix}
+\part{付録}
+%\chapter{ライブラリ環境のインストール} \label{achap:env_setting}
+%\input{A1_setting_for_install}
+%\chapter{設定ファイル"run.conf"のネームリストと出力変数リスト} \label{achap:namelist}
+%\input{A2_namelist}
+\chapter{よくある質問とその回答 : FAQ} \label{achap:practice}
+\input{A3_practice1_Q}
+\input{A3_practice2_A}
+\end{appendix}
+
+%backmatter
+\ClearWallPaper
+\input{back_matter}
+
+\end{document}

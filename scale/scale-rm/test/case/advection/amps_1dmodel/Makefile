@@ -1,0 +1,32 @@
+################################################################################
+#
+# Makefile for each test program
+#
+################################################################################
+
+PWD         = $(shell pwd)
+TOPDIR      = $(abspath ../../../../..)
+TESTDIR     = ../../..
+
+
+# user-defined source files
+CODE_DIR    = .
+ORG_SRCS    = mod_user.F90
+
+# parameters for run
+INITCONF    = init.conf
+RUNCONF     = run.conf
+SNOCONF     = sno.conf
+TPROC       = 5
+TPROC_SNO   = 1
+
+# required data (parameters,distributed files)
+DATPARAM    = " [ $(SCALE_DB)/AMPS AMPS_DATA ] \
+	        [ $(TOPDIR)/data/mp/AMPS/AMPSTASK.F AMPSTASK.F ] \
+	        [ $(TOPDIR)/data/mp/AMPS/seedini_0m seedini_0m ] "
+DATDISTS    = 
+
+
+
+# build, makedir, run, jobshell, allclean, clean is inside of common Makefile
+include $(TESTDIR)/Makefile.common

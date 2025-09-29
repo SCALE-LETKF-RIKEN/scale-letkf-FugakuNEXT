@@ -1,0 +1,39 @@
+SCALE-LETKF
+=========
+
+SCALE-LETKF is a LETKF data assimilation package for the SCALE-RM model.
+
+* See the following ULR for more details
+  https://github.com/SCALE-LETKF-RIKEN/scale-letkf
+
+
+Get the submodule
+-----------------
+- after cloning the SCALE repository, additional commands are needed to get the submodule
+ % git submodule init
+ % git submodule update
+
+Build
+-----
+- build the SCALE-RM first (set up SCALE_SYS environmental variable)
+ % cd scale-rm/src
+ % make
+
+- link or copy the configuration file
+ % cd letkf/scale
+ % ln -s arch/configure.user.Linux64-gnu-ompi configure.user # example
+
+- make all letkf programs
+ % make
+
+- link or copy the configuration files for the test case
+ % cd letkf/scale/run
+ % ln -s config/18km_Japan/config.main.Linux_torque config.main
+ % ln -s config/18km_Japan/config.cycle .
+ % ln -s config/18km_Japan/config.nml.* .
+
+- edit 'config.main', make sure all data files are in the correct locations
+ % vi config.main
+
+- run the test case
+ % ./cycle_run.sh

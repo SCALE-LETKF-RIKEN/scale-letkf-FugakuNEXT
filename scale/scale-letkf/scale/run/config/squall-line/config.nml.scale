@@ -1,0 +1,209 @@
+&PARAM_IO
+!--IO_LOG_BASENAME--
+ IO_LOG_ALLNODE = .false.,
+/
+
+&PARAM_ATMOS_PHY_BL_VARS
+ATMOS_PHY_BL_RESTART_IN_BASENAME="",
+/
+
+&PARAM_FILE
+!--FILE_AGGREGATE--
+/
+
+&PARAM_FILE_CARTESC
+ FILE_CARTESC_datacheck_criteria = 1.0D-3,
+/
+
+&PARAM_TIME
+!--TIME_STARTDATE--
+ TIME_STARTMS               = 0.0,
+!--TIME_DURATION--
+ TIME_DURATION_UNIT         = "SEC",
+ TIME_DT                    = 2.5,
+ TIME_DT_UNIT               = "SEC",
+ TIME_NSTEP_ATMOS_DYN       = 5,
+ TIME_DT_ATMOS_DYN_UNIT     = "SEC",
+ TIME_DT_ATMOS_PHY_MP       = 5.0,
+ TIME_DT_ATMOS_PHY_MP_UNIT  = "SEC",
+!--TIME_DT_ATMOS_RESTART--
+ TIME_DT_ATMOS_RESTART_UNIT = "SEC",
+!--TIME_DT_OCEAN_RESTART--
+ TIME_DT_OCEAN_RESTART_UNIT = "SEC",
+!--TIME_DT_LAND_RESTART--
+ TIME_DT_LAND_RESTART_UNIT  = "SEC",
+!--TIME_DT_URBAN_RESTART--
+ TIME_DT_URBAN_RESTART_UNIT = "SEC",
+!--TIME_END_RESTART_OUT--
+/
+
+&PARAM_COMM_CARTESC_NEST
+!--ONLINE_DOMAIN_NUM--
+!--ONLINE_IAM_PARENT--
+!--ONLINE_IAM_DAUGHTER--
+ ONLINE_BOUNDARY_USE_QHYD = .true.,
+ ONLINE_AGGRESSIVE_COMM   = .true.,
+ ONLINE_SPECIFIED_MAXRQ   = 10000,
+/
+
+&PARAM_STATISTICS
+ STATISTICS_checktotal     = .false.,
+ STATISTICS_use_globalcomm = .false.,
+/
+
+&PARAM_RESTART
+!--RESTART_OUTPUT--
+!--RESTART_IN_BASENAME--
+!--RESTART_IN_POSTFIX_TIMELABEL--
+!--RESTART_OUT_BASENAME--
+!--RESTART_OUT_POSTFIX_TIMELABEL--
+!--RESTART_OUT_ADDITIONAL_COPIES--
+!--RESTART_OUT_ADDITIONAL_BASENAME--
+/
+
+!&PARAM_LANDUSE
+!LANDUSE_ALLLAND=.true.,
+!!--LANDUSE_IN_BASENAME--
+!/
+
+
+#################################################
+#
+# model configuration: process
+#
+#################################################
+
+&PARAM_PRC_CARTESC
+ PRC_NUM_Y      = 24,
+ PRC_NUM_X      = 1,
+ PRC_PERIODIC_Y = .true.,
+/
+
+#################################################
+#
+# model configuration: region
+#
+#################################################
+
+&PARAM_ATMOS_GRID_CARTESC_INDEX
+ KMAX = 70,
+ IMAX = 1,
+ JMAX = 18,
+ JHALO = 2,
+/
+
+&PARAM_ATMOS_GRID_CARTESC
+ DX = 5000.0,
+ DY = 5000.0,
+ FZ(:) =   250.0,   500.0,   750.0,  1000.0,  1250.0,  1500.0,  1750.0,  2000.0,  2250.0,  2500.0,
+          2750.0,  3000.0,  3250.0,  3500.0,  3750.0,  4000.0,  4250.0,  4500.0,  4750.0,  5000.0,
+          5250.0,  5500.0,  5750.0,  6000.0,  6250.0,  6500.0,  6750.0,  7000.0,  7250.0,  7500.0,
+          7750.0,  8000.0,  8250.0,  8500.0,  8750.0,  9000.0,  9250.0,  9500.0,  9750.0, 10000.0,
+         10250.0, 10500.0, 10750.0, 11000.0, 11250.0, 11500.0, 11750.0, 12000.0, 12250.0, 12500.0,
+         12750.0, 13000.0, 13250.0, 13500.0, 13750.0, 14000.0, 14250.0, 14500.0, 14750.0, 15000.0,
+         15250.0, 15500.0, 15750.0, 16000.0, 16250.0, 16500.0, 16750.0, 17000.0, 17250.0, 17500.0,
+ BUFFER_DZ = 0.0,
+ BUFFER_DY = 100000.0,
+ BUFFER_DX = 0.0,
+/
+
+#################################################
+#
+# model configuration: administrator
+#
+#################################################
+
+&PARAM_CONST
+ CONST_THERMODYN_TYPE = "SIMPLE",
+/
+
+&PARAM_ATMOS
+ ATMOS_DYN_TYPE    = "HEVI",
+ ATMOS_PHY_MP_TYPE = "TOMITA08",
+/
+
+##################################################
+#
+# model configuration: atmosphere
+#
+#################################################
+
+&PARAM_ATMOS_VARS
+ ATMOS_VARS_CHECKRANGE = .true.,
+! ATMOS_RESTART_IN_CHECK_COORDINATES = .false.,
+/
+
+&PARAM_ATMOS_REFSTATE
+ ATMOS_REFSTATE_TYPE = "INIT",
+/
+
+&PARAM_ATMOS_BOUNDARY
+ ATMOS_BOUNDARY_TYPE           = "INIT",
+ ATMOS_BOUNDARY_USE_DENS       = .false.,
+ ATMOS_BOUNDARY_USE_VELZ       = .true.,
+ ATMOS_BOUNDARY_USE_VELY       = .true.,
+ ATMOS_BOUNDARY_USE_VELX       = .false.,
+ ATMOS_BOUNDARY_USE_PT         = .true.,
+ ATMOS_BOUNDARY_USE_QV         = .true.,
+ ATMOS_BOUNDARY_USE_QHYD       = .false.,
+ ATMOS_BOUNDARY_LINEAR_H       = .false.,
+ ATMOS_BOUNDARY_EXP_H          = 2.0,
+/
+
+&PARAM_ATMOS_DYN
+ ATMOS_DYN_TINTEG_LARGE_TYPE          = "EULER",
+ ATMOS_DYN_TINTEG_SHORT_TYPE          = "RK4",
+ ATMOS_DYN_TINTEG_TRACER_TYPE         = "RK3WS2002",
+ ATMOS_DYN_FVM_FLUX_TYPE              = "CD4",
+ ATMOS_DYN_FVM_FLUX_TRACER_TYPE       = "UD3KOREN1993",
+ ATMOS_DYN_FLAG_FCT_TRACER            = .false.,
+ ATMOS_DYN_NUMERICAL_DIFF_COEF        = 1.E-4,
+ ATMOS_DYN_NUMERICAL_DIFF_COEF_TRACER = 0.0,
+ ATMOS_DYN_WDAMP_TAU                  = 10.0,
+ ATMOS_DYN_WDAMP_HEIGHT               = 13.5E+3,
+/
+
+#################################################
+#
+# model configuration: history
+#
+#################################################
+
+&PARAM_FILE_HISTORY
+!--FILE_HISTORY_DEFAULT_BASENAME--
+!--FILE_HISTORY_DEFAULT_TINTERVAL--
+ FILE_HISTORY_DEFAULT_TUNIT     = "SEC",
+ FILE_HISTORY_DEFAULT_TSTATS_OP  = "none",
+ FILE_HISTORY_DEFAULT_DATATYPE  = "REAL4",
+ FILE_HISTORY_DEFAULT_ZCOORD    = "model",
+ FILE_HISTORY_OUTPUT_STEP0      = .true.,
+!--FILE_HISTORY_OUTPUT_WAIT--
+ FILE_HISTORY_OUTPUT_WAIT_TUNIT = "SEC",
+/
+
+&PARAM_FILE_HISTORY_CARTESC
+ FILE_HISTORY_CARTESC_BOUNDARY = .false.,
+ FILE_HISTORY_CARTESC_PRES_NLAYER = 9,
+ FILE_HISTORY_CARTESC_PRES= 1000.0, 925.0, 850.0, 700.0, 500.0, 300.0, 200.0, 100.0, 50.0, 
+/
+&HISTORY_ITEM name='U'    /
+&HISTORY_ITEM name='V'    /
+&HISTORY_ITEM name='W'    /
+&HISTORY_ITEM name='T'   /
+&HISTORY_ITEM name='PT'   /
+&HISTORY_ITEM name='RH'   /
+
+&HISTORY_ITEM name='DENS' / 
+&HISTORY_ITEM name='PRES' / 
+&HISTORY_ITEM name='QHYD' /
+&HISTORY_ITEM name='QV'   /
+&HISTORY_ITEM name='QC'   /
+&HISTORY_ITEM name='QR'   /
+&HISTORY_ITEM name='QI'   /
+&HISTORY_ITEM name='QS'   /
+&HISTORY_ITEM name='QG'   /
+
+&HISTORY_ITEM name='PREC' /
+&HISTORY_ITEM name='RAIN' /
+&HISTORY_ITEM name='SNOW' /
+

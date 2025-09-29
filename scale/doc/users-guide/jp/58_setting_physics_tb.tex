@@ -1,0 +1,37 @@
+\section{\SubsecTurbulenceSetting} \label{sec:basic_usel_turbulence}
+%------------------------------------------------------
+
+Large-eddy シミュレーション(LES)において、サブグリッドスケール乱流モデルは、
+移流項によるサブグリッドスケールへのエネルギーカスケードを表現するために存在する。
+
+乱流スキームの選択は，init.confとrun.conf中の
+\namelist{PARAM_ATMOS}の\nmitem{ATMOS_PHY_TB_TYPE}で設定する。
+乱流スキームを呼び出す時間間隔は、
+\namelist{PARAM_TIME}で設定する(詳細は第\ref{sec:timeintiv}節を参照)。
+
+\editboxtwo{
+\verb|&PARAM_ATMOS  | & \\
+\verb| ATMOS_PHY_TB_TYPE = "SMAGORINSKY", | & ; 表\ref{tab:nml_atm_tb}より選択。\\
+\verb|/             | & \\
+}
+\begin{table}[h]
+\begin{center}
+  \caption{乱流スキームの選択肢}
+  \label{tab:nml_atm_tb}
+  \begin{tabularx}{150mm}{lXX} \hline
+    \rowcolor[gray]{0.9}  スキーム名 & スキームの説明 & 参考文献\\ \hline
+      \verb|OFF|          & 乱流過程を計算しない &  \\
+      \verb|SMAGORINSKY|  & Smagorinsky—Lilly 型のサブグリッドスケール乱流モデル & \citet{smagorinsky_1963,lilly_1962,Brown_etal_1994,Scotti_1993} \\
+      \verb|D1980|        & Deardorff 型のサブグリッドスケール乱流モデル & \citet{Deardorff_1980} \\
+    \hline
+  \end{tabularx}
+\end{center}
+\end{table}
+
+\verb|SMAGORINSKY|スキームは、 RANS計算での水平渦粘性としても使用できる。
+惑星境界層パラメタリゼーション(第\ref{sec:basic_usel_pbl}節)は、
+鉛直混合のみを取り扱うスキームであり、
+RANS計算において水平粘性を考慮したい場合には、
+水平混合にサブグリッドスケール乱流モデルを利用することができる。
+サブグリッドスケール乱流モデルを惑星境界層パラメタリゼーションと併用する場合、
+\verb|SMAGORINSKY|スキームにおいては鉛直渦粘性は無効になる。

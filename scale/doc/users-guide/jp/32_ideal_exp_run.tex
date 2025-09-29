@@ -1,0 +1,135 @@
+\section{モデルの実行方法} \label{sec:ideal_exp_run}
+%====================================================================================
+
+\subsubsection{実験設定}
+%====================================================================================
+
+理想実験のチュートリアルとして、ここでは、2次元モデルにおける積雲対流の理想実験を実施する。
+この実験では、典型的な大気の鉛直分布と対流圏下層に初期擾乱を与えて、
+積乱雲が発生し発達する過程を計算する。
+表\ref{tab:setting_ideal}に、実験設定を示す。
+
+\begin{table}[htb]
+\begin{minipage}{150mm}
+\begin{center}
+\caption{理想実験の実験設定}
+\begin{tabularx}{150mm}{|l|X|X|} \hline
+ \rowcolor[gray]{0.9} 項目 & 設定内容 & 備考 \\ \hline
+ MPIプロセス数 & 東西：1、南北：2 & 計2プロセスによる並列計算 \\ \hline
+ 水平格子間隔 & 東西：500 m、南北：500 m & 南北-鉛直面を切り取った2次元実験 \\ \hline
+ 水平格子点数 & 東西：1、南北：40 &  \\ \hline
+ 鉛直層数     & 97層（モデル上端: 20 km）& 下層ほど層厚を細かく切ったストレッチ格子を使用 \\ \hline
+ 側面境界条件 & 周期境界 & 東西、南北方向の両方に適用 \\ \hline
+ 時間刻み幅   & 5 sec      & 雲微物理スキームに対しては 10 sec \\ \hline
+ 積分期間     & 3,600 sec  & 合計で 720 ステップ  \\ \hline
+ データ出力間隔 & 300 sec  &  \\ \hline
+ 物理スキーム & 雲微物理スキームのみ使用 &
+ 6-class single moment bulk model \citep{tomita_2008} \\ \hline
+ 初期の鉛直分布 & GCSS Case1 squall-line \citep{Redelsperger2000}&
+ 風の分布は、\citet{Ooyama_2001}に基づいた鉛直シアを設定 \\ \hline
+ 初期擾乱 & 暖気塊(warm bubble) & 半径: 水平 4 km、
+ 鉛直 3 km. 極大値: 3 K. \\ \hline
+\end{tabularx}
+\label{tab:setting_ideal}
+\end{center}
+\end{minipage}
+\end{table}
+
+
+\subsubsection{準備} %\label{subsec:ideal_exp_prepare}
+%------------------------------------------------------
+理想実験は、ディレクトリ\verb|scale-rm/test/tutorial/ideal|の中で実行する。
+このディレクトリに移動し、scale-{\version}/bin にある実行バイナリへの静的リンクを張る。
+\begin{alltt}
+  $ cd scale-rm/test/tutorial/ideal
+  $ ln -s ../../../../bin/scale-rm      ./
+  $ ln -s ../../../../bin/scale-rm_init ./
+\end{alltt}
+ここで、「\verb|scale-rm|」はモデル本体、
+「\verb|scale-rm_init|」は初期値/境界値作成ツールである。
+
+\subsubsection{初期値の作成} \label{subsec:ideal_exp_init}
+%------------------------------------------------------
+初期値の作成には、\verb|scale-rm_init|に与える設定ファイルが必要である。
+設定ファイル\\ \verb|sample/init_R20kmDX500m.conf| には、表\ref{tab:setting_ideal} に対応する実験設定が書かれている。
+この設定ファイルを読み込ませると、\verb|scale-rm_init|は大気の成層構造と初期擾乱を計算する。
+
+\scalerm の実行コマンドの一般的な形式は、
+\begin{alltt}
+  $ mpirun  -n  [プロセス数]  [実行バイナリ名]  [設定ファイル]
+\end{alltt}
+である。
+[プロセス数]にはMPI並列で使用したいプロセス数、
+[実行バイナリ]には\verb|scale-rm|や\verb|scale-rm_init|といった実行バイナリ名を指定する。
+[設定ファイル]には実験設定を記述した設定ファイルを指定する。
+設定ファイルとして\verb|sample/init_R20kmDX500m.conf|を使用し、
+2 プロセスによるMPI並列で\verb|scale-rm_init|を実行する場合には、
+コマンドは
+\begin{alltt}
+  $ cp  sample/init_R20kmDX500m.conf ./init_R20kmDX500m.conf
+  $ mpirun  -n  2  ./scale-rm_init  init_R20kmDX500m.conf
+\end{alltt}
+%
+と記述する。
+\noindent 実行が成功すれば、コマンドラインに以下のメッセージが表示される。\\
+
+\noindent {\small {\gt
+\fbox{
+\begin{tabularx}{150mm}{l}
+ *** Start Launch System for SCALE-RM\\
+ *** Execute preprocess? :  T\\
+ *** Execute model?      :  F\\
+ *** End   Launch System for SCALE-RM\\
+\end{tabularx}
+}}}\\
+
+
+\noindent この実行によって、下記の3つのファイルが、現在のディレクトリ下に作成される。
+\begin{alltt}
+  init_LOG.pe000000
+  init_00000101-000000.000.pe000000.nc
+  init_00000101-000000.000.pe000001.nc
+\end{alltt}
+計算領域の全体は、MPIプロセス数だけ水平方向に分割される。
+ファイル名において\verb|pe|に続く番号は、MPIのプロセス番号を示している。
+ログファイル(\verb|init_LOG.pe000000|)には、
+コマンドラインには表示されない詳細な情報が記録されている。
+この例では 2 つのMPIプロセスを使用しているが、
+デフォルト設定では 0 番目のプロセス(マスターランク)に対するログファイルだけが出力される。
+実行が正常に終了すれば、LOGファイルの最後に\\
+\msgbox{
+ +++++ Closing LOG file\\
+}
+が出力される。
+
+\verb|init_00000101-000000.000.pe000000.nc|と\verb|init_00000101-000000.000.pe000001.nc|の2つのファイルは初期値ファイルであり、
+それぞれ約 600 KBのファイルサイズになる。
+ファイル名の末尾が「.nc」で終わるファイルは {\netcdf}形式のファイルであり、
+GPhys/Ruby-DCL や ncview によって直接読み込める。
+
+
+\subsubsection{シミュレーションの実行} \label{subsec:ideal_exp_run}
+%------------------------------------------------------
+プロセス並列数は、初期値の作成時と同じにする必要がある。
+シミュレーションの実行用の設定ファイルは、\verb|sample/run_R20kmDX500m.conf| である。
+\begin{alltt}
+  $ cp  sample/run_R20kmDX500m.conf  ./run_R20kmDX500m.conf
+  $ mpirun  -n  2  ./scale-rm  run_R20kmDX500m.conf
+\end{alltt}
+
+本書の必要要件にあった計算機であれば、2 分程度で計算が終わる。
+この実行によって、3つのファイル
+\begin{alltt}
+  LOG.pe000000
+  history.pe000000.nc
+  history.pe000001.nc
+\end{alltt}
+が、現在のディレクトリ下に作成される。
+実行が正常に終了すれば、LOGファイルの最後に
+\msgbox{
+ +++++ Closing LOG file\\
+}
+と出力される。
+\verb|history.pe000000.nc| と \verb|history.pe000001.nc|
+の2つのファイルは、計算結果を含むヒストリファイルである。
+これらのファイル形式は{\netcdf}であり、各ファイルのサイズは約1.5 MBである。

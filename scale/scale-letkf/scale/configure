@@ -1,0 +1,58 @@
+TOPDIR    = ../../..
+include $(TOPDIR)/sysdep/Makedef.$(SCALE_SYS)
+include $(TOPDIR)/Mkinclude
+
+SCALE_INC = -I$(TOPDIR)/include$(POSTFIX)
+SCALE_LIB = -L$(TOPDIR)/lib -lscale$(POSTFIX) $(CONTRIB_LIBS)
+SCALE_RM_OBJDIR = $(TOPDIR)/scale-rm/src/.libs$(POSTFIX)
+#SCALE_RM_OBJDIR = $(TOPDIR)/scale-letkf-dev/scale/run/Ullrich15_ext/.libs$(POSTFIX)
+SCALE_RM_OBJS = $(shell ls $(SCALE_RM_OBJDIR)/*.o | grep -v "scale-rm.o\|scale-rm_pp.o\|scale-rm_init.o")
+
+#------
+
+include ../arch/configure.user.$(SCALE_SYS)
+
+NETCDF_INC = $(SCALE_NETCDF_INCLUDE)
+NETCDF_LIB = $(SCALE_NETCDF_LIBS)
+
+### tentative
+ifeq ($(USE_PAWR_DECODER),T)
+FOPTS       += $(FFLAGS_OPENMP)
+FOPTS_SCALE += $(FFLAGS_OPENMP)
+endif
+
+ifeq ($(SCALE_USER_VER),T)
+FOPTS     += -DSCALEUV
+endif
+
+ifeq ($(LETKF_SINGLE_FP),T)
+FOPTS     += -DSINGLE_LETKF
+endif
+
+ifeq ($(LETKF_DEBUG),T)
+FOPTS     += -DLETKF_DEBUG
+endif
+
+ifeq ($(H08),T)
+FOPTS     += -DH08
+FOPTS_SCALE += -DH08
+endif
+
+TOSHIBA_OPT =
+ifeq ($(ENABLE_SAITAMA_MPW),T)
+FOPTS     += -DMPW
+FOPTS_SCALE += -DMPW
+TOSHIBA_OPT = _mpr
+endif
+
+ifeq ($(SINGLE_EVP),T)
+FOPTS     += -DSINGLE_EVP
+endif
+
+ifeq ($(USE_MTX_KEVD),T)
+  FOPTS     += -DKEVD
+  common_mtx = common_mtx_kevd
+else
+  common_mtx = common_mtx_lapack
+  KEVD_LIB = 
+endif

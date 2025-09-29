@@ -1,0 +1,13 @@
+
+&PARAM_USER
+ USER_do = .true.,
+ REFSTATE_IN_BASENAME = "/home/amemiya/test_scale/result/barocwave/refstate/refstate",
+ NUDGE_UV_DAY_TOP = -999.9, 
+ NUDGE_UV_DAY_BOT = 10.0, 
+ NUDGE_UV_TRANS_HEIGHT = 3.0D3,
+ NUDGE_UV_TRANS_WIDTH  = 1.0D3,
+ NUDGE_T_DAY_TOP  = 10.0, 
+ NUDGE_T_DAY_BOT  = 10.0, 
+ NUDGE_T_TRANS_HEIGHT = 3.0D3,
+ NUDGE_T_TRANS_WIDTH  = 1.0D3,
+/

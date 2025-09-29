@@ -1,0 +1,164 @@
+#!/bin/bash
+#===============================================================================
+#
+#  Main settings for SCALE-LETKF scripts
+#
+#===============================================================================
+
+PRESET='FUGAKU'
+
+#===============================================================================
+
+DIR="$(cd "$(pwd)/.." && pwd)"    # Root directory of the SCALE-LETKF
+
+OUTDIR=$DIR/../../../result/squall-line ### EDIT HERE ### 
+INDIR=$OUTDIR
+
+#===============================================================================
+# Location of model/data files
+
+SCALEDIR="$DIR/../.."                  # Directory of the SCALE model
+DATADIR=$SCALE_DB  # Directory of the SCALE database
+
+DATA_BDY_SCALE=
+DATA_TOPO_BDY_SCALE=
+DATA_TOPO=$INDIR                                # Directory of the prepared topo files
+DATA_LANDUSE=$DATA_TOPO                         # Directory of the prepared landuse files
+DATA_BDY_SCALE_PRC_NUM_X=
+DATA_BDY_SCALE_PRC_NUM_Y=
+DATA_BDY_SCALE_PREP=         # Directory of the prepared SCALE boundary files
+DATA_BDY_WRF=                # Directory of the boundary data in WRF format
+DATA_BDY_NICAM=              # Directory of the boundary data in NICAM format (not finished)
+
+DATA_BDY_GRADS=
+
+OBS=$OUTDIR/obs_radar
+
+#===============================================================================
+# model/data file options
+
+DET_RUN=0               # 0: Disable the deterministic run
+                        # 1: Enable  the deterministic run
+
+TOPO_FORMAT='none'     # 'prep': Use prepared topo files in $DATA_TOPO
+                        # 'GTOPO30' (requires compatible 'config.nml.scale_pp')
+                        # 'DEM50M'  (requires compatible 'config.nml.scale_pp')
+
+LANDUSE_FORMAT='none'   # 'prep': Use prepared landuse files in $DATA_LANDUSE
+                        # 'GLCCv2' (requires compatible 'config.nml.scale_pp')
+                        # 'LU100M' (requires compatible 'config.nml.scale_pp')
+LANDUSE_UPDATE=0        # 0: Time-invariant landuse files
+                        # 1: Time-variant landuse files
+
+BDY_FORMAT=5            # 0: SCALE boundary files (with exactly same domain settings; do not need additional preprocessing)
+                        # 1: SCALE history (requires compatible 'config.nml.scale_init')
+                        # 2: WRF           (requires compatible 'config.nml.scale_init')
+                        # 3: NICAM         (requires compatible 'config.nml.scale_init')
+                        # 4: GrADS         (requires compatible 'config.nml.scale_init')
+                        # 5: None          (idealized experiment with sounding)
+
+BDY_SINGLE_FILE=0       # 0: Length of a boundary file = $BDYCYCLE_INT (e.g., files made by data assimilation cycles)
+                        # 1: Length of a boundary file is long enough so that only a single boundary file is used for each forecast
+BDY_SCALE_DIR='fcst'    # Directory name of the SCALE history files when $BDY_FORMAT = 1
+
+BDY_ENS=0               # 0: Fixed boundary files for all memebers
+                        # 1: Ensemble boundary files
+
+# FCST
+BDY_ROTATING=0          # 0: Use a same series of boundary files for all initial time
+                        # 1: Use different series of boundary files for different initial time
+
+
+BDYINT=600
+BDYCYCLE_INT=32400
+
+PARENT_REF_TIME=
+
+ENABLE_PARAM_USER=0     # 0: Do not enable the 'PARAM_USER' section of the SCALE namelist
+                        # 1: Enable the 'PARAM_USER' section of the SCALE namelist (require 'config.nml.scale_user' and customized version of SCALE)
+
+OCEAN_INPUT=0           # 0: No ocean input (use cycling ocean variables)
+                        # 1: Update the ocean variables every cycle
+OCEAN_FORMAT=99         # 0: SCALE init files (with exactly same domain settings; do not need additional preprocessing)
+                        # 99: From the same file as used in generating the boundary conditions ($BDY_FORMAT)
+LAND_INPUT=0            # 0: No land input (use cycling land variables)
+                        # 1: Update the land variables every cycle
+LAND_FORMAT=99          # 0: SCALE init files (with exactly same domain settings; do not need additional preprocessing)
+                        # 99: From the same file as used in generating the boundary conditions ($BDY_FORMAT)
+
+SOUNDING="$DIR/run/env.txt"
+
+OBSNUM=1
+OBSNAME[1]='radar3d'
+
+#===============================================================================
+# Cycling settings
+
+WINDOW_S=300     # SCALE forecast time when the assimilation window starts (second)
+WINDOW_E=300     # SCALE forecast time when the assimilation window ends (second)
+LCYCLE=300       # Length of a DA cycle (second)
+LTIMESLOT=300    # Timeslot interval for 4D-LETKF (second)
+
+#===============================================================================
+# Parallelization settings
+
+MEMBER=32           # Ensemble size
+
+PPN=4               # Number of processes per node
+
+THREADS=12          # Number of threads per process
+
+SCALE_NP_X=24        # = PRC_NUM_X
+SCALE_NP_Y=1         # = PRC_NUM_Y
+SCALE_NP=$(( SCALE_NP_X  * SCALE_NP_Y )) # Number of processes to run SCALE
+
+if (( DET_RUN == 1 ));then
+  NNODES=$(( ( MEMBER + 2 ) * ( SCALE_NP / PPN ) ))
+else
+  NNODES=$(( ( MEMBER + 1 ) * ( SCALE_NP / PPN ) ))
+fi
+
+#===============================================================================
+# Temporary directories to store runtime files
+
+DISK_MODE=0      # Disk I/O mode
+                 # 0: direct I/O -- no intermediate files in $TMP
+                 # 1: use symbolic links in $TMP 
+                 # 2: staging -- copy files to/from $TMP 
+                 # 3: staging -- copy files to/from $TMPL for each node (effective only on Fugaku)
+
+SYSNAME="$(basename $OUTDIR)"
+TMPSUBDIR="scale-letkf_${SYSNAME}"           # (used to identify multiple runs in the same time)
+
+TMP="$DIR/tmp/$TMPSUBDIR" # Temporary directory shared among all nodes
+TMPS="$TMP"  # Temporary directory only on the server node
+TMPL="$TMP"
+
+USE_LLIO_BIN=1   # Use LLIO-transfer for binary files ? (effective only on Fugaku) 
+                 # 0: No 
+                 # 1: Yes
+
+USE_LLIO_DAT=1   # Use LLIO-transfer for shared data files ? (effective only on Fugaku) 
+                 # 0: No 
+                 # 1: Yes
+
+USE_SPACK=0 # 1: Use spack in job scripts
+            # 0: Not use spack in job scripts
+            #    SCALE environment paramters (e.g., SCALE_NETCDF_C) should be exported
+
+#===============================================================================
+# Environmental settings
+
+STAGE_THREAD=8
+TAR_THREAD=8
+
+PYTHON="python"
+
+#===============================================================================
+# Machine-independent source file
+
+. ./config.rc
+
+##USE_INIT_FROM_BDY=1
+
+#===============================================================================
