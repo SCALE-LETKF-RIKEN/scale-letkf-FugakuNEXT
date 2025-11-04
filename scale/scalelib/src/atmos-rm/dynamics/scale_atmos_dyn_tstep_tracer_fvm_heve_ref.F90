@@ -202,6 +202,7 @@ contains
     enddo
     enddo
 
+    !$acc end data
     return
   end subroutine ATMOS_DYN_Tstep_tracer_fvm_heve_ref
 
