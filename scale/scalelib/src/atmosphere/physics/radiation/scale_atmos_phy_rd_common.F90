@@ -37,6 +37,10 @@ module scale_atmos_phy_rd_common
   integer,  public, parameter :: I_LW = 1
   integer,  public, parameter :: I_SW = 2
 
+  ! for cloud type
+  integer,  public, parameter :: I_Cloud    = 1
+  integer,  public, parameter :: I_ClearSky = 2
+
   !-----------------------------------------------------------------------------
   !
   !++ Private procedure

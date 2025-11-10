@@ -204,7 +204,9 @@ contains
        I_SW, &
        I_LW, &
        I_dn, &
-       I_up
+       I_up, &
+       I_Cloud, &
+       I_ClearSky
     use mod_atmos_vars, only: &
        TEMP,              &
        PRES,              &
@@ -283,6 +285,8 @@ contains
 
     real(RP) :: RH(KA,IA,JA)
 
+    logical :: clear_sky
+
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
@@ -327,6 +331,7 @@ contains
             QTRC(:,:,:,:), RH(:,:,:), & ! [IN]
             Re=AE_Re, Qe=AE_Qe        ) ! [IN]
 
+       clear_sky = .true. ! tentative
 
        select case ( ATMOS_PHY_RD_TYPE )
        case ( "MSTRNX" )
@@ -342,17 +347,18 @@ contains
                AE_Re(:,:,:,:), AE_Qe(:,:,:,:),                   & ! [IN]
                flux_rad(:,:,:,:,:,:),                            & ! [OUT]
                flux_rad_top(:,:,:,:,:), SFLX_rad_dn(:,:,:,:),    & ! [OUT]
-               dtau_s = dtau_s(:,:,:), dem_s = dem_s(:,:,:)      ) ! [OUT]
+               clear_sky = clear_sky,                            & ! [IN, optional]
+               dtau_s = dtau_s(:,:,:), dem_s = dem_s(:,:,:)      ) ! [OUT, optional]
 
        case ( "OFFLINE" )
 
           call ATMOS_PHY_RD_offline_flux( &
                KA, KS, KE, IA, IS, IE, JA, JS, JE, &
-               TIME_NOWDAYSEC,        & ! [IN]
-               flux_rad(:,:,:,:,:,2), & ! [OUT]
-               SFLX_rad_dn(:,:,:,:)   ) ! [OUT]
+               TIME_NOWDAYSEC,              & ! [IN]
+               flux_rad(:,:,:,:,:,I_Cloud), & ! [OUT]
+               SFLX_rad_dn(:,:,:,:)         ) ! [OUT]
           !$acc kernels
-          flux_rad(:,:,:,:,:,1)   = 0.0_RP ! clear sky
+          flux_rad(:,:,:,:,:,I_ClearSky)   = 0.0_RP ! clear sky
           flux_rad_top(:,:,:,:,:) = 0.0_RP
           dtau_s(:,:,:) = 0.0_RP
           dem_s(:,:,:) = 0.0_RP
@@ -368,15 +374,17 @@ contains
        do j = JS, JE
        do i = IS, IE
           ! for clear-sky
-          SFCFLX_LW_up_c(i,j)    = flux_rad(KS-1,i,j,I_LW,I_up,1)
-          SFCFLX_LW_dn_c(i,j)    = flux_rad(KS-1,i,j,I_LW,I_dn,1)
-          SFCFLX_SW_up_c(i,j)    = flux_rad(KS-1,i,j,I_SW,I_up,1)
-          SFCFLX_SW_dn_c(i,j)    = flux_rad(KS-1,i,j,I_SW,I_dn,1)
+          if ( clear_sky ) then
+             SFCFLX_LW_up_c(i,j)    = flux_rad(KS-1,i,j,I_LW,I_up,I_ClearSky)
+             SFCFLX_LW_dn_c(i,j)    = flux_rad(KS-1,i,j,I_LW,I_dn,I_ClearSky)
+             SFCFLX_SW_up_c(i,j)    = flux_rad(KS-1,i,j,I_SW,I_up,I_ClearSky)
+             SFCFLX_SW_dn_c(i,j)    = flux_rad(KS-1,i,j,I_SW,I_dn,I_ClearSky)
+          end if
           ! for all-sky
-          SFCFLX_LW_up  (i,j)    = flux_rad(KS-1,i,j,I_LW,I_up,2)
-          SFCFLX_LW_dn  (i,j)    = flux_rad(KS-1,i,j,I_LW,I_dn,2)
-          SFCFLX_SW_up  (i,j)    = flux_rad(KS-1,i,j,I_SW,I_up,2)
-          SFCFLX_SW_dn  (i,j)    = flux_rad(KS-1,i,j,I_SW,I_dn,2)
+          SFCFLX_LW_up  (i,j)    = flux_rad(KS-1,i,j,I_LW,I_up,I_Cloud)
+          SFCFLX_LW_dn  (i,j)    = flux_rad(KS-1,i,j,I_LW,I_dn,I_Cloud)
+          SFCFLX_SW_up  (i,j)    = flux_rad(KS-1,i,j,I_SW,I_up,I_Cloud)
+          SFCFLX_SW_dn  (i,j)    = flux_rad(KS-1,i,j,I_SW,I_dn,I_Cloud)
 
           flux_net_sfc(i,j,I_LW) = SFCFLX_LW_up(i,j) - SFCFLX_LW_dn(i,j)
           flux_net_sfc(i,j,I_SW) = SFCFLX_SW_up(i,j) - SFCFLX_SW_dn(i,j)
@@ -391,15 +399,17 @@ contains
        do j = JS, JE
        do i = IS, IE
           ! for clear-sky
-          TOAFLX_LW_up_c(i,j)    = flux_rad_top(i,j,I_LW,I_up,1)
-          TOAFLX_LW_dn_c(i,j)    = flux_rad_top(i,j,I_LW,I_dn,1)
-          TOAFLX_SW_up_c(i,j)    = flux_rad_top(i,j,I_SW,I_up,1)
-          TOAFLX_SW_dn_c(i,j)    = flux_rad_top(i,j,I_SW,I_dn,1)
+          if ( clear_sky ) then
+             TOAFLX_LW_up_c(i,j)    = flux_rad_top(i,j,I_LW,I_up,I_ClearSky)
+             TOAFLX_LW_dn_c(i,j)    = flux_rad_top(i,j,I_LW,I_dn,I_ClearSky)
+             TOAFLX_SW_up_c(i,j)    = flux_rad_top(i,j,I_SW,I_up,I_ClearSky)
+             TOAFLX_SW_dn_c(i,j)    = flux_rad_top(i,j,I_SW,I_dn,I_ClearSky)
+          end if
           ! for all-sky
-          TOAFLX_LW_up  (i,j)    = flux_rad_top(i,j,I_LW,I_up,2)
-          TOAFLX_LW_dn  (i,j)    = flux_rad_top(i,j,I_LW,I_dn,2)
-          TOAFLX_SW_up  (i,j)    = flux_rad_top(i,j,I_SW,I_up,2)
-          TOAFLX_SW_dn  (i,j)    = flux_rad_top(i,j,I_SW,I_dn,2)
+          TOAFLX_LW_up  (i,j)    = flux_rad_top(i,j,I_LW,I_up,I_Cloud)
+          TOAFLX_LW_dn  (i,j)    = flux_rad_top(i,j,I_LW,I_dn,I_Cloud)
+          TOAFLX_SW_up  (i,j)    = flux_rad_top(i,j,I_SW,I_up,I_Cloud)
+          TOAFLX_SW_dn  (i,j)    = flux_rad_top(i,j,I_SW,I_dn,I_Cloud)
 
           flux_net_toa(i,j,I_LW) = TOAFLX_LW_up(i,j) - TOAFLX_LW_dn(i,j)
           flux_net_toa(i,j,I_SW) = TOAFLX_SW_up(i,j) - TOAFLX_SW_dn(i,j)
@@ -414,15 +424,17 @@ contains
        do j = JS, JE
        do i = IS, IE
           ! for clear-sky
-          TOMFLX_LW_up_c(i,j)    = flux_rad(KE,i,j,I_LW,I_up,1)
-          TOMFLX_LW_dn_c(i,j)    = flux_rad(KE,i,j,I_LW,I_dn,1)
-          TOMFLX_SW_up_c(i,j)    = flux_rad(KE,i,j,I_SW,I_up,1)
-          TOMFLX_SW_dn_c(i,j)    = flux_rad(KE,i,j,I_SW,I_dn,1)
+          if ( clear_sky ) then
+             TOMFLX_LW_up_c(i,j)    = flux_rad(KE,i,j,I_LW,I_up,I_ClearSky)
+             TOMFLX_LW_dn_c(i,j)    = flux_rad(KE,i,j,I_LW,I_dn,I_ClearSky)
+             TOMFLX_SW_up_c(i,j)    = flux_rad(KE,i,j,I_SW,I_up,I_ClearSky)
+             TOMFLX_SW_dn_c(i,j)    = flux_rad(KE,i,j,I_SW,I_dn,I_ClearSky)
+          end if
           ! for all-sky
-          TOMFLX_LW_up  (i,j)    = flux_rad(KE,i,j,I_LW,I_up,2)
-          TOMFLX_LW_dn  (i,j)    = flux_rad(KE,i,j,I_LW,I_dn,2)
-          TOMFLX_SW_up  (i,j)    = flux_rad(KE,i,j,I_SW,I_up,2)
-          TOMFLX_SW_dn  (i,j)    = flux_rad(KE,i,j,I_SW,I_dn,2)
+          TOMFLX_LW_up  (i,j)    = flux_rad(KE,i,j,I_LW,I_up,I_Cloud)
+          TOMFLX_LW_dn  (i,j)    = flux_rad(KE,i,j,I_LW,I_dn,I_Cloud)
+          TOMFLX_SW_up  (i,j)    = flux_rad(KE,i,j,I_SW,I_up,I_Cloud)
+          TOMFLX_SW_dn  (i,j)    = flux_rad(KE,i,j,I_SW,I_dn,I_Cloud)
 
           flux_net_tom(i,j,I_LW) = TOMFLX_LW_up(i,j) - TOMFLX_LW_dn(i,j)
           flux_net_tom(i,j,I_SW) = TOMFLX_SW_up(i,j) - TOMFLX_SW_dn(i,j)
@@ -436,10 +448,10 @@ contains
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
-          flux_up (k,i,j,I_LW) = 0.5_RP * ( flux_rad(k-1,i,j,I_LW,I_up,2) + flux_rad(k,i,j,I_LW,I_up,2) )
-          flux_dn (k,i,j,I_LW) = 0.5_RP * ( flux_rad(k-1,i,j,I_LW,I_dn,2) + flux_rad(k,i,j,I_LW,I_dn,2) )
-          flux_up (k,i,j,I_SW) = 0.5_RP * ( flux_rad(k-1,i,j,I_SW,I_up,2) + flux_rad(k,i,j,I_SW,I_up,2) )
-          flux_dn (k,i,j,I_SW) = 0.5_RP * ( flux_rad(k-1,i,j,I_SW,I_dn,2) + flux_rad(k,i,j,I_SW,I_dn,2) )
+          flux_up (k,i,j,I_LW) = 0.5_RP * ( flux_rad(k-1,i,j,I_LW,I_up,I_Cloud) + flux_rad(k,i,j,I_LW,I_up,I_Cloud) )
+          flux_dn (k,i,j,I_LW) = 0.5_RP * ( flux_rad(k-1,i,j,I_LW,I_dn,I_Cloud) + flux_rad(k,i,j,I_LW,I_dn,I_Cloud) )
+          flux_up (k,i,j,I_SW) = 0.5_RP * ( flux_rad(k-1,i,j,I_SW,I_up,I_Cloud) + flux_rad(k,i,j,I_SW,I_up,I_Cloud) )
+          flux_dn (k,i,j,I_SW) = 0.5_RP * ( flux_rad(k-1,i,j,I_SW,I_dn,I_Cloud) + flux_rad(k,i,j,I_SW,I_dn,I_Cloud) )
 
           flux_net(k,i,j,I_LW) = flux_up(k,i,j,I_LW) - flux_dn(k,i,j,I_LW)
           flux_net(k,i,j,I_SW) = flux_up(k,i,j,I_SW) - flux_dn(k,i,j,I_SW)
@@ -451,13 +463,12 @@ contains
        ! apply radiative flux convergence -> heating rate
        call ATMOS_PHY_RD_calc_heating( &
             KA, KS, KE, IA, IS, IE, JA, JS, JE, &
-            flux_rad(:,:,:,:,:,2),     & ! [IN]
-            DENS(:,:,:), TEMP(:,:,:),  & ! [IN]
-            CVtot(:,:,:),              & ! [IN]
-            REAL_FZ(:,:,:),            & ! [IN]
-            RHOH_RD(:,:,:),            & ! [OUT]
-            temp_t = TEMP_t(:,:,:,:)   ) ! [OUT]
-
+            flux_rad(:,:,:,:,:,I_Cloud), & ! [IN]
+            DENS(:,:,:), TEMP(:,:,:),    & ! [IN]
+            CVtot(:,:,:),                & ! [IN]
+            REAL_FZ(:,:,:),              & ! [IN]
+            RHOH_RD(:,:,:),              & ! [OUT]
+            temp_t = TEMP_t(:,:,:,:)     ) ! [OUT]
 
 
        call FILE_HISTORY_in( solins(:,:), 'SOLINS', 'solar insolation',        'W/m2', fill_halo=.true. )
