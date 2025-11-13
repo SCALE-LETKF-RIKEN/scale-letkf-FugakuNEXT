@@ -444,11 +444,11 @@ contains
     real(RP), intent(in)  :: MOMZ(KA,IA,JA)
     real(RP), intent(in)  :: MOMX(KA,IA,JA)
     real(RP), intent(in)  :: MOMY(KA,IA,JA)
-    real(RP), intent(in)  :: GSQRT(KA,IA,JA,7)
-    real(RP), intent(in)  :: J13G(KA,IA,JA,7)
-    real(RP), intent(in)  :: J23G(KA,IA,JA,7)
+    real(RP), intent(in)  :: GSQRT(KA,IA,JA,I_XYZ_MAX)
+    real(RP), intent(in)  :: J13G(KA,IA,JA,I_XYZ_MAX)
+    real(RP), intent(in)  :: J23G(KA,IA,JA,I_XYZ_MAX)
     real(RP), intent(in)  :: J33G
-    real(RP), intent(in)  :: MAPF(IA,JA,2,7)
+    real(RP), intent(in)  :: MAPF(IA,JA,2,I_XY_MAX)
     logical,  intent(in)  :: TwoD
     real(RP), intent(in)  :: RCDZ(KA)
     real(RP), intent(in)  :: RCDX(IA)

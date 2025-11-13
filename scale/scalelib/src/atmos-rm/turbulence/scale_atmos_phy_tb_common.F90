@@ -1428,7 +1428,7 @@ contains
        !$omp end parallel workshare
     else
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
-       !$omp shared(JJS,JJE,IIS,IIE,KS,KE,DENS,Kh,FACT,PHI,qflx_phi,GSQRT,I_XYW,RFDZ,J33G)
+       !$omp shared(JJS,JJE,IIS,IIE,KS,KE,DENS,Kh,FACT,PHI,qflx_phi,GSQRT,RFDZ,J33G)
        !$acc kernels
        do j = JJS, JJE
        do i = IIS, IIE
@@ -1471,7 +1471,7 @@ contains
     if ( .not. twoD ) then
     ! (y-z plane; u,y,z)
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
-    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,DENS,Kh,FACT,PHI,qflx_phi,GSQRT,I_XYZ,RFDX,J13G,I_UYZ) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,DENS,Kh,FACT,PHI,qflx_phi,GSQRT,RFDX,J13G,I_UYZ) &
     !$omp shared(RCDZ)
     !$acc kernels
     do j = JJS,   JJE
@@ -1547,8 +1547,8 @@ contains
     ! (z-x plane; x,v,z)
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
     !$omp private(i,j,k) &
-    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,Kh,FACT,PHI,RFDY,DENS,qflx_phi,GSQRT,I_XYZ,J23G,I_XVZ,RCDZ) &
-    !$omp shared(MAPF,I_XV)
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,Kh,FACT,PHI,RFDY,DENS,qflx_phi,GSQRT,J23G,RCDZ) &
+    !$omp shared(MAPF)
     !$acc kernels
     do j = JJS-1, JJE
     do i = IIS,   IIE
@@ -1689,7 +1689,7 @@ contains
        !$omp parallel do default(none) OMP_SCHEDULE_ &
        !$omp private(j,k, &
        !$omp         fluxZ) &
-       !$omp shared(JJS,JJE,i,KS,KE,I_XYZ,I_XYW,I_UYW,I_XVW,I_XY,I_XV,I_UY, &
+       !$omp shared(JJS,JJE,i,KS,KE,I_UYW,I_UY, &
        !$omp        MOMZ_t_TB,QFLX_MOMZ,GSQRT,J13G,J23G,J33G,MAPF,RFDZ,RCDX,RCDY)
        !$acc kernels
        !$acc loop private(fluxZ)
@@ -1720,7 +1720,7 @@ contains
        !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
        !$omp private(i,j,k, &
        !$omp         fluxZ) &
-       !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_XYZ,I_XYW,I_UYW,I_XVW,I_XY,I_XV,I_UY, &
+       !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UYW,I_UY, &
        !$omp        MOMZ_t_TB,QFLX_MOMZ,GSQRT,J13G,J23G,J33G,MAPF,RFDZ,RCDX,RCDY)
        !$acc kernels
        do j = JJS, JJE
@@ -1784,7 +1784,7 @@ contains
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
     !$omp private(i,j,k, &
     !$omp        fluxZ) &
-    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_XYZ,I_UYZ,I_UVZ,I_UYW,I_UY,I_XY,I_UV, &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UYZ,I_UVZ,I_UYW,I_UY,I_UV, &
     !$omp        MOMX_t_TB,QFLX_MOMX,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RFDX,RCDY)
     !$acc kernels
     do j = JJS, JJE
@@ -1852,7 +1852,7 @@ contains
        !$omp parallel do default(none) OMP_SCHEDULE_ &
        !$omp private(j,k, &
        !$omp         fluxZ) &
-       !$omp shared(JJS,JJE,i,KS,KE,I_XVZ,I_UVZ,I_XYZ,I_XVW,I_XV,I_UV,I_XY, &
+       !$omp shared(JJS,JJE,i,KS,KE,I_UVZ,I_UV, &
        !$omp        MOMY_t_TB,QFLX_MOMY,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RCDX,RFDY)
        !$acc kernels
        !$acc loop private(fluxZ)
@@ -1883,7 +1883,7 @@ contains
        !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
        !$omp private(i,j,k, &
        !$omp         fluxZ) &
-       !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_XVZ,I_UVZ,I_XYZ,I_XVW,I_XV,I_UV,I_XY, &
+       !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UVZ,I_UV, &
        !$omp        MOMY_t_TB,QFLX_MOMY,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RCDX,RFDY)
        !$acc kernels
        do j = JJS, JJE
@@ -1954,7 +1954,7 @@ contains
        !$omp parallel do default(none) OMP_SCHEDULE_ &
        !$omp private(j,k, &
        !$omp         fluxZ) &
-       !$omp shared(JJS,JJE,i,KS,KE,I_XYZ,I_UYZ,I_XVZ,I_XYW,I_XY,I_UY,I_XV, &
+       !$omp shared(JJS,JJE,i,KS,KE,I_UYZ,I_UY, &
        !$omp        phi_t_TB,QFLX_phi,GSQRT,MAPF, &
        !$omp        J23G,J33G,RCDZ,RCDX,RCDY)
        !$acc kernels
@@ -1986,7 +1986,7 @@ contains
        !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
        !$omp private(i,j,k, &
        !$omp         fluxZ) &
-       !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_XYZ,I_UYZ,I_XVZ,I_XYW,I_XY,I_UY,I_XV, &
+       !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UYZ,I_UY, &
        !$omp        phi_t_TB,QFLX_phi,GSQRT,MAPF, &
        !$omp        J13G,J23G,J33G,RCDZ,RCDX,RCDY)
        !$acc kernels

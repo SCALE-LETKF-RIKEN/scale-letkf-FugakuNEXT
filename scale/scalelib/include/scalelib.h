@@ -6,7 +6,9 @@
 
 #ifdef _OPENACC
 
+#ifndef LSIZE
 #define LSIZE 1
+#endif
 
 #else
 

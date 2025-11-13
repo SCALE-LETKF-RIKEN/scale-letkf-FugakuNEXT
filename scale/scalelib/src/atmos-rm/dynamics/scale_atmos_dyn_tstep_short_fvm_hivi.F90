@@ -262,13 +262,13 @@ contains
     real(RP), intent(in) :: RFDX(IA-1)
     real(RP), intent(in) :: RFDY(JA-1)
 
-    real(RP), intent(in)  :: PHI     (KA,IA,JA)   !< geopotential
-    real(RP), intent(in)  :: GSQRT   (KA,IA,JA,7) !< vertical metrics {G}^1/2
-    real(RP), intent(in)  :: J13G    (KA,IA,JA,7) !< (1,3) element of Jacobian matrix
-    real(RP), intent(in)  :: J23G    (KA,IA,JA,7) !< (2,3) element of Jacobian matrix
-    real(RP), intent(in)  :: J33G                 !< (3,3) element of Jacobian matrix
-    real(RP), intent(in)  :: MAPF    (IA,JA,2,4)  !< map factor
-    real(RP), intent(in)  :: REF_dens(KA,IA,JA)   !< reference density
+    real(RP), intent(in)  :: PHI     (KA,IA,JA)           !< geopotential
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA,I_XYZ_MAX) !< vertical metrics {G}^1/2
+    real(RP), intent(in)  :: J13G    (KA,IA,JA,I_XYZ_MAX) !< (1,3) element of Jacobian matrix
+    real(RP), intent(in)  :: J23G    (KA,IA,JA,I_XYZ_MAX) !< (2,3) element of Jacobian matrix
+    real(RP), intent(in)  :: J33G                         !< (3,3) element of Jacobian matrix
+    real(RP), intent(in)  :: MAPF    (IA,JA,2,I_XY_MAX)   !< map factor
+    real(RP), intent(in)  :: REF_dens(KA,IA,JA)           !< reference density
     real(RP), intent(in)  :: REF_rhot(KA,IA,JA)
 
     logical,  intent(in)  :: BND_W
@@ -2273,7 +2273,7 @@ contains
     real(RP), intent(in) :: POTT(KA,IA,JA)
     real(RP), intent(in) :: RCs2T(KA,IA,JA)
     real(RP), intent(in) :: GRAV
-    real(RP), intent(in) :: G(KA,IA,JA,7)
+    real(RP), intent(in) :: G(KA,IA,JA,I_XYZ_MAX)
     real(RP), intent(in) :: J33G
     real(RP), intent(in) :: RCDZ(KA)
     real(RP), intent(in) :: RFDZ(KA-1)

@@ -55,7 +55,7 @@ module scale_atmos_dyn_tinteg_tracer
        real(RP), intent(in)    :: DENS    (KA,IA,JA)
        real(RP), intent(in)    :: mflx_hi (KA,IA,JA,3)
        real(RP), intent(in)    :: num_diff(KA,IA,JA,3)
-       real(RP), intent(in)    :: GSQRT   (KA,IA,JA,7)
+       real(RP), intent(in)    :: GSQRT   (KA,IA,JA,I_XYZ_MAX)
        real(RP), intent(in)    :: MAPF    (IA,JA)
        real(RP), intent(in)    :: CDZ(KA)
        real(RP), intent(in)    :: RCDZ(KA)

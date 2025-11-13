@@ -109,15 +109,9 @@ contains
     ATMOS_GRID_CARTESC_METRIC_ROTC(:,:,1) = 0.0_RP
     !$acc enter data copyin(ATMOS_GRID_CARTESC_METRIC_ROTC) async
 
-    if ( PRC_TwoD ) then
-       allocate( ATMOS_GRID_CARTESC_METRIC_GSQRT(KA,IA,JA,4) )
-       allocate( ATMOS_GRID_CARTESC_METRIC_J13G (KA,IA,JA,4) )
-       allocate( ATMOS_GRID_CARTESC_METRIC_J23G (KA,IA,JA,4) )
-    else
-       allocate( ATMOS_GRID_CARTESC_METRIC_GSQRT(KA,IA,JA,7) )
-       allocate( ATMOS_GRID_CARTESC_METRIC_J13G (KA,IA,JA,7) )
-       allocate( ATMOS_GRID_CARTESC_METRIC_J23G (KA,IA,JA,7) )
-    end if
+    allocate( ATMOS_GRID_CARTESC_METRIC_GSQRT(KA,IA,JA,I_XYZ_MAX) )
+    allocate( ATMOS_GRID_CARTESC_METRIC_J13G (KA,IA,JA,I_XYZ_MAX) )
+    allocate( ATMOS_GRID_CARTESC_METRIC_J23G (KA,IA,JA,I_XYZ_MAX) )
 
     ATMOS_GRID_CARTESC_METRIC_GSQRT(:,:,:,:) = 1.0_RP
     ATMOS_GRID_CARTESC_METRIC_J13G (:,:,:,:) = 0.0_RP
@@ -125,9 +119,9 @@ contains
     ATMOS_GRID_CARTESC_METRIC_J33G = 1.0_RP
     !$acc enter data copyin(ATMOS_GRID_CARTESC_METRIC_GSQRT, ATMOS_GRID_CARTESC_METRIC_J13G, ATMOS_GRID_CARTESC_METRIC_J23G, ATMOS_GRID_CARTESC_METRIC_J33G) async
 
-    allocate( ATMOS_GRID_CARTESC_METRIC_LIMYZ(KA,IA,JA,7) )
-    allocate( ATMOS_GRID_CARTESC_METRIC_LIMXZ(KA,IA,JA,7) )
-    allocate( ATMOS_GRID_CARTESC_METRIC_LIMXY(KA,IA,JA,7) )
+    allocate( ATMOS_GRID_CARTESC_METRIC_LIMYZ(KA,IA,JA,I_XYZ_MAX) )
+    allocate( ATMOS_GRID_CARTESC_METRIC_LIMXZ(KA,IA,JA,I_XYZ_MAX) )
+    allocate( ATMOS_GRID_CARTESC_METRIC_LIMXY(KA,IA,JA,I_XYZ_MAX) )
     ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,:) = 1.0_RP
     ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,:) = 1.0_RP
     ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,:) = 1.0_RP
@@ -184,15 +178,9 @@ contains
     deallocate( ATMOS_GRID_CARTESC_METRIC_ROTC )
 
     !$acc exit data delete(ATMOS_GRID_CARTESC_METRIC_GSQRT, ATMOS_GRID_CARTESC_METRIC_J13G, ATMOS_GRID_CARTESC_METRIC_J23G)
-    if ( PRC_TwoD ) then
-       deallocate( ATMOS_GRID_CARTESC_METRIC_GSQRT )
-       deallocate( ATMOS_GRID_CARTESC_METRIC_J13G  )
-       deallocate( ATMOS_GRID_CARTESC_METRIC_J23G  )
-    else
-       deallocate( ATMOS_GRID_CARTESC_METRIC_GSQRT )
-       deallocate( ATMOS_GRID_CARTESC_METRIC_J13G  )
-       deallocate( ATMOS_GRID_CARTESC_METRIC_J23G  )
-    end if
+    deallocate( ATMOS_GRID_CARTESC_METRIC_GSQRT )
+    deallocate( ATMOS_GRID_CARTESC_METRIC_J13G  )
+    deallocate( ATMOS_GRID_CARTESC_METRIC_J23G  )
 
     deallocate( ATMOS_GRID_CARTESC_METRIC_LIMYZ )
     deallocate( ATMOS_GRID_CARTESC_METRIC_LIMXZ )
@@ -465,6 +453,8 @@ contains
   subroutine ATMOS_GRID_CARTESC_METRIC_thin_wall
     use scale_prc, only: &
        PRC_abort
+    use scale_prc_cartesC, only: &
+       PRC_TwoD
     use scale_atmos_grid_cartesC, only: &
        ATMOS_GRID_CARTESC_CZ, &
        ATMOS_GRID_CARTESC_CX, &
@@ -638,6 +628,7 @@ contains
     enddo
 
     ! index i,j,k
+
     I_QLIMtoLIM(1:3,I_XYZ) = (/ 1, 1, 1 /)
     I_QLIMtoLIM(1:3,I_XYW) = (/ 1, 1, 0 /)
     I_QLIMtoLIM(1:3,I_UYW) = (/ 0, 1, 0 /)
@@ -646,7 +637,7 @@ contains
     I_QLIMtoLIM(1:3,I_XVZ) = (/ 1, 0, 1 /)
     I_QLIMtoLIM(1:3,I_UVZ) = (/ 0, 0, 1 /)
 
-    do n = 1, 7
+    do n = 1, I_XYZ_MAX
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -675,54 +666,68 @@ contains
 
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XYZ),  1 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XYW),  2 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYW),  3 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVW),  4 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYZ),  5 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVZ),  6 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVW),  3 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVZ),  4 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYW),  5 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYZ),  6 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UVZ),  7 )
+    end if
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XYZ),  1 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XYW),  2 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYW),  3 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVW),  4 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYZ),  5 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVZ),  6 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVW),  3 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVZ),  4 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYW),  5 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYZ),  6 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UVZ),  7 )
+    end if
 
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XYZ),  8 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XYW),  9 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYW), 10 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVW), 11 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYZ), 12 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVZ), 13 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVW), 10 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVZ), 11 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYW), 12 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYZ), 13 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UVZ), 14 )
+    end if
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XYZ),  8 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XYW),  9 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYW), 10 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVW), 11 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYZ), 12 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVZ), 13 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVW), 10 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVZ), 11 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYW), 12 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYZ), 13 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UVZ), 14 )
+    end if
 
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XYZ), 15 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XYW), 16 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYW), 17 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVW), 18 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYZ), 19 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVZ), 20 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVW), 17 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVZ), 18 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYW), 19 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYZ), 20 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UVZ), 21 )
+    end if
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XYZ), 15 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XYW), 16 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYW), 17 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVW), 18 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYZ), 19 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVZ), 20 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVW), 17 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVZ), 18 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYW), 19 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYZ), 20 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UVZ), 21 )
+    end if
 
     return
   end subroutine ATMOS_GRID_CARTESC_METRIC_thin_wall
 
   !-----------------------------------------------------------------------------
   subroutine ATMOS_GRID_CARTESC_METRIC_step_mountain
+    use scale_prc_cartesC, only: &
+       PRC_TwoD
     use scale_comm_cartesC, only: &
        COMM_vars8, &
        COMM_wait
@@ -731,7 +736,7 @@ contains
     integer :: i,j,k,n
     !---------------------------------------------------------------------------
 
-    do n = 1, 7
+    do n = 1, I_XYZ_MAX
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -757,48 +762,60 @@ contains
 
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XYZ),  1 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XYW),  2 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYW),  3 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVW),  4 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYZ),  5 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVZ),  6 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVW),  3 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVZ),  4 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYW),  5 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYZ),  6 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UVZ),  7 )
+    end if
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XYZ),  1 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XYW),  2 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYW),  3 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVW),  4 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYZ),  5 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVZ),  6 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVW),  3 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_XVZ),  4 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYW),  5 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UYZ),  6 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMYZ(:,:,:,I_UVZ),  7 )
+    end if
 
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XYZ),  8 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XYW),  9 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYW), 10 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVW), 11 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYZ), 12 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVZ), 13 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVW), 10 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVZ), 11 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYW), 12 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYZ), 13 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UVZ), 14 )
+    end if
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XYZ),  8 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XYW),  9 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYW), 10 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVW), 11 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYZ), 12 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVZ), 13 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVW), 10 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_XVZ), 11 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYW), 12 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UYZ), 13 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXZ(:,:,:,I_UVZ), 14 )
+    end if
 
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XYZ), 15 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XYW), 16 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYW), 17 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVW), 18 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYZ), 19 )
-    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVZ), 20 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVW), 17 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVZ), 18 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYW), 19 )
+    call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYZ), 20 )
     call COMM_vars8( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UVZ), 21 )
+    end if
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XYZ), 15 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XYW), 16 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYW), 17 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVW), 18 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYZ), 19 )
-    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVZ), 20 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVW), 17 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_XVZ), 18 )
+    if ( .not. PRC_TwoD ) then
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYW), 19 )
+    call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UYZ), 20 )
     call COMM_wait ( ATMOS_GRID_CARTESC_METRIC_LIMXY(:,:,:,I_UVZ), 21 )
+    end if
 
     return
   end subroutine ATMOS_GRID_CARTESC_METRIC_step_mountain

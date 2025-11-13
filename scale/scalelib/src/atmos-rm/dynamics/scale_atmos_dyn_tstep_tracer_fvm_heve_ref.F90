@@ -85,7 +85,7 @@ contains
     real(RP), intent(in)  :: DENS    (KA,IA,JA)
     real(RP), intent(in)  :: qflx_ref(KA,IA,JA,3)
     real(RP), intent(in)  :: num_diff(KA,IA,JA,3)
-    real(RP), intent(in)  :: GSQRT   (KA,IA,JA,7)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA,I_XYZ_MAX)
     real(RP), intent(in)  :: MAPF    (IA,JA,2)
     real(RP), intent(in)  :: CDZ(KA)
     real(RP), intent(in)  :: RCDZ(KA)
@@ -167,7 +167,7 @@ contains
        if ( TwoD ) then
           !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ &
           !$omp shared(JJS,JJE,IS,KS,KE,QTRCo,QTRC0,DENS0,dtl,qflx_hi,RCDZ,RCDY,MAPF) &
-          !$omp shared(GSQRT,RHOQ_t,DENS,I_XYZ)
+          !$omp shared(GSQRT,RHOQ_t,DENS)
           !$acc kernels
           do j = JJS, JJE
           do k = KS, KE
@@ -182,7 +182,7 @@ contains
        else
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE,QTRCo,QTRC0,DENS0,dtl,qflx_hi,RCDZ,RCDX,RCDY,MAPF) &
-          !$omp shared(GSQRT,RHOQ_t,DENS,I_XYZ)
+          !$omp shared(GSQRT,RHOQ_t,DENS)
           !$acc kernels
           do j = JJS, JJE
           do i = IIS, IIE
