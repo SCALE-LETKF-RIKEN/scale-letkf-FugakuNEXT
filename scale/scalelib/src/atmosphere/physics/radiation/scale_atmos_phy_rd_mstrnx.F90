@@ -1900,7 +1900,7 @@ contains
     !$acc kernels
     LOOP_INNER
     do k = 1, rd_kmax
-    do l = 1, LSIZE
+    do l = 1, VLEN
        tauCLD_067u(l,k,i) = 0.0_RP
     enddo
     enddo
