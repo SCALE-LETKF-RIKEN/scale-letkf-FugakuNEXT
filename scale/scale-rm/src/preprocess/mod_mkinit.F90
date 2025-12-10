@@ -5772,11 +5772,21 @@ contains
        MOMZ(k,i,j) = 0.0_RP
        MOMX(k,i,j) = ENV_U * DENS(k,i,j)
        MOMY(k,i,j) = ENV_V * DENS(k,i,j)
+       qv  (k,i,j) = qv(k,1,1)
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
 
+    ! loop division to avoid bugs in NVIDIA compielr
+
+    !$acc kernels
+    !$acc loop collapse(3) independent
+    do j = JSB, JEB
+    do i = ISB, IEB
+    do k = KS, KE
        ! make warm bubble
        RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
-
-       qv  (k,i,j) = qv(k,1,1)
     enddo
     enddo
     enddo
