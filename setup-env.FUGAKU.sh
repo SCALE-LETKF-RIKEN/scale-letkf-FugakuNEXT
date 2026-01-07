@@ -10,6 +10,6 @@ SCALE_NETCDF_C=`spack location --install-dir /${NC_HASH}`
 SCALE_NETCDF_F=`spack location --install-dir /${NF_HASH}`
 SCALE_PNETCDF=`spack location --install-dir parallel-netcdf%fj@4.12.0`
 
-export SCALE_DB="`pwd`/scale_database"
+export SCALE_SYS="FUGAKU"
 export SCALE_NETCDF_INCLUDE="-I${SCALE_NETCDF_C}/include -I${SCALE_NETCDF_F}/include -I${SCALE_PNETCDF}/include"
 export SCALE_NETCDF_LIBS="-L${SCALE_NETCDF_C}/lib -L${SCALE_NETCDF_F}/lib -L${SCALE_HDF}/lib -L${SCALE_PNETCDF}/lib -lpnetcdf -lnetcdff -lnetcdf -lhdf5_hl -lhdf5 -lfjprofmpi -lmpi_cxx"
