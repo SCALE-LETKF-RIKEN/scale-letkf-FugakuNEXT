@@ -4,9 +4,9 @@ WKDIR=$(cd $(dirname $0) ; pwd)
 
 GROUP="rccs-sdt" # your group
 
-MEMBER=3 ### up to 50
-PRC_NUM_X=1
-PRC_NUM_Y=1
+MEMBER=2 ### up to 50
+PRC_NUM_X=2
+PRC_NUM_Y=2
 
 IMAXG=128
 JMAXG=128
