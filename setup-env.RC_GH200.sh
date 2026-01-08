@@ -4,7 +4,7 @@ module purge
 module load system/qc-gh200
 module load nvhpc/25.9
 
-SYS_LIB="/lvs0/rccs-sdt/tyamaura/lib_qc-gh200"
+SYS_LIB="/lvs0/rccs-nghpcadu/CX_input/SCALE-LETKF/lib_qc-gh200"
 
 SCALE_HDF="$SYS_LIB/hdf5/1.10.10"
 SCALE_NETCDF_C="$SYS_LIB/netcdf-c/4.9.2"

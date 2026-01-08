@@ -2,7 +2,7 @@
 
 WKDIR=$(cd $(dirname $0) ; pwd)
 
-GROUP="rccs-sdt" # your group
+GROUP="rccs-nghpcadu" # your group
 
 MEMBER=2 ### up to 50
 PRC_NUM_X=2

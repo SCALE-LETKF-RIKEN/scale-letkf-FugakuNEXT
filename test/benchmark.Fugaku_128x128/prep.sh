@@ -2,14 +2,14 @@
 
 WKDIR=$(cd $(dirname $0) ; pwd)
 
-GROUP="rccs-sdt" # your group
+GROUP="ra010016" # your group
 
 MEMBER=2 ### up to 50
-PRC_NUM_X=10
-PRC_NUM_Y=10
+PRC_NUM_X=2
+PRC_NUM_Y=2
 
-IMAXG=1280
-JMAXG=1280
+IMAXG=128
+JMAXG=128
 IMAX=$((IMAXG / PRC_NUM_X))
 JMAX=$((JMAXG / PRC_NUM_Y))
 
