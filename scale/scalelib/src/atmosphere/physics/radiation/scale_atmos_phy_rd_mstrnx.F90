@@ -1760,7 +1760,7 @@ contains
     real(RP) :: E12mns(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit) ! source function   in doubling method
     real(RP) :: E12pls(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit) ! source function   in doubling method
 
-    real(RP), pointer, contiguous :: cldfrac_ptr(:,:)
+    real(RP), pointer, contiguous :: cldfrac_ptr(:,:,:), cldfrac_ptr_i(:,:)
 
     real(RP) :: zerosw
     real(RP) :: valsum(VLEN)
@@ -2122,7 +2122,13 @@ contains
        LOOP_END_INNER
        !$acc end kernels
 
-       !$acc parallel copyin(cldfrac) if (ncloud_in>1)
+       if ( ncloud_in > 1 ) then
+          cldfrac_ptr => cldfrac
+       else
+          cldfrac_ptr => null()
+       end if
+
+       !$acc parallel copyin(cldfrac_ptr)
        !$acc loop independent &
        !$acc private(tauPR,omgPR,g,b,b_sfc,fsol_rgn,wl,bbar,bbarh,tau,omg, &
        !$acc         flux,flux_direct,emisCLD, &
@@ -2265,11 +2271,8 @@ contains
 
        endif ! solar/IR switch
 
-
        if ( ncloud_in > 1 ) then
-          cldfrac_ptr => cldfrac(:,:,i)
-       else
-          cldfrac_ptr => null()
+         cldfrac_ptr_i => cldfrac_ptr(:,:,i)
        end if
 
        ! two-stream transfer
@@ -2292,7 +2295,7 @@ contains
                                  Em(:,:,:,:), Ep(:,:,:,:),              & ! [WORK]
                                  R12mns(:,:,:,:), R12pls(:,:,:,:),      & ! [WORK]
                                  E12mns(:,:,:,:), E12pls(:,:,:,:),      & ! [WORK]
-                                 cldfrac = cldfrac_ptr                  ) ! [IN,optional]
+                                 cldfrac = cldfrac_ptr_i                ) ! [IN,optional]
        !call PROF_rapend  ('RD_MSTRN_twst', 3)
 
        !$acc loop collapse(3) vector
