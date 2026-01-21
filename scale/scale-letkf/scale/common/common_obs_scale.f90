@@ -2096,7 +2096,7 @@ SUBROUTINE get_nobs(cfile,nrec,nn)
 
     READ(iunit,IOSTAT=ios) wk
     IF(ios /= 0) THEN
-      WRITE(6,'(3A,I)') '[Error]',cfile,': Reading error ', ios
+      WRITE(6,'(3A,I0)') '[Error]',cfile,': Reading error ', ios
       STOP
     ELSE 
       IF (real(int(wk(1)),r_size) /= wk(1)) THEN
@@ -2414,7 +2414,7 @@ SUBROUTINE get_nobs_radar(cfile,nn,radarlon,radarlat,radarz)
     IF(ios /= 0) THEN
 !      WRITE(6,'(3A)') '[Warning]',cfile,': Reading error -- skipped'
 !      RETURN
-      WRITE(6,'(3A,I)') '[Error]',cfile,': Reading error', ios
+      WRITE(6,'(3A,I0)') '[Error]',cfile,': Reading error', ios
       STOP
      ELSEIF ( tmp < 0.0_r_size .or. tmp > 360.0_r_size ) THEN
         WRITE(6,'(3A,E10.4)') '[Error]',cfile,': Invalid observation value radarlon = ', tmp
