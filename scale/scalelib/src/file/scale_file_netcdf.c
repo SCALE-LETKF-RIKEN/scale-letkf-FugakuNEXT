@@ -3,6 +3,9 @@
 #define MPI_INCLUDED
 #endif
 #include "netcdf.h"
+#ifndef NC_FillValue
+#define NC_FillValue "_FillValue"
+#endif
 
 #define TEPS 1e-6
 #define NTMAX 102400
@@ -1744,7 +1747,7 @@ int file_add_variable_c(       int    *vid,     // (out)
     if ( strlen(units)  >0 ) CHECK_PNC_ERROR( ncmpi_put_att_text(ncid, varid, "units", strlen(units), units) )
     if ( strlen(stdname)>0 ) CHECK_PNC_ERROR( ncmpi_put_att_text(ncid, varid, "standard_name", strlen(stdname), stdname) )
 	
-//    CHECK_PNC_ERROR( ncmpi_put_att_double(ncid, varid, _FillValue, xtype, 1, &rmiss) )
+//    CHECK_PNC_ERROR( ncmpi_put_att_double(ncid, varid, NC_FillValue, xtype, 1, &rmiss) )
     CHECK_PNC_ERROR( ncmpi_put_att_double(ncid, varid, "missing_value", xtype, 1, &rmiss) )
   }
   else {
@@ -1753,7 +1756,7 @@ int file_add_variable_c(       int    *vid,     // (out)
     if ( strlen(desc)   >0 ) CHECK_ERROR( nc_put_att_text(ncid, varid, "long_name", strlen(desc), desc) )
     if ( strlen(units)  >0 ) CHECK_ERROR( nc_put_att_text(ncid, varid, "units", strlen(units), units) )
     if ( strlen(stdname)>0 ) CHECK_ERROR( nc_put_att_text(ncid, varid, "standard_name", strlen(stdname), stdname) )
-    CHECK_ERROR( nc_put_att_double(ncid, varid, _FillValue, xtype, 1, &rmiss) )
+    CHECK_ERROR( nc_put_att_double(ncid, varid, NC_FillValue, xtype, 1, &rmiss) )
     CHECK_ERROR( nc_put_att_double(ncid, varid, "missing_value", xtype, 1, &rmiss) )
   }
   if ( has_assoc ) {
