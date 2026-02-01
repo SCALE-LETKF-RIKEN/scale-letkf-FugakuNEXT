@@ -868,7 +868,7 @@ contains
     !---------------------------------------------------------------------------
 
     !$acc data copy(DENS_t, MOMZ_t, RHOU_t, RHOV_t, RHOQ_t(:,:,:,:), RHOH, &
-    !$acc           DENS_t_MP, MOMZ_t_MP, RHOU_t_MP, RHOV_t_MP, RHOQ_t_MP, RHOC_t_MP, RHOH_MP, &
+    !$acc           DENS_t_MP, MOMZ_t_MP, RHOU_t_MP, RHOV_t_MP, RHOQ_t_MP, RHOH_MP, &
     !$acc           EVAPORATE, SFLX_rain, SFLX_snow, SFLX_ENGI, &
     !$acc           Sarea) &
     !$acc      copyin(DENS(:,:,:), MOMZ(:,:,:), U, V, TEMP, QTRC(:,:,:,:), PRES, CVtot, CPtot, &
@@ -877,6 +877,7 @@ contains
     !$acc      create(RHOE_t, TEMP1, CPtot1, CVtot1, CCN, QTRC1, CPtot_t, CVtot_t, precip, &
     !$acc             QTRC1_crg, QSPLT_in, dqcrg, beta_crg, &
     !$acc             hist_vterm_idx)
+    !$acc data copy(RHOC_t_MP) if (flg_lt)
 
 
     if ( update_flag ) then
@@ -1610,6 +1611,7 @@ contains
        enddo
     endif
 
+    !$acc end data
     !$acc end data
 
     return
