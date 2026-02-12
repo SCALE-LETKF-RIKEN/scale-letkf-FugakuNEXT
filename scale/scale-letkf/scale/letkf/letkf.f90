@@ -39,6 +39,7 @@ PROGRAM letkf
 
   call initialize_mpi_scale
   call mpi_timer('', 1)
+  call mpi_timer('', 2)
 
   if (command_argument_count() >= 2) then
     call get_command_argument(2, icmd)
@@ -85,7 +86,7 @@ PROGRAM letkf
 
     call mtx_setup( MEMBER )
 
-    call mpi_timer('INITIALIZE', 1, barrier=MPI_COMM_a)
+    call mpi_timer('INITIALIZE', 2, barrier=MPI_COMM_a)
 
 !-----------------------------------------------------------------------
 ! Read observations
@@ -94,7 +95,7 @@ PROGRAM letkf
     allocate (obs(OBS_IN_NUM))
     call read_obs_all_mpi(obs)
 
-    call mpi_timer('READ_OBS', 1, barrier=MPI_COMM_a)
+    call mpi_timer('READ_OBS', 2, barrier=MPI_COMM_a)
 
 !-----------------------------------------------------------------------
 ! Observation operator
@@ -112,7 +113,7 @@ PROGRAM letkf
     !
     call obsope_cal(obsda_return=obsda, nobs_extern=nobs_extern)
 
-    call mpi_timer('OBS_OPERATOR', 1, barrier=MPI_COMM_a)
+    call mpi_timer('OBS_OPERATOR', 2, barrier=MPI_COMM_a)
 
 !-----------------------------------------------------------------------
 ! Process observation data
@@ -120,7 +121,7 @@ PROGRAM letkf
 
     call set_letkf_obs
 
-    call mpi_timer('PROCESS_OBS', 1, barrier=MPI_COMM_a)
+    call mpi_timer('PROCESS_OBS', 2, barrier=MPI_COMM_a)
 
 !-----------------------------------------------------------------------
 ! First guess ensemble
@@ -136,7 +137,7 @@ PROGRAM letkf
     allocate (anal3d(nij1,nlev,nens,nv3d))
     allocate (anal2d(nij1,nens,nv2d))
 
-    call mpi_timer('SET_GRID', 1, barrier=MPI_COMM_a)
+    call mpi_timer('SET_GRID', 2, barrier=MPI_COMM_a)
 
     !
     ! READ GUES
@@ -148,7 +149,7 @@ PROGRAM letkf
       gues2d(:,mmdet,:) = gues2d(:,mmdetin,:)
     end if
 
-    call mpi_timer('READ_GUES', 1, barrier=MPI_COMM_a)
+    call mpi_timer('READ_GUES', 2, barrier=MPI_COMM_a)
 
     !
     ! WRITE ENS MEAN and SPRD
@@ -163,7 +164,7 @@ PROGRAM letkf
       call write_enssprd(GUES_SPRD_OUT_BASENAME, gues3d, gues2d)
     end if
 
-    call mpi_timer('GUES_MEAN', 1, barrier=MPI_COMM_a)
+    call mpi_timer('GUES_MEAN', 2, barrier=MPI_COMM_a)
 
 !-----------------------------------------------------------------------
 ! Data Assimilation
@@ -174,7 +175,7 @@ PROGRAM letkf
     !
     call das_letkf(gues3d,gues2d,anal3d,anal2d)
 
-    call mpi_timer('DAS_LETKF', 1, barrier=MPI_COMM_a)
+    call mpi_timer('DAS_LETKF', 2, barrier=MPI_COMM_a)
 
 !-----------------------------------------------------------------------
 ! Analysis ensemble
@@ -190,7 +191,7 @@ PROGRAM letkf
       call write_enssprd(ANAL_SPRD_OUT_BASENAME, anal3d, anal2d)
     end if
 
-    call mpi_timer('ANAL_MEAN', 1, barrier=MPI_COMM_a)
+    call mpi_timer('ANAL_MEAN', 2, barrier=MPI_COMM_a)
 
     !
     ! WRITE ANAL and ENS MEAN
@@ -201,7 +202,7 @@ PROGRAM letkf
       call write_ens_mpi(anal3d, anal2d)
     end if
 
-    call mpi_timer('WRITE_ANAL', 1, barrier=MPI_COMM_a)
+    call mpi_timer('WRITE_ANAL', 2, barrier=MPI_COMM_a)
 
 !!-----------------------------------------------------------------------
 !! Monitor
@@ -219,7 +220,8 @@ PROGRAM letkf
 
   call unset_scalelib
 
-  call mpi_timer('FINALIZE', 1, barrier=MPI_COMM_WORLD)
+  call mpi_timer('FINALIZE', 2, barrier=MPI_COMM_WORLD)
+  call mpi_timer('LETKF',    1, barrier=MPI_COMM_WORLD)
 
 !-----------------------------------------------------------------------
 ! Finalize

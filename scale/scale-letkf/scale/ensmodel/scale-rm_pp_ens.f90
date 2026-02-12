@@ -55,6 +55,7 @@ program scaleles_pp_ens
   call PRC_MPIstart( universal_comm ) ! [OUT]
 
   call mpi_timer('', 1)
+  call mpi_timer('', 2)
 
   call PRC_UNIVERSAL_setup( universal_comm,   & ! [IN]
                             universal_nprocs, & ! [OUT]
@@ -74,7 +75,7 @@ program scaleles_pp_ens
     call set_mem_node_proc(MEMBER+1)
   end if
 
-  call mpi_timer('INITIALIZE', 1, barrier=universal_comm)
+  call mpi_timer('INITIALIZE', 2, barrier=universal_comm)
 
 !-----------------------------------------------------------------------
 ! Run SCALE-RM_pp
@@ -150,7 +151,8 @@ program scaleles_pp_ens
 
   end if ! [ global_comm /= MPI_COMM_NULL ]
 
-  call mpi_timer('SCALE_RM', 1, barrier=universal_comm)
+  call mpi_timer('MAIN_PROCESS', 2, barrier=universal_comm)
+  call mpi_timer('SCALE_RM_PP',  1, barrier=universal_comm)
 
 !-----------------------------------------------------------------------
 ! Finalize
