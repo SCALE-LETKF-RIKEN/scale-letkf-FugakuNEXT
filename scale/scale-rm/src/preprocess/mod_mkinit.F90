@@ -3624,7 +3624,7 @@ contains
     end do
 
     !$acc kernels
-    !$acc loop collapse(3) independent
+    !$acc loop independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -3641,7 +3641,7 @@ contains
     ! loop division to avoid bugs in NVIDIA compielr
 
     !$acc kernels
-    !$acc loop collapse(3) independent
+    !$acc loop independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -5774,7 +5774,7 @@ contains
     end do
 
     !$acc kernels
-    !$acc loop collapse(3) independent
+    !$acc loop independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -5791,7 +5791,7 @@ contains
     ! loop division to avoid bugs in NVIDIA compielr
 
     !$acc kernels
-    !$acc loop collapse(3) independent
+    !$acc loop independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
