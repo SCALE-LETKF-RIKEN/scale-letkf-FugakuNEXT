@@ -2705,8 +2705,7 @@ contains
                                DENS(:,1,1), temp(:,1,1), pres(:,1,1), temp_sfc(1,1),   & ! [OUT]
                                converged                                               ) ! [OUT]
 
-    !$acc kernels
-    !$acc loop collapse(3) independent
+    !$acc parallel loop collapse(3) independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -2714,14 +2713,12 @@ contains
        MOMZ(k,i,j) = 0.0_RP
        MOMX(k,i,j) = ENV_U * DENS(k,1,1)
        MOMY(k,i,j) = ENV_V * DENS(k,1,1)
-
        ! make warm bubble
        RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
-
     enddo
     enddo
     enddo
-    !$acc end kernels
+    !$acc end parallel
 
     return
   end subroutine MKINIT_gravitywave
@@ -3623,8 +3620,7 @@ contains
 
     end do
 
-    !$acc kernels
-    !$acc loop independent
+    !$acc parallel loop collapse(3) independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -3633,24 +3629,12 @@ contains
        MOMX(k,i,j) = ENV_U * DENS(k,i,j)
        MOMY(k,i,j) = ENV_V * DENS(k,i,j)
        qv  (k,i,j) = qv(k,1,1)
-    enddo
-    enddo
-    enddo
-    !$acc end kernels
-
-    ! loop division to avoid bugs in NVIDIA compielr
-
-    !$acc kernels
-    !$acc loop independent
-    do j = JSB, JEB
-    do i = ISB, IEB
-    do k = KS, KE
        ! make warm bubble
        RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
     enddo
     enddo
     enddo
-    !$acc end kernels
+    !$acc end parallel
 
     call flux_setup
 
@@ -3702,8 +3686,7 @@ contains
 
     call read_sounding( RHO, VELX, VELY, POTT, QV1D ) ! (out)
 
-    !$acc kernels
-    !$acc loop collapse(3) independent
+    !$acc parallel loop collapse(3) independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -3711,7 +3694,6 @@ contains
        MOMZ(k,i,j) = 0.0_RP
        MOMX(k,i,j) = RHO(k) * VELX(k)
        MOMY(k,i,j) = RHO(k) * VELY(k)
-
        ! make warm bubble
        RHOT(k,i,j) = RHO(k) * ( POTT(k) + BBL_THETA * bubble(k,i,j) )
 
@@ -3719,7 +3701,7 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
+    !$acc end parallel
 
     call flux_setup
 
@@ -3955,21 +3937,19 @@ contains
     enddo
     !$acc end kernels
 
-    !$acc kernels
-    !$acc loop collapse(3) independent
+    !$acc parallel loop collapse(3) independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
        MOMY(k,i,j) = 0.0_RP
        MOMZ(k,i,j) = 0.0_RP
        RHOT(k,i,j) = pott(k,i,j) * DENS(k,i,j)
-
        ! make warm bubble
        RHOT(k,i,j) = DENS(k,i,j) * ( pott(k,i,j) + BBL_THETA * bubble(k,i,j) )
     enddo
     enddo
     enddo
-    !$acc end kernels
+    !$acc end parallel
 
     call flux_setup
 
@@ -5773,8 +5753,7 @@ contains
                                   converged                                               ) ! [OUT]
     end do
 
-    !$acc kernels
-    !$acc loop independent
+    !$acc parallel loop collapse(3) independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -5783,24 +5762,12 @@ contains
        MOMX(k,i,j) = ENV_U * DENS(k,i,j)
        MOMY(k,i,j) = ENV_V * DENS(k,i,j)
        qv  (k,i,j) = qv(k,1,1)
-    enddo
-    enddo
-    enddo
-    !$acc end kernels
-
-    ! loop division to avoid bugs in NVIDIA compielr
-
-    !$acc kernels
-    !$acc loop independent
-    do j = JSB, JEB
-    do i = ISB, IEB
-    do k = KS, KE
        ! make warm bubble
        RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
     enddo
     enddo
     enddo
-    !$acc end kernels
+    !$acc end parallel
 
     call flux_setup
 
