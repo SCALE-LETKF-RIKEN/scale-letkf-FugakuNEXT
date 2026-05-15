@@ -2716,7 +2716,7 @@ contains
        pott_1d(k) = pott(k,1,1)
     enddo
 
-    !$acc parallel loop collapse(3) independent default(present)
+    !$acc parallel loop collapse(3) independent present(DENS, MOMZ, MOMX, MOMY, RHOT, bubble)
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -3645,14 +3645,14 @@ contains
        pott_1d(k) = pott(k,1,1)
     enddo
 
-    !$acc parallel loop collapse(3) independent default(present)
+    !$acc parallel loop collapse(3) independent present(DENS, MOMZ, MOMX, MOMY, qv, RHOT, bubble)
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
        DENS(k,i,j) = dens_1d(k)
        MOMZ(k,i,j) = 0.0_RP
-       MOMX(k,i,j) = ENV_U * DENS(k,i,j)
-       MOMY(k,i,j) = ENV_V * DENS(k,i,j)
+       MOMX(k,i,j) = ENV_U * dens_1d(k)
+       MOMY(k,i,j) = ENV_V * dens_1d(k)
        qv  (k,i,j) = qv_1d(k)
        ! make warm bubble
        RHOT(k,i,j) = dens_1d(k) * ( pott_1d(k) + BBL_THETA * bubble(k,i,j) )
@@ -3660,9 +3660,9 @@ contains
     enddo
     enddo
 
-    call flux_setup
-
     !$acc end data
+
+    call flux_setup
 
     return
   end subroutine MKINIT_warmbubble
@@ -5790,14 +5790,14 @@ contains
        pott_1d(k) = pott(k,1,1)
     enddo
 
-    !$acc parallel loop collapse(3) independent default(present)
+    !$acc parallel loop collapse(3) independent present(DENS, MOMZ, MOMX, MOMY, qv, RHOT, bubble)
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
        DENS(k,i,j) = dens_1d(k)
        MOMZ(k,i,j) = 0.0_RP
-       MOMX(k,i,j) = ENV_U * DENS(k,i,j)
-       MOMY(k,i,j) = ENV_V * DENS(k,i,j)
+       MOMX(k,i,j) = ENV_U * dens_1d(k)
+       MOMY(k,i,j) = ENV_V * dens_1d(k)
        qv  (k,i,j) = qv_1d(k)
        ! make warm bubble
        RHOT(k,i,j) = dens_1d(k) * ( pott_1d(k) + BBL_THETA * bubble(k,i,j) )
@@ -5805,9 +5805,9 @@ contains
     enddo
     enddo
 
-    call flux_setup
-
     !$acc end data
+
+    call flux_setup
 
     return
   end subroutine MKINIT_warmbubbleaero
