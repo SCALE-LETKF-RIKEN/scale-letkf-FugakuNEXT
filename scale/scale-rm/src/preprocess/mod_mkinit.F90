@@ -2708,7 +2708,9 @@ contains
                                DENS(:,1,1), temp(:,1,1), pres(:,1,1), temp_sfc(1,1),   & ! [OUT]
                                converged                                               ) ! [OUT]
 
-    !$acc parallel loop default(present)
+    !$acc data create(dens_1d, pott_1d)
+
+    !$acc parallel loop
     do k = KS, KE
        dens_1d(k) = DENS(k,1,1)
        pott_1d(k) = pott(k,1,1)
@@ -2727,6 +2729,8 @@ contains
     enddo
     enddo
     enddo
+
+    !$acc end data
 
     return
   end subroutine MKINIT_gravitywave
@@ -3632,7 +3636,9 @@ contains
 
     end do
 
-    !$acc parallel loop default(present)
+    !$acc data create(dens_1d, qv_1d, pott_1d)
+
+    !$acc parallel loop
     do k = KS, KE
        dens_1d(k) = DENS(k,1,1)
        qv_1d  (k) = qv  (k,1,1)
@@ -3655,6 +3661,8 @@ contains
     enddo
 
     call flux_setup
+
+    !$acc end data
 
     return
   end subroutine MKINIT_warmbubble
@@ -5773,7 +5781,9 @@ contains
                                   converged                                               ) ! [OUT]
     end do
 
-    !$acc parallel loop default(present)
+    !$acc data create(dens_1d, qv_1d, pott_1d)
+
+    !$acc parallel loop
     do k = KS, KE
        dens_1d(k) = DENS(k,1,1)
        qv_1d  (k) = qv  (k,1,1)
@@ -5796,6 +5806,8 @@ contains
     enddo
 
     call flux_setup
+
+    !$acc end data
 
     return
   end subroutine MKINIT_warmbubbleaero
