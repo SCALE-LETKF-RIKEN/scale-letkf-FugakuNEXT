@@ -2716,7 +2716,7 @@ contains
        pott_1d(k) = pott(k,1,1)
     enddo
 
-    !$acc parallel loop collapse(3) independent
+    !$acc parallel loop collapse(3) independent default(present)
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -3645,7 +3645,7 @@ contains
        pott_1d(k) = pott(k,1,1)
     enddo
 
-    !$acc parallel loop collapse(3) independent
+    !$acc parallel loop collapse(3) independent default(present)
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
@@ -5790,7 +5790,7 @@ contains
        pott_1d(k) = pott(k,1,1)
     enddo
 
-    !$acc parallel loop collapse(3) independent
+    !$acc parallel loop collapse(3) independent default(present)
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
