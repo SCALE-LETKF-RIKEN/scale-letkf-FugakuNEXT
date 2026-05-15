@@ -3631,12 +3631,20 @@ contains
        MOMX(k,i,j) = ENV_U * DENS(k,1,1)
        MOMY(k,i,j) = ENV_V * DENS(k,1,1)
        qv  (k,i,j) = qv  (k,1,1)
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+
+    !$acc parallel loop collapse(3) independent
+    do j = JSB, JEB
+    do i = ISB, IEB
+    do k = KS, KE
        ! make warm bubble
        RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
     enddo
     enddo
     enddo
-    !$acc end kernels
 
     call flux_setup
 
@@ -5767,12 +5775,20 @@ contains
        MOMX(k,i,j) = ENV_U * DENS(k,1,1)
        MOMY(k,i,j) = ENV_V * DENS(k,1,1)
        qv  (k,i,j) = qv  (k,1,1)
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+
+    !$acc parallel loop collapse(3) independent
+    do j = JSB, JEB
+    do i = ISB, IEB
+    do k = KS, KE
        ! make warm bubble
        RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
     enddo
     enddo
     enddo
-    !$acc end kernels
 
     call flux_setup
 
