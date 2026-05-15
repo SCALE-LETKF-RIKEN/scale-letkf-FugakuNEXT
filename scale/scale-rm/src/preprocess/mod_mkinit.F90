@@ -2654,6 +2654,9 @@ contains
 
     logical :: converged
 
+    real(RP) :: dens_1d(KS:KE)
+    real(RP) :: pott_1d(KS:KE)
+
 #ifdef _OPENACC
     real(RP) :: work1(KA)
     real(RP) :: work2(KA)
@@ -2705,20 +2708,25 @@ contains
                                DENS(:,1,1), temp(:,1,1), pres(:,1,1), temp_sfc(1,1),   & ! [OUT]
                                converged                                               ) ! [OUT]
 
+    !$acc parallel loop default(present)
+    do k = KS, KE
+       dens_1d(k) = DENS(k,1,1)
+       pott_1d(k) = pott(k,1,1)
+    enddo
+
     !$acc parallel loop collapse(3) independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
-       DENS(k,i,j) = DENS(k,1,1)
+       DENS(k,i,j) = dens_1d(k)
        MOMZ(k,i,j) = 0.0_RP
-       MOMX(k,i,j) = ENV_U * DENS(k,1,1)
-       MOMY(k,i,j) = ENV_V * DENS(k,1,1)
+       MOMX(k,i,j) = ENV_U * dens_1d(k)
+       MOMY(k,i,j) = ENV_V * dens_1d(k)
        ! make warm bubble
-       RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
+       RHOT(k,i,j) = dens_1d(k) * ( pott_1d(k) + BBL_THETA * bubble(k,i,j) )
     enddo
     enddo
     enddo
-    !$acc end parallel
 
     return
   end subroutine MKINIT_gravitywave
@@ -3513,6 +3521,10 @@ contains
 
     logical :: converged
 
+    real(RP) :: dens_1d(KS:KE)
+    real(RP) :: qv_1d  (KS:KE)
+    real(RP) :: pott_1d(KS:KE)
+
 #ifdef _OPENACC
     real(RP) :: work1(KA)
     real(RP) :: work2(KA)
@@ -3620,21 +3632,27 @@ contains
 
     end do
 
+    !$acc parallel loop default(present)
+    do k = KS, KE
+       dens_1d(k) = DENS(k,1,1)
+       qv_1d  (k) = qv  (k,1,1)
+       pott_1d(k) = pott(k,1,1)
+    enddo
+
     !$acc parallel loop collapse(3) independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
-       DENS(k,i,j) = DENS(k,1,1)
+       DENS(k,i,j) = dens_1d(k)
        MOMZ(k,i,j) = 0.0_RP
        MOMX(k,i,j) = ENV_U * DENS(k,i,j)
        MOMY(k,i,j) = ENV_V * DENS(k,i,j)
-       qv  (k,i,j) = qv(k,1,1)
+       qv  (k,i,j) = qv_1d(k)
        ! make warm bubble
-       RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
+       RHOT(k,i,j) = dens_1d(k) * ( pott_1d(k) + BBL_THETA * bubble(k,i,j) )
     enddo
     enddo
     enddo
-    !$acc end parallel
 
     call flux_setup
 
@@ -3701,7 +3719,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end parallel
 
     call flux_setup
 
@@ -3949,7 +3966,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end parallel
 
     call flux_setup
 
@@ -5656,6 +5672,10 @@ contains
 
     logical :: converged
 
+    real(RP) :: dens_1d(KS:KE)
+    real(RP) :: qv_1d  (KS:KE)
+    real(RP) :: pott_1d(KS:KE)
+
 #ifdef _OPENACC
     real(RP) :: work1(KA)
     real(RP) :: work2(KA)
@@ -5753,21 +5773,27 @@ contains
                                   converged                                               ) ! [OUT]
     end do
 
+    !$acc parallel loop default(present)
+    do k = KS, KE
+       dens_1d(k) = DENS(k,1,1)
+       qv_1d  (k) = qv  (k,1,1)
+       pott_1d(k) = pott(k,1,1)
+    enddo
+
     !$acc parallel loop collapse(3) independent
     do j = JSB, JEB
     do i = ISB, IEB
     do k = KS, KE
-       DENS(k,i,j) = DENS(k,1,1)
+       DENS(k,i,j) = dens_1d(k)
        MOMZ(k,i,j) = 0.0_RP
        MOMX(k,i,j) = ENV_U * DENS(k,i,j)
        MOMY(k,i,j) = ENV_V * DENS(k,i,j)
-       qv  (k,i,j) = qv(k,1,1)
+       qv  (k,i,j) = qv_1d(k)
        ! make warm bubble
-       RHOT(k,i,j) = DENS(k,1,1) * ( pott(k,1,1) + BBL_THETA * bubble(k,i,j) )
+       RHOT(k,i,j) = dens_1d(k) * ( pott_1d(k) + BBL_THETA * bubble(k,i,j) )
     enddo
     enddo
     enddo
-    !$acc end parallel
 
     call flux_setup
 
