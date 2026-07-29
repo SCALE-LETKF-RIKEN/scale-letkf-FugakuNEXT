@@ -8,6 +8,12 @@
 !!
 !<
 !-------------------------------------------------------------------------------
+#ifdef _OPENACC
+#define HEVI_FISSION 1
+#endif
+#if defined(HEVI_FISSION) && LSIZE > 1
+#error "HEVI_FISSION is not supported with LSIZE > 1"
+#endif
 
 #ifdef PROFILE_FAPP
 #define PROFILE_START(name) call fapp_start(name, 1, 1)
@@ -35,6 +41,9 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   use scale_const, only: &
      UNDEF  => CONST_UNDEF, &
      IUNDEF => CONST_UNDEF2
+#endif
+#ifdef _OPENACC
+  use nvtx
 #endif
   !-----------------------------------------------------------------------------
   implicit none
@@ -286,15 +295,31 @@ contains
     real(RP) :: Sw(KA,IA,JA)
     real(RP) :: St(KA,IA,JA)
 
+#ifdef HEVI_FISSION
+    real(RP), allocatable :: PT_work(:,:,:)
+    real(RP), allocatable :: Ci_work(:,:,:)
+    real(RP), allocatable :: Co_work(:,:,:)
+    real(RP), allocatable :: F1_work(:,:,:)
+    real(RP), allocatable :: F2_work(:,:,:)
+    real(RP), allocatable :: F3_work(:,:,:)
+#define PT(k,l) PT_work(k,i,j)
+#define Ci(k,l) Ci_work(k,i,j)
+#define Co(k,l) Co_work(k,i,j)
+#define F1(k,l) F1_work(k,i,j)
+#define F2(k,l) F2_work(k,i,j)
+#define F3(k,l) F3_work(k,i,j)
+#else
     real(RP) :: PT(KA,LSIZE)
     real(RP) :: Ci(KS:KE-1,LSIZE)
     real(RP) :: Co(KS:KE-1,LSIZE)
     real(RP) :: F1(KS:KE-1,LSIZE)
     real(RP) :: F2(KS:KE-1,LSIZE)
     real(RP) :: F3(KS:KE-1,LSIZE)
+#endif
 
 #ifdef _OPENACC
     real(RP) :: work(KMAX-1,4) ! for CR
+    integer :: nvtx_level
 #endif
 
     integer :: IIS, IIE, JJS, JJE
@@ -850,12 +875,29 @@ contains
        PROFILE_START("hevi_solver")
 
        call PROF_rapstart("DYN_HEVI", 3)
+       nvtx_level = nvtxRangePush("DYN_HEVI")
+
+#ifdef HEVI_FISSION
+       allocate(PT_work(KA,IS:IE,JS:JE))
+       allocate(Ci_work(KS:KE-1,IS:IE,JS:JE))
+       allocate(Co_work(KS:KE-1,IS:IE,JS:JE))
+       allocate(F1_work(KS:KE-1,IS:IE,JS:JE))
+       allocate(F2_work(KS:KE-1,IS:IE,JS:JE))
+       allocate(F3_work(KS:KE-1,IS:IE,JS:JE))
+       !$acc enter data create(PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work)
+#endif
+       !$acc wait
 
 !OCL INDEPENDENT
 !OCL PREFETCH_SEQUENTIAL(SOFT)
 #ifndef __GFORTRAN__
        !$omp parallel do default(none) OMP_SCHEDULE_ &
-       !$omp private(k,i,j,ii,l,A,B,Ci,Co,F1,F2,F3,PT,pg,advcv) &
+       !$omp private(k,i,j,ii,l,A,B,pg,advcv) &
+#ifdef HEVI_FISSION
+       !$omp shared(PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work) &
+#else
+       !$omp private(PT,Ci,Co,F1,F2,F3)
+#endif
 #ifdef HIST_TEND
        !$omp shared(lhist,pg_t,advcv_t) &
 #endif
@@ -873,16 +915,24 @@ contains
        !$omp shared(MAPF,GSQRT,J33G,CDZ,RCDZ,RFDZ)
 #else
        !$omp parallel do default(shared) private(i,j,k,ii,l) OMP_SCHEDULE_ &
-       !$omp private(A,B,Ci,Co,F1,F2,F3,PT,pg,advcv)
+#ifndef HEVI_FISSION
+       !$omp private(PT,Ci,Co,F1,F2,F3) &
 #endif
-       !$acc kernels
+       !$omp private(A,B,pg,advcv)
+#endif
+       !$acc parallel async(0)
+       !$acc loop collapse(2) &
+#ifndef HEVI_FISSION
+       !$acc private(PT,Ci,Co,F1,F2,F3) &
+#endif
+       !$acc private(work,A)
        do j = JJS, JJE
 #if LSIZE == 1
-       !$acc loop private(F1,F2,F3,PT,Ci,Co,A,work)
        do i = IIS, IIE
 #else
        do ii = IIS, IIE, LSIZE
 
+#ifndef HEVI_FISSION
 #if defined DEBUG || defined QUICKDEBUG
     PT(:,:) = UNDEF
     Ci(:,:) = UNDEF
@@ -891,6 +941,7 @@ contains
     F1(:,:) = UNDEF
     F2(:,:) = UNDEF
     F3(:,:) = 0.0_RP
+#endif
 #endif
 
           do l = 1, LSIZE
@@ -901,10 +952,22 @@ contains
              call ATMOS_DYN_FVM_flux_valueW_Z( PT(:,l), & ! (out)
                   MOMZ(:,i,j), POTT(:,i,j), GSQRT(:,i,j,I_XYZ), & ! (in)
                   CDZ )
+#ifdef HEVI_FISSION__THIS_RESULTS_WORTH_PERFORMANCE
+          end do ! i
+          end do ! j
+          !$acc end parallel
 
+          !$omp parallel do default(none) OMP_SCHEDULE_ &
+          !$omp private(k,i,j,A,B)
+          !$acc parallel async(0)
+          !$acc loop collapse(2) private(A)
+          do j = JJS, JJE
+          do i = IIS, IIE
+#endif
              do k = KS, KE
                 A(k) = dtrk**2 * J33G * RCDZ(k) * RT2P(k,i,j) * J33G / GSQRT(k,i,j,I_XYZ)
              enddo
+
              B = GRAV * dtrk**2 * J33G / ( CDZ(KS+1) + CDZ(KS) )
              F1(KS,l) =        - ( PT(KS+1,l) * RFDZ(KS) *   A(KS+1)         + B ) / GSQRT(KS,i,j,I_XYW)
              F2(KS,l) = 1.0_RP + ( PT(KS  ,l) * RFDZ(KS) * ( A(KS+1)+A(KS) )     ) / GSQRT(KS,i,j,I_XYW)
@@ -914,10 +977,21 @@ contains
                 F2(k,l) = 1.0_RP + ( PT(k  ,l) * RFDZ(k) * ( A(k+1)+A(k) )     ) / GSQRT(k,i,j,I_XYW)
                 F3(k,l) =        - ( PT(k-1,l) * RFDZ(k) *          A(k)   - B ) / GSQRT(k,i,j,I_XYW)
              enddo
-
              B = GRAV * dtrk**2 * J33G / ( CDZ(KE) + CDZ(KE-1) )
              F2(KE-1,l) = 1.0_RP + ( PT(KE-1,l) * RFDZ(KE-1) * ( A(KE)+A(KE-1) )    ) / GSQRT(KE-1,i,j,I_XYW)
              F3(KE-1,l) =        - ( PT(KE-2,l) * RFDZ(KE-1) *         A(KE-1)  - B ) / GSQRT(KE-1,i,j,I_XYW)
+#ifdef HEVI_FISSION
+          end do ! i
+          end do ! j
+          !$acc end parallel
+
+          !$omp parallel do default(none) OMP_SCHEDULE_ &
+          !$omp private(k,i,j,pg)
+          !$acc parallel async(1)
+          !$acc loop collapse(2)
+          do j = JJS, JJE
+          do i = IIS, IIE
+#endif
              do k = KS, KE-1
                 ! use not density at the half level but mean density between CZ(k) and CZ(k+1)
                 pg = - ( DPRES(k+1,i,j) + RT2P(k+1,i,j)*dtrk*St(k+1,i,j) &
@@ -931,6 +1005,29 @@ contains
                 if ( lhist ) pg_t(k,i,j,1) = pg
 #endif
              enddo
+#ifdef HEVI_FISSION
+       end do ! i
+       end do ! j
+       !$acc end parallel
+       !$acc wait
+
+       call MATRIX_SOLVER_tridiagonal( KMAX-1, 1, KMAX-1, &
+                                       IE-IS+1, 1, IE-IS+1, &
+                                       JE-JS+1, 1, JE-JS+1, &
+                                       F1_work(:,:,:), F2_work(:,:,:), F3_work(:,:,:), & ! (in)
+                                       Ci_work(:,:,:),                   & ! (in)
+                                       Co_work(:,:,:)                    ) ! (out)
+
+       !$acc wait
+
+       !$omp parallel do default(none) OMP_SCHEDULE_ &
+       !$omp private(k,i,j,ii,l,advcv)
+       !$acc parallel async(0)
+       !$acc loop collapse(2)
+       do j = JJS, JJE
+       do i = IIS, IIE
+
+#else
 
 #if LSIZE == 1
              call MATRIX_SOLVER_tridiagonal_1D_CR( KMAX-1, 1, KMAX-1, &
@@ -951,6 +1048,8 @@ contains
           do l = 1, LSIZE
              i = ii + l - 1
              if ( i > IIE ) exit
+#endif
+
 #endif
 
 !OCL NORECURRENCE
@@ -979,20 +1078,31 @@ contains
                                + ( Co(k,l) - MOMZ(k,i,j) )
 #endif
              enddo
+#ifdef HEVI_FISSION
+          end do ! i
+          end do ! j
+          !$acc end parallel
+     
+          !$omp parallel do default(none) OMP_SCHEDULE_ &
+          !$omp private(i,j)
+          !$acc parallel async(0)
+          !$acc loop collapse(2)
+          do j = JJS, JJE
+          do i = IIS, IIE
              MOMZ_RK(KS-1,i,j) = 0.0_RP
              MOMZ_RK(KE  ,i,j) = 0.0_RP
-
+          end do ! i
+          end do ! j
+          !$acc end parallel
+     
+          !$omp parallel do default(none) OMP_SCHEDULE_ &
+          !$omp private(k,i,j,advcv)
+          !$acc parallel async(1)
+          !$acc loop collapse(2)
+          do j = JJS, JJE
+          do i = IIS, IIE
+#endif
              ! density and rho*theta
-             advcv = - Co(KS,l)          * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co(KS-1) = 0
-             DENS_RK(KS,i,j) = DENS0(KS,i,j) + dtrk * ( advcv + Sr(KS,i,j) )
-#ifdef HIST_TEND
-             if ( lhist ) advcv_t(KS,i,j,I_DENS) = advcv
-#endif
-             advcv = - Co(KS,l) * PT(KS,l) * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co(KS-1) = 0
-             RHOT_RK(KS,i,j) = RHOT0(KS,i,j) + dtrk * ( advcv + St(KS,i,j) )
-#ifdef HIST_TEND
-             if ( lhist ) advcv_t(KS,i,j,I_RHOT) = advcv
-#endif
 !OCL NORECURRENCE
              do k = KS+1, KE-1
                 advcv = - ( Co(k,l)         - Co(k-1,l) ) &
@@ -1001,6 +1111,21 @@ contains
 #ifdef HIST_TEND
                 if ( lhist ) advcv_t(k,i,j,I_DENS) = advcv
 #endif
+#ifdef HEVI_FISSION
+             end do ! k
+          end do ! i
+          end do ! j
+          !$acc end parallel
+
+          !$omp parallel do default(none) OMP_SCHEDULE_ &
+          !$omp private(k,i,j,advcv)
+          !$acc parallel async(2)
+          !$acc loop collapse(2)
+          do j = JJS, JJE
+          do i = IIS, IIE
+#endif
+!OCL NORECURRENCE
+             do k = KS+1, KE-1
                 advcv = - ( Co(k,l) * PT(k,l) - Co(k-1,l) * PT(k-1,l) ) &
                       * J33G * RCDZ(k) / GSQRT(k,i,j,I_XYZ)
                 RHOT_RK(k,i,j) = RHOT0(k,i,j) + dtrk * ( advcv + St(k,i,j) )
@@ -1008,10 +1133,44 @@ contains
                 if ( lhist ) advcv_t(k,i,j,I_RHOT) = advcv
 #endif
              enddo
+#ifdef HEVI_FISSION
+         end do ! i
+         end do ! j
+         !$acc end parallel
+
+         !$omp parallel do default(none) OMP_SCHEDULE_ &
+         !$omp private(i,j,advcv)
+         !$acc parallel async(1)
+         !$acc loop collapse(2)
+         do j = JJS, JJE
+         do i = IIS, IIE
+#endif
+             advcv = - Co(KS,l)          * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co(KS-1) = 0
+             DENS_RK(KS,i,j) = DENS0(KS,i,j) + dtrk * ( advcv + Sr(KS,i,j) )
+#ifdef HIST_TEND
+             if ( lhist ) advcv_t(KS,i,j,I_DENS) = advcv
+#endif
              advcv = Co(KE-1,l)            * J33G * RCDZ(KE) / GSQRT(KE,i,j,I_XYZ) ! Co(KE) = 0
              DENS_RK(KE,i,j) = DENS0(KE,i,j) + dtrk * ( advcv + Sr(KE,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KE,i,j,I_DENS) = advcv
+#endif
+#ifdef HEVI_FISSION
+         end do ! i
+         end do ! j
+         !$acc end parallel
+
+         !$omp parallel do default(none) OMP_SCHEDULE_ &
+         !$omp private(i,j,advcv)
+         !$acc parallel async(2)
+         !$acc loop collapse(2)
+         do j = JJS, JJE
+         do i = IIS, IIE
+#endif
+             advcv = - Co(KS,l) * PT(KS,l) * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co(KS-1) = 0
+             RHOT_RK(KS,i,j) = RHOT0(KS,i,j) + dtrk * ( advcv + St(KS,i,j) )
+#ifdef HIST_TEND
+             if ( lhist ) advcv_t(KS,i,j,I_RHOT) = advcv
 #endif
              advcv = Co(KE-1,l) * PT(KE-1,l) * J33G * RCDZ(KE) / GSQRT(KE,i,j,I_XYZ) ! Co(KE) = 0
              RHOT_RK(KE,i,j) = RHOT0(KE,i,j) + dtrk * ( advcv + St(KE,i,j) )
@@ -1036,11 +1195,23 @@ contains
 
        enddo
        enddo
-       !$acc end kernels
+       !$acc end parallel
 #ifdef DEBUG
        k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
 
+       !$acc wait
+#ifdef HEVI_FISSION
+       !$acc exit data delete(PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work)
+       deallocate(PT_work)
+       deallocate(Ci_work)
+       deallocate(Co_work)
+       deallocate(F1_work)
+       deallocate(F2_work)
+       deallocate(F3_work)
+#endif
+
+       nvtx_level = nvtxRangePop()
        call PROF_rapend("DYN_HEVI", 3)
 
        PROFILE_STOP("hevi_solver")
