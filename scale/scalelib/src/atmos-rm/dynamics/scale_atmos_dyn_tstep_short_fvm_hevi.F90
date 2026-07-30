@@ -296,6 +296,12 @@ contains
     real(RP) :: St(KA,IA,JA)
 
 #ifdef HEVI_FISSION
+    ! work arrays to pass intermediate values between the split kernels
+    real(RP) :: pg_work(KA,IA,JA)
+    real(RP) :: cf_work(KA,IA,JA)
+#endif
+
+#ifdef HEVI_FISSION
     real(RP), allocatable :: PT_work(:,:,:)
     real(RP), allocatable :: Ci_work(:,:,:)
     real(RP), allocatable :: Co_work(:,:,:)
@@ -387,6 +393,9 @@ contains
     !$acc        BND_W,BND_E,BND_S,BND_N,TwoD,dtrk,last) &
     !$acc create(POTT,DPRES, &
     !$acc        qflx_hi,qflx_J13,qflx_J23, &
+#ifdef HEVI_FISSION
+    !$acc        pg_work,cf_work, &
+#endif
     !$acc        Sr,Sw,St)
 
     do JJS = JS, JE, JBLOCK
@@ -397,7 +406,11 @@ contains
        PROFILE_START("hevi_pres")
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JJS,JJE,IIS,IIE,IA,KS,KE,DPRES0,RT2P,RHOT,REF_rhot,DPRES,DENS,PHI)
+#ifdef HEVI_FISSION
+       !$acc kernels async(0)
+#else
        !$acc kernels
+#endif
        do j = JJS, JJE+1
        do i = IIS, min(IIE+1,IA)
           do k = KS, KE
@@ -409,6 +422,17 @@ contains
 #endif
              DPRES(k,i,j) = DPRES0(k,i,j) + RT2P(k,i,j) * ( RHOT(k,i,j) - REF_rhot(k,i,j) )
           enddo
+#ifdef HEVI_FISSION
+       enddo
+       enddo
+       !$acc end kernels
+
+       !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+       !$omp private(i,j)
+       !$acc kernels async(1)
+       do j = JJS, JJE+1
+       do i = IIS, min(IIE+1,IA)
+#endif
           DPRES(KS-1,i,j) = DPRES0(KS-1,i,j) - DENS(KS,i,j) * ( PHI(KS-1,i,j) - PHI(KS+1,i,j) )
           DPRES(KE+1,i,j) = DPRES0(KE+1,i,j) - DENS(KE,i,j) * ( PHI(KE+1,i,j) - PHI(KE-1,i,j) )
        enddo
@@ -444,10 +468,13 @@ contains
        else
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE,GSQRT,MOMX,MOMY,J13G,J23G,mflx_hi,MAPF,num_diff)
+#ifdef HEVI_FISSION
+          !$acc kernels async(0)
+#else
           !$acc kernels
+#endif
           do j = JJS, JJE
           do i = IIS-1, IIE
-             mflx_hi(KS-1,i,j,ZDIR) = 0.0_RP
              do k = KS, KE-1
 #ifdef DEBUG
                 call CHECK( __LINE__, MOMX(k+1,i  ,j) )
@@ -467,6 +494,18 @@ contains
                                       + MOMY(k  ,i,j)+MOMY(k  ,i,j-1) ) &
                                      + GSQRT(k,i,j,I_XYW) / ( MAPF(i,j,1,I_XY)*MAPF(i,j,2,I_XY) ) * num_diff(k,i,j,I_DENS,ZDIR)
              enddo
+#ifdef HEVI_FISSION
+          enddo
+          enddo
+          !$acc end kernels
+
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j)
+          !$acc kernels async(1)
+          do j = JJS, JJE
+          do i = IIS-1, IIE
+#endif
+             mflx_hi(KS-1,i,j,ZDIR) = 0.0_RP
              mflx_hi(KE  ,i,j,ZDIR) = 0.0_RP
           enddo
           enddo
@@ -529,6 +568,10 @@ contains
 
        !--- update density
        PROFILE_START("hevi_sr")
+#ifdef HEVI_FISSION
+       ! mflx_hi(:,:,:,ZDIR) is computed asynchronously
+       !$acc wait
+#endif
        if ( TwoD ) then
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp private(j,k,advcv,advch) &
@@ -875,7 +918,9 @@ contains
        PROFILE_START("hevi_solver")
 
        call PROF_rapstart("DYN_HEVI", 3)
+#ifdef _OPENACC
        nvtx_level = nvtxRangePush("DYN_HEVI")
+#endif
 
 #ifdef HEVI_FISSION
        allocate(PT_work(KA,IS:IE,JS:JE))
@@ -896,7 +941,7 @@ contains
 #ifdef HEVI_FISSION
        !$omp shared(PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work) &
 #else
-       !$omp private(PT,Ci,Co,F1,F2,F3)
+       !$omp private(PT,Ci,Co,F1,F2,F3) &
 #endif
 #ifdef HIST_TEND
        !$omp shared(lhist,pg_t,advcv_t) &
@@ -1089,12 +1134,14 @@ contains
           !$acc loop collapse(2)
           do j = JJS, JJE
           do i = IIS, IIE
+#endif
              MOMZ_RK(KS-1,i,j) = 0.0_RP
              MOMZ_RK(KE  ,i,j) = 0.0_RP
+#ifdef HEVI_FISSION
           end do ! i
           end do ! j
           !$acc end parallel
-     
+
           !$omp parallel do default(none) OMP_SCHEDULE_ &
           !$omp private(k,i,j,advcv)
           !$acc parallel async(1)
@@ -1123,9 +1170,9 @@ contains
           !$acc loop collapse(2)
           do j = JJS, JJE
           do i = IIS, IIE
-#endif
 !OCL NORECURRENCE
              do k = KS+1, KE-1
+#endif
                 advcv = - ( Co(k,l) * PT(k,l) - Co(k-1,l) * PT(k-1,l) ) &
                       * J33G * RCDZ(k) / GSQRT(k,i,j,I_XYZ)
                 RHOT_RK(k,i,j) = RHOT0(k,i,j) + dtrk * ( advcv + St(k,i,j) )
@@ -1211,7 +1258,9 @@ contains
        deallocate(F3_work)
 #endif
 
+#ifdef _OPENACC
        nvtx_level = nvtxRangePop()
+#endif
        call PROF_rapend("DYN_HEVI", 3)
 
        PROFILE_STOP("hevi_solver")
@@ -1307,6 +1356,9 @@ contains
           iee = min(IIE,IEH)
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,advch,advcv,pg,cf,div) &
+#ifdef HEVI_FISSION
+          !$omp shared(pg_work) &
+#endif
 #ifdef HIST_TEND
           !$omp shared(lhist,advch_t,advcv_t,pg_t,cf_t,ddiv_t) &
 #endif
@@ -1316,7 +1368,11 @@ contains
           !$omp shared(RCDZ,RCDY,RFDX,CDZ,FDX) &
           !$omp shared(MAPF,GSQRT,J13G,I_UY,I_UV,I_UYW,I_UYZ) &
           !$omp shared(dtrk,CORIOLI,divdmp_coef)
+#ifdef HEVI_FISSION
+          !$acc kernels async(0)
+#else
           !$acc kernels
+#endif
           do j = JJS, JJE
           do i = IIS, iee
 !OCL NORECURRENCE
@@ -1340,12 +1396,6 @@ contains
              call CHECK( __LINE__, DDIV(k,i  ,j) )
              call CHECK( __LINE__, MOMX0(k,i,j) )
 #endif
-             advcv = -   ( qflx_hi (k,i,j,ZDIR) - qflx_hi (k-1,i  ,j  ,ZDIR) &
-                         + qflx_J13(k,i,j)      - qflx_J13(k-1,i  ,j       ) &
-                         + qflx_J23(k,i,j)      - qflx_J23(k-1,i  ,j       ) ) * RCDZ(k)
-             advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k  ,i-1,j  ,XDIR) ) * RFDX(i) &
-                       + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k  ,i  ,j-1,YDIR) ) * RCDY(j) ) &
-                   * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY)
              pg = ( ( GSQRT(k,i+1,j,I_XYZ) * DPRES(k,i+1,j) & ! [x,y,z]
                     - GSQRT(k,i  ,j,I_XYZ) * DPRES(k,i  ,j) & ! [x,y,z]
                     ) * RFDX(i) &
@@ -1357,6 +1407,20 @@ contains
                                + F2H(k,2,I_UYZ) * ( DPRES(k-1,i+1,j)+DPRES(k-1,i,j) ) ) & ! [x,y,z->u,y,w]
                     ) * RCDZ(k) ) &
                   * MAPF(i,j,1,I_UY)
+#ifdef HEVI_FISSION
+             pg_work(k,i,j) = pg
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,cf)
+          !$acc kernels async(1)
+          do j = JJS, JJE
+          do i = IIS, iee
+          do k = KS, KE
+#endif
              cf = 0.125_RP * ( CORIOLI(i+1,j  )+CORIOLI(i,j  ) ) & ! [x,y,z->u,y,z]
                 * ( MOMY   (k,i+1,j  )+MOMY   (k,i,j  ) &
                   + MOMY   (k,i+1,j-1)+MOMY   (k,i,j-1) ) &  ! [x,v,z->u,y,z]
@@ -1367,6 +1431,30 @@ contains
                       - MOMX(k,i,j) &
                       * ( 1.0_RP/MAPF(i,j,1,I_UV) - 1.0_RP/MAPF(i,j-1,1,I_UV) ) * RCDY(j) ) &
                 * 2.0_RP / ( DENS(k,i+1,j) + DENS(k,i,j) ) ! metric term
+#ifdef HEVI_FISSION
+             cf_work(k,i,j) = cf
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+          !$acc wait
+
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,advcv,advch,div,pg,cf)
+          !$acc kernels
+          do j = JJS, JJE
+          do i = IIS, iee
+
+          do k = KS, KE
+             pg = pg_work(k,i,j)
+             cf = cf_work(k,i,j)
+#endif
+             advcv = -   ( qflx_hi (k,i,j,ZDIR) - qflx_hi (k-1,i  ,j  ,ZDIR) &
+                         + qflx_J13(k,i,j)      - qflx_J13(k-1,i  ,j       ) &
+                         + qflx_J23(k,i,j)      - qflx_J23(k-1,i  ,j       ) ) * RCDZ(k)
+             advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k  ,i-1,j  ,XDIR) ) * RFDX(i) &
+                       + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k  ,i  ,j-1,YDIR) ) * RCDY(j) ) &
+                   * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY)
              div = divdmp_coef / dtrk * ( DDIV(k,i+1,j)/MAPF(i+1,j,2,I_XY) - DDIV(k,i,j)/MAPF(i,j,1,I_XY) ) &
                  * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) * FDX(i) ! divergence damping
              MOMX_RK(k,i,j) = MOMX0(k,i,j) &
@@ -1499,6 +1587,9 @@ contains
        else
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,advch,advcv,pg,cf,div) &
+#ifdef HEVI_FISSION
+          !$omp shared(pg_work) &
+#endif
 #ifdef HIST_TEND
           !$omp shared(lhist,advch_t,advcv_t,pg_t,cf_t,ddiv_t) &
 #endif
@@ -1508,7 +1599,11 @@ contains
           !$omp shared(RCDZ,RCDX,RFDY,CDZ,FDY) &
           !$omp shared(MAPF,GSQRT,J23G,I_UV) &
           !$omp shared(dtrk,CORIOLI,divdmp_coef)
+#ifdef HEVI_FISSION
+          !$acc kernels async(0)
+#else
           !$acc kernels
+#endif
           do j = JJS, min(JJE,JEH)
           do i = IIS, IIE
 !OCL NORECURRENCE
@@ -1533,12 +1628,6 @@ contains
              call CHECK( __LINE__, MOMY_t(k,i,j) )
              call CHECK( __LINE__, MOMY0(k,i,j) )
 #endif
-             advcv = -   ( qflx_hi (k,i,j,ZDIR) - qflx_hi (k-1,i  ,j  ,ZDIR) &
-                         + qflx_J13(k,i,j)      - qflx_J13(k-1,i  ,j  )      &
-                         + qflx_J23(k,i,j)      - qflx_J23(k-1,i  ,j  )      ) * RCDZ(k)
-             advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k  ,i-1,j  ,XDIR) ) * RCDX(i) &
-                       + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k  ,i  ,j-1,YDIR) ) * RFDY(j) ) &
-                     * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV)
              pg = ( ( GSQRT(k,i,j+1,I_XYZ) * DPRES(k,i,j+1) & ! [x,y,z]
                     - GSQRT(k,i,j  ,I_XYZ) * DPRES(k,i,j  ) & ! [x,y,z]
                     ) * RFDY(j) &
@@ -1550,6 +1639,20 @@ contains
                                + F2H(k-1,2,I_XVZ) * ( DPRES(k-1,i,j+1)+DPRES(k-1,i,j) ) ) & ! [x,y,z->x,v,w]
                     ) * RCDZ(k) ) &
                   * MAPF(i,j,2,I_XV)
+#ifdef HEVI_FISSION
+             pg_work(k,i,j) = pg
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,cf)
+          !$acc kernels async(1)
+          do j = JJS, min(JJE,JEH)
+          do i = IIS, IIE
+          do k = KS, KE
+#endif
              cf = - 0.125_RP * ( CORIOLI(i  ,j+1)+CORIOLI(i  ,j) ) & ! [x,y,z->x,v,z]
                              * ( MOMX   (k,i  ,j+1)+MOMX   (k,i  ,j) &
                                + MOMX   (k,i-1,j+1)+MOMX   (k,i-1,j) ) & ! [u,y,z->x,v,z]
@@ -1560,6 +1663,29 @@ contains
                     - 0.25_RP * ( MOMX(k,i,j)+MOMX(k,i-1,j)+MOMX(k,i,j+1)+MOMX(k,i-1,j+1) ) &
                     * ( 1.0_RP/MAPF(i,j+1,1,I_XY) - 1.0_RP/MAPF(i,j,1,I_XY) ) * RFDY(j) ) &
                   * 2.0_RP / ( DENS(k,i,j+1) + DENS(k,i,j) ) ! metoric term
+#ifdef HEVI_FISSION
+             cf_work(k,i,j) = cf
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+          !$acc wait
+
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,advcv,advch,div,pg,cf)
+          !$acc kernels
+          do j = JJS, min(JJE,JEH)
+          do i = IIS, IIE
+          do k = KS, KE
+             pg = pg_work(k,i,j)
+             cf = cf_work(k,i,j)
+#endif
+             advcv = -   ( qflx_hi (k,i,j,ZDIR) - qflx_hi (k-1,i  ,j  ,ZDIR) &
+                         + qflx_J13(k,i,j)      - qflx_J13(k-1,i  ,j  )      &
+                         + qflx_J23(k,i,j)      - qflx_J23(k-1,i  ,j  )      ) * RCDZ(k)
+             advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k  ,i-1,j  ,XDIR) ) * RCDX(i) &
+                       + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k  ,i  ,j-1,YDIR) ) * RFDY(j) ) &
+                     * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV)
              div = divdmp_coef / dtrk * ( DDIV(k,i,j+1)/MAPF(i,j+1,1,I_XY) - DDIV(k,i,j)/MAPF(i,j,1,I_XY) ) &
                  * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) * FDY(j) ! divergence damping
              MOMY_RK(k,i,j) = MOMY0(k,i,j) &
