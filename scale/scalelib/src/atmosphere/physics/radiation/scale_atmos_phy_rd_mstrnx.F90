@@ -56,6 +56,7 @@ module scale_atmos_phy_rd_mstrnx
   private :: RD_MSTRN_setup
   private :: RD_MSTRN_DTRN3
   private :: RD_MSTRN_two_stream
+  private :: RD_MSTRN_two_stream_RT
 
   !-----------------------------------------------------------------------------
   !
@@ -2275,8 +2276,7 @@ contains
        cldfrac             )
     use scale_const, only: &
        PI   => CONST_PI,   &
-       EPS  => CONST_EPS,  &
-       EPS1 => CONST_EPS1
+       EPS  => CONST_EPS
     implicit none
 
     integer,  intent(in) :: RD_KMAX
@@ -2337,14 +2337,10 @@ contains
     real(RP) :: c0
     real(RP) :: c1
     real(RP) :: c2
-    real(RP) :: Pmns, Ppls ! Phase  function          : two-stream truncation
     real(RP) :: Smns, Spls ! Source function          : two-stream truncation
 
     ! working
     real(RP) :: X, Y                 ! X-, X+
-    real(RP) :: lamda                ! eigenvalue of X-, X+
-    real(RP) :: E
-    real(RP) :: Apls_mns, Bpls_mns   ! A+/A-, B+/B-
     real(DP) :: V0mns, V0pls         ! V0-, V0+
     real(DP) :: V1mns, V1pls         ! V1-, V1+
     real(DP) :: Dmns0, Dmns1, Dmns2  ! D0-, D1-, D2-
@@ -2377,67 +2373,25 @@ contains
     !$acc create(Tdir0, R0, T0, Em_s, Ep_s, tau_bar_sol, R, T, Em, Ep, R12mns, R12pls, E12mns, E12pls)
     !$acc data copyin(cldfrac) if (present(cldfrac))
 
-    !$acc kernels
-    LOOP_INNER
-    do ich = 1, chmax
-    do icloud = 1, ncloud_in
+    if ( irgn == I_LW ) then
+       !$acc parallel
+       !$acc loop collapse(5) independent private(tau, zerosw, omg, tau_new, omg_new, g_new, X, Y, sw)
+       LOOP_INNER
+       do ich = 1, chmax
+       do icloud = 1, ncloud_in
 !OCL LOOP_FISSION_TARGET(LS)
-    do k = 1, rd_kmax
-    !DIR$ SIMD
-    do l = 1, VLEN
+       do k = 1, rd_kmax
+       !DIR$ SIMD
+       do l = 1, VLEN
 
-       !---< two-stream truncation >---
-       tau = tauGAS(l,k,ich,i) + tauPR(l,k,icloud,i)
-       zerosw = 0.5_RP - sign( 0.5_RP, tau-RD_EPS ) ! if tau < EPS, zerosw = 1
+          call RD_MSTRN_two_stream_RT( &
+               irgn, cosSZA(l,i),                                           & ! [IN]
+               tauGAS(l,k,ich,i), tauPR(l,k,icloud,i), omgPR(l,k,icloud,i), & ! [IN]
+               g(l,k,1,icloud,i), g(l,k,2,icloud,i),                        & ! [IN]
+               Tdir0(l,k,icloud,ich,i),                                     & ! [OUT]
+               R0(l,k,icloud,ich,i), T0(l,k,icloud,ich,i),                  & ! [OUT]
+               tau, zerosw, omg, tau_new, omg_new, g_new, X, Y, sw          ) ! [OUT]
 
-       omg = ( 1.0_RP-zerosw ) * omgPR(l,k,icloud,i) / ( tau-zerosw ) &
-           + (        zerosw ) * 1.0_RP
-
-       tau_new = ( 1.0_RP - omg*g(l,k,2,icloud,i) ) * tau
-
-       omg_new = ( 1.0_RP - g(l,k,2,icloud,i) ) / ( 1.0_RP - omg*g(l,k,2,icloud,i) ) * omg
-       omg_new = min( omg_new, EPS1 )
-
-       g_new   = ( g(l,k,1,icloud,i) - g(l,k,2,icloud,i) ) / ( 1.0_RP - g(l,k,2,icloud,i) )
-
-#if defined(NVIDIA) || defined(SX)
-       Tdir0(l,k,icloud,ich,i) = exp( -min( tau_new/cosSZA(l,i), 1.E+3_RP ) ) ! apply exp limiter
-#else
-       Tdir0(l,k,icloud,ich,i) = exp(-tau_new/cosSZA(l,i))
-#endif
-
-       !--- P+, P-
-       Pmns = omg_new * 0.5_RP * ( 1.0_RP - 3.0_RP * g_new * M(irgn)*M(irgn) )
-       Ppls = omg_new * 0.5_RP * ( 1.0_RP + 3.0_RP * g_new * M(irgn)*M(irgn) )
-
-       !---< calculate R, T, e+, e- >---
-       sw = 0.5_RP + sign(0.5_RP,tau_new-RD_EPS)
-
-       !--- X, Y
-       X     =  ( 1.0_RP - W(irgn) * ( Ppls - Pmns ) ) / M(irgn)
-       Y     =  ( 1.0_RP - W(irgn) * ( Ppls + Pmns ) ) / M(irgn)
-       !X     =  max( ( 1.0_RP - W(irgn) * ( Ppls - Pmns ) ) / M(irgn), 1.E-30 )
-       !Y     =  max( ( 1.0_RP - W(irgn) * ( Ppls + Pmns ) ) / M(irgn), 1.E-30 )
-       lamda = sqrt(X*Y)
-#if defined(NVIDIA) || defined(SX)
-       E     = exp( -min( lamda*tau_new, 1.E+3_RP ) ) ! apply exp limiter
-#else
-       E     = exp(-lamda*tau_new)
-#endif
-
-       !--- A+/A-, B+/B-
-       Apls_mns = ( X * ( 1.0_DP+E ) - lamda * ( 1.0_DP-E ) ) &
-                / ( X * ( 1.0_DP+E ) + lamda * ( 1.0_DP-E ) )
-       Bpls_mns = ( X * ( 1.0_DP-E ) - lamda * ( 1.0_DP+E ) ) &
-                / ( X * ( 1.0_DP-E ) + lamda * ( 1.0_DP+E ) )
-
-       !--- R, T
-       R0(l,k,icloud,ich,i) = (        sw ) * 0.5_RP * ( Apls_mns + Bpls_mns ) &
-                            + ( 1.0_RP-sw ) * (          tau_new * (          Pmns ) / M(irgn) )
-       T0(l,k,icloud,ich,i) = (        sw ) * 0.5_RP * ( Apls_mns - Bpls_mns ) &
-                            + ( 1.0_RP-sw ) * ( 1.0_RP - tau_new * ( 1.0_RP - Ppls ) / M(irgn) )
-
-       if ( irgn == I_LW ) then
           !--- thermal source
 
           b0 = bbarh(l,k,i)
@@ -2473,9 +2427,31 @@ contains
                                  + ( 1.0_RP-sw ) * 0.5_RP * tau_new * ( 2.0_RP*c0 + c1*tau_new + c2*tau_new*tau_new )
           Ep_s(l,k,icloud,ich,i) = (        sw ) * ( V1pls - T0(l,k,icloud,ich,i) * V0pls - R0(l,k,icloud,ich,i) * V1mns ) &
                                  + ( 1.0_RP-sw ) * 0.5_RP * tau_new * ( 2.0_RP*c0 + c1*tau_new + c2*tau_new*tau_new )
-       end if
+       enddo
+       enddo
+       enddo
+       enddo
+       LOOP_END_INNER
+       !$acc end parallel
+    else if ( irgn == I_SW ) then
+       !$acc parallel
+       !$acc loop collapse(5) independent private(tau, zerosw, omg, tau_new, omg_new, g_new, X, Y, sw)
+       LOOP_INNER
+       do ich = 1, chmax
+       do icloud = 1, ncloud_in
+!OCL LOOP_FISSION_TARGET(LS)
+       do k = 1, rd_kmax
+       !DIR$ SIMD
+       do l = 1, VLEN
 
-       if ( irgn == I_SW ) then
+          call RD_MSTRN_two_stream_RT( &
+               irgn, cosSZA(l,i),                                           & ! [IN]
+               tauGAS(l,k,ich,i), tauPR(l,k,icloud,i), omgPR(l,k,icloud,i), & ! [IN]
+               g(l,k,1,icloud,i), g(l,k,2,icloud,i),                        & ! [IN]
+               Tdir0(l,k,icloud,ich,i),                                     & ! [OUT]
+               R0(l,k,icloud,ich,i), T0(l,k,icloud,ich,i),                  & ! [OUT]
+               tau, zerosw, omg, tau_new, omg_new, g_new, X, Y, sw          ) ! [OUT]
+
           !--- solar source
 
           !--- S+, S-
@@ -2499,13 +2475,13 @@ contains
                                  + ( 1.0_RP-sw ) * Wmns(irgn) * Smns * tau_new * sqrt( Tdir0(l,k,icloud,ich,i) )
           Ep_s(l,k,icloud,ich,i) = (        sw ) * ( V1pls - T0(l,k,icloud,ich,i) * V0pls - R0(l,k,icloud,ich,i) * V1mns ) &
                                  + ( 1.0_RP-sw ) * Wmns(irgn) * Spls * tau_new * sqrt( Tdir0(l,k,icloud,ich,i) )
-       end if
-    enddo
-    enddo
-    enddo
-    enddo
-    LOOP_END_INNER
-    !$acc end kernels
+       enddo
+       enddo
+       enddo
+       enddo
+       LOOP_END_INNER
+       !$acc end parallel
+    end if
 
     !---< consider partial cloud layer: semi-random over-wrapping >---
 
@@ -2812,5 +2788,89 @@ contains
 
     return
   end subroutine RD_MSTRN_two_stream
+
+  !-----------------------------------------------------------------------------
+  !> Two-stream truncation and R/T calculation (common for LW/SW)
+!OCL SERIAL
+  subroutine RD_MSTRN_two_stream_RT( &
+       irgn, cosSZA,           &
+       tauGAS, tauPR, omgPR,   &
+       g1, g2,                 &
+       Tdir, R, T,             &
+       tau, zerosw, omg,       &
+       tau_new, omg_new, g_new,&
+       X, Y, sw                )
+    !$acc routine seq
+    use scale_const, only: &
+       EPS1 => CONST_EPS1
+    implicit none
+
+    integer,  intent(in), value :: irgn
+    real(RP), intent(in), value :: cosSZA
+    real(RP), intent(in), value :: tauGAS, tauPR, omgPR
+    real(RP), intent(in), value :: g1, g2
+    real(RP), intent(out) :: Tdir, R, T
+    real(RP), intent(out) :: tau, zerosw, omg
+    real(RP), intent(out) :: tau_new, omg_new, g_new
+    real(RP), intent(out) :: X, Y, sw
+
+    real(RP) :: Pmns, Ppls
+    real(RP) :: lamda, E
+    real(RP) :: Apls_mns, Bpls_mns
+    !---------------------------------------------------------------------------
+
+    !---< two-stream truncation >---
+    tau = tauGAS + tauPR
+    zerosw = 0.5_RP - sign( 0.5_RP, tau-RD_EPS ) ! if tau < EPS, zerosw = 1
+
+    omg = ( 1.0_RP-zerosw ) * omgPR / ( tau-zerosw ) &
+        + (        zerosw ) * 1.0_RP
+
+    tau_new = ( 1.0_RP - omg*g2 ) * tau
+
+    omg_new = ( 1.0_RP - g2 ) / ( 1.0_RP - omg*g2 ) * omg
+    omg_new = min( omg_new, EPS1 )
+
+    g_new   = ( g1 - g2 ) / ( 1.0_RP - g2 )
+
+#if defined(NVIDIA) || defined(SX)
+    Tdir = exp( -min( tau_new/cosSZA, 1.E+3_RP ) ) ! apply exp limiter
+#else
+    Tdir = exp(-tau_new/cosSZA)
+#endif
+
+    !--- P+, P-
+    Pmns = omg_new * 0.5_RP * ( 1.0_RP - 3.0_RP * g_new * M(irgn)*M(irgn) )
+    Ppls = omg_new * 0.5_RP * ( 1.0_RP + 3.0_RP * g_new * M(irgn)*M(irgn) )
+
+    !---< calculate R, T, e+, e- >---
+    sw = 0.5_RP + sign(0.5_RP,tau_new-RD_EPS)
+
+    !--- X, Y
+    X     =  ( 1.0_RP - W(irgn) * ( Ppls - Pmns ) ) / M(irgn)
+    Y     =  ( 1.0_RP - W(irgn) * ( Ppls + Pmns ) ) / M(irgn)
+    !X     =  max( ( 1.0_RP - W(irgn) * ( Ppls - Pmns ) ) / M(irgn), 1.E-30 )
+    !Y     =  max( ( 1.0_RP - W(irgn) * ( Ppls + Pmns ) ) / M(irgn), 1.E-30 )
+    lamda = sqrt(X*Y)
+#if defined(NVIDIA) || defined(SX)
+    E     = exp( -min( lamda*tau_new, 1.E+3_RP ) ) ! apply exp limiter
+#else
+    E     = exp(-lamda*tau_new)
+#endif
+
+    !--- A+/A-, B+/B-
+    Apls_mns = ( X * ( 1.0_DP+E ) - lamda * ( 1.0_DP-E ) ) &
+             / ( X * ( 1.0_DP+E ) + lamda * ( 1.0_DP-E ) )
+    Bpls_mns = ( X * ( 1.0_DP-E ) - lamda * ( 1.0_DP+E ) ) &
+             / ( X * ( 1.0_DP-E ) + lamda * ( 1.0_DP+E ) )
+
+    !--- R, T
+    R = (        sw ) * 0.5_RP * ( Apls_mns + Bpls_mns ) &
+      + ( 1.0_RP-sw ) * (          tau_new * (          Pmns ) / M(irgn) )
+    T = (        sw ) * 0.5_RP * ( Apls_mns - Bpls_mns ) &
+      + ( 1.0_RP-sw ) * ( 1.0_RP - tau_new * ( 1.0_RP - Ppls ) / M(irgn) )
+
+    return
+  end subroutine RD_MSTRN_two_stream_RT
 
 end module scale_atmos_phy_rd_mstrnx
