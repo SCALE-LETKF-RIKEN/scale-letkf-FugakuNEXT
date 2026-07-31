@@ -11,9 +11,6 @@
 #ifdef _OPENACC
 #define HEVI_FISSION 1
 #endif
-#if defined(HEVI_FISSION) && LSIZE > 1
-#error "HEVI_FISSION is not supported with LSIZE > 1"
-#endif
 
 #ifdef PROFILE_FAPP
 #define PROFILE_START(name) call fapp_start(name, 1, 1)
@@ -23,7 +20,23 @@
 #define PROFILE_STOP(name)
 #endif
 
+! NVTX is provided by the NVHPC compiler (-cudalib=nvtx)
+#if defined(_OPENACC) && defined(NVIDIA)
+#define NVTX_PUSH(name) nvtx_level = nvtxRangePush(name)
+#define NVTX_POP()      nvtx_level = nvtxRangePop()
+#else
+#define NVTX_PUSH(name)
+#define NVTX_POP()
+#endif
+
 #include "scalelib.h"
+
+! the vector length macro is defined in scalelib.h,
+! so this check must come after the include
+#if defined(HEVI_FISSION) && LSIZE > 1
+#error "HEVI_FISSION is not supported with LSIZE > 1"
+#endif
+
 module scale_atmos_dyn_tstep_short_fvm_hevi
   !-----------------------------------------------------------------------------
   !
@@ -42,7 +55,7 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
      UNDEF  => CONST_UNDEF, &
      IUNDEF => CONST_UNDEF2
 #endif
-#ifdef _OPENACC
+#if defined(_OPENACC) && defined(NVIDIA)
   use nvtx
 #endif
   !-----------------------------------------------------------------------------
@@ -188,6 +201,10 @@ contains
     use scale_matrix, only: &
        MATRIX_SOLVER_TRIDIAGONAL, &
        MATRIX_SOLVER_TRIDIAGONAL_1D_CR
+#if defined(HEVI_FISSION) && defined(USE_CUDALIB)
+    use scale_prc, only: &
+       PRC_abort
+#endif
     implicit none
 
     real(RP), intent(out) :: DENS_RK(KA,IA,JA)   ! prognostic variables
@@ -308,6 +325,9 @@ contains
     real(RP), allocatable :: F1_work(:,:,:)
     real(RP), allocatable :: F2_work(:,:,:)
     real(RP), allocatable :: F3_work(:,:,:)
+    ! The i and j indices are taken implicitly from the enclosing loop, so these
+    ! macros must only be used inside the body of an (i,j) loop nest.
+    ! They are #undef'ed just after the end of this subroutine.
 #define PT(k,l) PT_work(k,i,j)
 #define Ci(k,l) Ci_work(k,i,j)
 #define Co(k,l) Co_work(k,i,j)
@@ -325,6 +345,8 @@ contains
 
 #ifdef _OPENACC
     real(RP) :: work(KMAX-1,4) ! for CR
+#endif
+#if defined(_OPENACC) && defined(NVIDIA)
     integer :: nvtx_level
 #endif
 
@@ -370,11 +392,33 @@ contains
     call fipp_start()
 #endif
 
+#if defined(HEVI_FISSION) && defined(USE_CUDALIB)
+    ! The cuSPARSE branch of MATRIX_SOLVER_tridiagonal_3D solves the whole
+    ! (IA,JA) plane in one batched call and ignores the IS:IE / JS:JE loop
+    ! range, so with cache blocking it would repeat the full-plane solve for
+    ! every block and read the work arrays outside the current block, which
+    ! are not filled yet.
+    if ( IBLOCK /= IMAX .or. JBLOCK /= JMAX ) then
+       LOG_ERROR("ATMOS_DYN_Tstep_short_fvm_hevi",*) 'cache blocking is not supported with cuSPARSE. Set IBLOCK = IMAX and JBLOCK = JMAX. Check!'
+       call PRC_abort
+    end if
+#endif
+
     IFS_OFF = 1
     JFS_OFF = 1
     if ( BND_W ) IFS_OFF = 0
     if ( BND_S ) JFS_OFF = 0
 
+#ifdef HEVI_FISSION
+    ! allocated here (not inside the block loop) to avoid repeated device
+    ! allocation, and freed on return so that no memory is held outside dynamics
+    allocate( PT_work(KA,      IS:IE, JS:JE) )
+    allocate( Ci_work(KS:KE-1, IS:IE, JS:JE) )
+    allocate( Co_work(KS:KE-1, IS:IE, JS:JE) )
+    allocate( F1_work(KS:KE-1, IS:IE, JS:JE) )
+    allocate( F2_work(KS:KE-1, IS:IE, JS:JE) )
+    allocate( F3_work(KS:KE-1, IS:IE, JS:JE) )
+#endif
 
     !$acc data &
     !$acc copy(mflx_hi) &
@@ -395,6 +439,7 @@ contains
     !$acc        qflx_hi,qflx_J13,qflx_J23, &
 #ifdef HEVI_FISSION
     !$acc        pg_work,cf_work, &
+    !$acc        PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work, &
 #endif
     !$acc        Sr,Sw,St)
 
@@ -918,31 +963,24 @@ contains
        PROFILE_START("hevi_solver")
 
        call PROF_rapstart("DYN_HEVI", 3)
-#ifdef _OPENACC
-       nvtx_level = nvtxRangePush("DYN_HEVI")
-#endif
+       NVTX_PUSH("DYN_HEVI")
 
 #ifdef HEVI_FISSION
-       allocate(PT_work(KA,IS:IE,JS:JE))
-       allocate(Ci_work(KS:KE-1,IS:IE,JS:JE))
-       allocate(Co_work(KS:KE-1,IS:IE,JS:JE))
-       allocate(F1_work(KS:KE-1,IS:IE,JS:JE))
-       allocate(F2_work(KS:KE-1,IS:IE,JS:JE))
-       allocate(F3_work(KS:KE-1,IS:IE,JS:JE))
-       !$acc enter data create(PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work)
+       ! Note: async(0) is a queue distinct from the synchronous (null) queue,
+       !       so there is no implicit ordering between them. Every dependency
+       !       between the split kernels below is enforced by an explicit wait.
 #endif
-       !$acc wait
 
 !OCL INDEPENDENT
 !OCL PREFETCH_SEQUENTIAL(SOFT)
+#ifdef HEVI_FISSION
+       !$omp parallel do default(shared) OMP_SCHEDULE_ &
+       !$omp private(k,i,j,A,B)
+#else
 #ifndef __GFORTRAN__
        !$omp parallel do default(none) OMP_SCHEDULE_ &
        !$omp private(k,i,j,ii,l,A,B,pg,advcv) &
-#ifdef HEVI_FISSION
-       !$omp shared(PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work) &
-#else
        !$omp private(PT,Ci,Co,F1,F2,F3) &
-#endif
 #ifdef HIST_TEND
        !$omp shared(lhist,pg_t,advcv_t) &
 #endif
@@ -960,10 +998,9 @@ contains
        !$omp shared(MAPF,GSQRT,J33G,CDZ,RCDZ,RFDZ)
 #else
        !$omp parallel do default(shared) private(i,j,k,ii,l) OMP_SCHEDULE_ &
-#ifndef HEVI_FISSION
        !$omp private(PT,Ci,Co,F1,F2,F3) &
-#endif
        !$omp private(A,B,pg,advcv)
+#endif
 #endif
        !$acc parallel async(0)
        !$acc loop collapse(2) &
@@ -997,22 +1034,30 @@ contains
              call ATMOS_DYN_FVM_flux_valueW_Z( PT(:,l), & ! (out)
                   MOMZ(:,i,j), POTT(:,i,j), GSQRT(:,i,j,I_XYZ), & ! (in)
                   CDZ )
-#ifdef HEVI_FISSION__THIS_RESULTS_WORTH_PERFORMANCE
-          end do ! i
-          end do ! j
-          !$acc end parallel
-
-          !$omp parallel do default(none) OMP_SCHEDULE_ &
-          !$omp private(k,i,j,A,B)
-          !$acc parallel async(0)
-          !$acc loop collapse(2) private(A)
-          do j = JJS, JJE
-          do i = IIS, IIE
-#endif
+             ! An additional fission point was evaluated here, splitting the PT
+             ! calculation above from the A, B and F1-F3 calculations below.
+             ! It degraded performance, and is kept only as a record:
+             !    enddo ! i
+             !    enddo ! j
+             !    !$acc end parallel
+             !
+             !    !$omp parallel do default(shared) OMP_SCHEDULE_ private(k,i,j,A,B)
+             !    !$acc parallel async(0)
+             !    !$acc loop collapse(2) private(A)
+             !    do j = JJS, JJE
+             !    do i = IIS, IIE
              do k = KS, KE
                 A(k) = dtrk**2 * J33G * RCDZ(k) * RT2P(k,i,j) * J33G / GSQRT(k,i,j,I_XYZ)
              enddo
 
+             ! Note: F3(KS,l) (the sub-diagonal of the first row) and F1(KE-1,l)
+             !       (the super-diagonal of the last row) are deliberately left
+             !       unset. They are outside the tridiagonal system and none of
+             !       the solvers currently used reads them (see the note in
+             !       MATRIX_SOLVER_tridiagonal_1D_CR in scale_matrix.F90).
+             !       Zeroing them costs a measurable amount of time, so it is
+             !       not done. If the solver implementation is changed, check
+             !       whether the new one requires them to be zero.
              B = GRAV * dtrk**2 * J33G / ( CDZ(KS+1) + CDZ(KS) )
              F1(KS,l) =        - ( PT(KS+1,l) * RFDZ(KS) *   A(KS+1)         + B ) / GSQRT(KS,i,j,I_XYW)
              F2(KS,l) = 1.0_RP + ( PT(KS  ,l) * RFDZ(KS) * ( A(KS+1)+A(KS) )     ) / GSQRT(KS,i,j,I_XYW)
@@ -1026,11 +1071,11 @@ contains
              F2(KE-1,l) = 1.0_RP + ( PT(KE-1,l) * RFDZ(KE-1) * ( A(KE)+A(KE-1) )    ) / GSQRT(KE-1,i,j,I_XYW)
              F3(KE-1,l) =        - ( PT(KE-2,l) * RFDZ(KE-1) *         A(KE-1)  - B ) / GSQRT(KE-1,i,j,I_XYW)
 #ifdef HEVI_FISSION
-          end do ! i
-          end do ! j
+          enddo ! i
+          enddo ! j
           !$acc end parallel
 
-          !$omp parallel do default(none) OMP_SCHEDULE_ &
+          !$omp parallel do default(shared) OMP_SCHEDULE_ &
           !$omp private(k,i,j,pg)
           !$acc parallel async(1)
           !$acc loop collapse(2)
@@ -1051,22 +1096,31 @@ contains
 #endif
              enddo
 #ifdef HEVI_FISSION
-       end do ! i
-       end do ! j
+       enddo ! i
+       enddo ! j
        !$acc end parallel
+       ! wait for F1_work/F2_work/F3_work (async(0)) and Ci_work (async(1))
        !$acc wait
 
-       call MATRIX_SOLVER_tridiagonal( KMAX-1, 1, KMAX-1, &
-                                       IE-IS+1, 1, IE-IS+1, &
-                                       JE-JS+1, 1, JE-JS+1, &
+       ! Only the current block (IIS:IIE, JJS:JJE) of the work arrays has been
+       ! filled, so the solver must be restricted to it. The lower bounds of the
+       ! actual arguments are IS/JS, but they are re-mapped to 1 in the dummy
+       ! arguments, hence the IS-1 / JS-1 shift.
+       ! Note: the cuSPARSE branch of the solver ignores this range and always
+       !       solves the whole plane, which is why cache blocking is rejected
+       !       at the top of this subroutine when USE_CUDALIB is set.
+       call MATRIX_SOLVER_tridiagonal( KMAX-1, 1,         KMAX-1,   &
+                                       IE-IS+1, IIS-IS+1, IIE-IS+1, &
+                                       JE-JS+1, JJS-JS+1, JJE-JS+1, &
                                        F1_work(:,:,:), F2_work(:,:,:), F3_work(:,:,:), & ! (in)
                                        Ci_work(:,:,:),                   & ! (in)
                                        Co_work(:,:,:)                    ) ! (out)
 
+       ! wait for Co_work
        !$acc wait
 
-       !$omp parallel do default(none) OMP_SCHEDULE_ &
-       !$omp private(k,i,j,ii,l,advcv)
+       !$omp parallel do default(shared) OMP_SCHEDULE_ &
+       !$omp private(k,i,j)
        !$acc parallel async(0)
        !$acc loop collapse(2)
        do j = JJS, JJE
@@ -1124,11 +1178,11 @@ contains
 #endif
              enddo
 #ifdef HEVI_FISSION
-          end do ! i
-          end do ! j
+          enddo ! i
+          enddo ! j
           !$acc end parallel
-     
-          !$omp parallel do default(none) OMP_SCHEDULE_ &
+
+          !$omp parallel do default(shared) OMP_SCHEDULE_ &
           !$omp private(i,j)
           !$acc parallel async(0)
           !$acc loop collapse(2)
@@ -1138,11 +1192,11 @@ contains
              MOMZ_RK(KS-1,i,j) = 0.0_RP
              MOMZ_RK(KE  ,i,j) = 0.0_RP
 #ifdef HEVI_FISSION
-          end do ! i
-          end do ! j
+          enddo ! i
+          enddo ! j
           !$acc end parallel
 
-          !$omp parallel do default(none) OMP_SCHEDULE_ &
+          !$omp parallel do default(shared) OMP_SCHEDULE_ &
           !$omp private(k,i,j,advcv)
           !$acc parallel async(1)
           !$acc loop collapse(2)
@@ -1159,12 +1213,12 @@ contains
                 if ( lhist ) advcv_t(k,i,j,I_DENS) = advcv
 #endif
 #ifdef HEVI_FISSION
-             end do ! k
-          end do ! i
-          end do ! j
+             enddo ! k
+          enddo ! i
+          enddo ! j
           !$acc end parallel
 
-          !$omp parallel do default(none) OMP_SCHEDULE_ &
+          !$omp parallel do default(shared) OMP_SCHEDULE_ &
           !$omp private(k,i,j,advcv)
           !$acc parallel async(2)
           !$acc loop collapse(2)
@@ -1181,45 +1235,45 @@ contains
 #endif
              enddo
 #ifdef HEVI_FISSION
-         end do ! i
-         end do ! j
-         !$acc end parallel
+          enddo ! i
+          enddo ! j
+          !$acc end parallel
 
-         !$omp parallel do default(none) OMP_SCHEDULE_ &
-         !$omp private(i,j,advcv)
-         !$acc parallel async(1)
-         !$acc loop collapse(2)
-         do j = JJS, JJE
-         do i = IIS, IIE
+          !$omp parallel do default(shared) OMP_SCHEDULE_ &
+          !$omp private(i,j,advcv)
+          !$acc parallel async(1)
+          !$acc loop collapse(2)
+          do j = JJS, JJE
+          do i = IIS, IIE
 #endif
-             advcv = - Co(KS,l)          * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co(KS-1) = 0
+             advcv = - Co(KS,l)          * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co at KS-1 is 0
              DENS_RK(KS,i,j) = DENS0(KS,i,j) + dtrk * ( advcv + Sr(KS,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KS,i,j,I_DENS) = advcv
 #endif
-             advcv = Co(KE-1,l)            * J33G * RCDZ(KE) / GSQRT(KE,i,j,I_XYZ) ! Co(KE) = 0
+             advcv = Co(KE-1,l)            * J33G * RCDZ(KE) / GSQRT(KE,i,j,I_XYZ) ! Co at KE is 0
              DENS_RK(KE,i,j) = DENS0(KE,i,j) + dtrk * ( advcv + Sr(KE,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KE,i,j,I_DENS) = advcv
 #endif
 #ifdef HEVI_FISSION
-         end do ! i
-         end do ! j
-         !$acc end parallel
+          enddo ! i
+          enddo ! j
+          !$acc end parallel
 
-         !$omp parallel do default(none) OMP_SCHEDULE_ &
-         !$omp private(i,j,advcv)
-         !$acc parallel async(2)
-         !$acc loop collapse(2)
-         do j = JJS, JJE
-         do i = IIS, IIE
+          !$omp parallel do default(shared) OMP_SCHEDULE_ &
+          !$omp private(i,j,advcv)
+          !$acc parallel async(2)
+          !$acc loop collapse(2)
+          do j = JJS, JJE
+          do i = IIS, IIE
 #endif
-             advcv = - Co(KS,l) * PT(KS,l) * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co(KS-1) = 0
+             advcv = - Co(KS,l) * PT(KS,l) * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co at KS-1 is 0
              RHOT_RK(KS,i,j) = RHOT0(KS,i,j) + dtrk * ( advcv + St(KS,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KS,i,j,I_RHOT) = advcv
 #endif
-             advcv = Co(KE-1,l) * PT(KE-1,l) * J33G * RCDZ(KE) / GSQRT(KE,i,j,I_XYZ) ! Co(KE) = 0
+             advcv = Co(KE-1,l) * PT(KE-1,l) * J33G * RCDZ(KE) / GSQRT(KE,i,j,I_XYZ) ! Co at KE is 0
              RHOT_RK(KE,i,j) = RHOT0(KE,i,j) + dtrk * ( advcv + St(KE,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KE,i,j,I_RHOT) = advcv
@@ -1247,20 +1301,12 @@ contains
        k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
 
-       !$acc wait
 #ifdef HEVI_FISSION
-       !$acc exit data delete(PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work)
-       deallocate(PT_work)
-       deallocate(Ci_work)
-       deallocate(Co_work)
-       deallocate(F1_work)
-       deallocate(F2_work)
-       deallocate(F3_work)
+       ! wait for DENS_RK (async(1)) and RHOT_RK (async(2))
+       !$acc wait
 #endif
 
-#ifdef _OPENACC
-       nvtx_level = nvtxRangePop()
-#endif
+       NVTX_POP()
        call PROF_rapend("DYN_HEVI", 3)
 
        PROFILE_STOP("hevi_solver")
@@ -1437,6 +1483,7 @@ contains
           enddo
           enddo
           !$acc end kernels
+          ! wait for pg_work (async(0)) and cf_work (async(1))
           !$acc wait
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
@@ -1669,6 +1716,7 @@ contains
           enddo
           enddo
           !$acc end kernels
+          ! wait for pg_work (async(0)) and cf_work (async(1))
           !$acc wait
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
@@ -1749,8 +1797,26 @@ contains
 
     !$acc end data
 
+#ifdef HEVI_FISSION
+    deallocate( PT_work )
+    deallocate( Ci_work )
+    deallocate( Co_work )
+    deallocate( F1_work )
+    deallocate( F2_work )
+    deallocate( F3_work )
+#endif
+
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_hevi
+
+#ifdef HEVI_FISSION
+#undef PT
+#undef Ci
+#undef Co
+#undef F1
+#undef F2
+#undef F3
+#endif
 
 #ifdef DEBUG
 !OCL SERIAL

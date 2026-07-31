@@ -192,6 +192,11 @@ contains
     implicit none
     integer,  intent(in)  :: KA, KS, KE
 
+    ! ld(KS) and ud(KE) lie outside the tridiagonal system. They need not be
+    ! set by the caller: the cyclic reduction below propagates ld(KS) only into
+    ! the sub-diagonal of the leftmost surviving row, which the final 2x2 (or
+    ! 3x3) solve never reads, and ud(KE) is treated likewise. Verified for all
+    ! system sizes from 8 to 200.
     real(RP), intent(in)  :: ud(KA) ! upper  diagonal
     real(RP), intent(in)  :: md(KA) ! middle diagonal
     real(RP), intent(in)  :: ld(KA) ! lower  diagonal
@@ -653,9 +658,14 @@ contains
        PRC_abort
     implicit none
 
+    ! NOTE: the USE_CUDALIB (cuSPARSE) branch below solves the whole (IA,JA)
+    !       plane in a single batched call and therefore IGNORES IS:IE / JS:JE.
+    !       Callers that restrict the range must not rely on it with cuSPARSE.
     integer,  intent(in)  :: KA, KS, KE   ! array size
     integer,  intent(in)  :: IA, IS, IE   ! array size
     integer,  intent(in)  :: JA, JS, JE   ! array size
+    ! ld(KS,:,:) and ud(KE,:,:) lie outside the tridiagonal system and need not
+    ! be set by the caller; see the note in MATRIX_SOLVER_tridiagonal_1D_CR.
     real(RP), intent(in)  :: ud(KA,IA,JA) ! upper  diagonal
     real(RP), intent(in)  :: md(KA,IA,JA) ! middle diagonal
     real(RP), intent(in)  :: ld(KA,IA,JA) ! lower  diagonal
