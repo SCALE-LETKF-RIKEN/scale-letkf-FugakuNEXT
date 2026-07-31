@@ -659,7 +659,7 @@ contains
        !$omp         gamma) &
        !$omp shared (tropopause,pres,temp,CZ, &
        !$omp         KS,KE,IS,IE,JS,JE)
-       !$acc kernels
+       !$acc kernels async(0)
        do j  = JS, JE
        do i  = IS, IE
           tropopause(i,j) = KE+1
@@ -682,7 +682,7 @@ contains
        !$omp shared (tropopause, &
        !$omp         KE,IS,IE,JS,JE)
 !OCL XFILL
-       !$acc kernels
+       !$acc kernels async(0)
        do j  = JS, JE
        do i  = IS, IE
           tropopause(i,j) = KE+1
@@ -740,7 +740,7 @@ contains
     end if
     aerosol_conc_merge = 0.0_RP
     aerosol_radi_merge = 0.0_RP
-    !$acc kernels
+    !$acc kernels async(0)
     solins_ij(:,:) = 0.0_RP
     cosSZA_ij(:,:) = 1.0_RP
     temp_sfc_ij(:,:) = 300.0_RP
@@ -755,7 +755,7 @@ contains
     !$omp parallel do default(none)                                           &
     !$omp shared(JS,JE,IS,IE,RD_KADD,temph_merge,RD_temph,KE,RD_KMAX,KS,temp,CZ,FZ) &
     !$omp private(i,j,k,RD_k,ij,i1,i2) OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async(0)
     !$acc loop collapse(2) independent
     do j = JS, JE
     do i = IS, IE
@@ -785,7 +785,7 @@ contains
     !$omp shared (RD_temp,dens,FZ,pres,temp, &
     !$omp         rhodz_merge,RD_rhodz,pres_merge,RD_pres,temp_merge, &
     !$omp         KS,JS,JE,IS,IE,RD_KMAX,RD_KADD)
-    !$acc kernels
+    !$acc kernels async(0)
     !$acc loop collapse(2) independent
     do j = JS, JE
     do i = IS, IE
@@ -814,7 +814,7 @@ contains
     !$omp private(v,i,j,RD_k,ij,i1,i2) &
     !$omp shared (gas_merge,RD_gas, &
     !$omp         IS,IE,JS,JE,RD_KMAX)
-    !$acc kernels
+    !$acc kernels async(0)
     !$acc loop collapse(3) independent
     do v = 1,  MSTRN_ngas
     do j = JS, JE
@@ -836,7 +836,7 @@ contains
     !$omp         zerosw ) &
     !$omp shared (gas_merge,QV,EPS,Mvap,Mdry, &
     !$omp         KS,IS,IE,JS,JE,RD_KADD,RD_KMAX)
-    !$acc kernels
+    !$acc kernels async(0)
     !$acc loop collapse(2) independent
     do j = JS, JE
     do i = IS, IE
@@ -858,7 +858,7 @@ contains
     !$omp private(v,i,j,RD_k,ij,i1,i2) &
     !$omp shared (cfc_merge,RD_cfc, &
     !$omp         IS,IE,JS,JE,RD_KMAX)
-    !$acc kernels
+    !$acc kernels async(0)
     !$acc loop collapse(3) independent
     do v = 1,  MSTRN_ncfc
     do j = JS, JE
@@ -880,7 +880,7 @@ contains
        !$omp private(k,i,j,RD_k,ij,i1,i2) &
        !$omp shared (cldfrac_merge,RD_cldfrac,cldfrac, &
        !$omp         KS,IS,IE,JS,JE,RD_KMAX,RD_KADD)
-       !$acc kernels
+       !$acc kernels async(0)
        !$acc loop collapse(2) independent
        do j = JS, JE
        do i = IS, IE
@@ -908,7 +908,7 @@ contains
     !$omp private(v,i,j,RD_k,ij,i1,i2) &
     !$omp shared (aerosol_conc_merge,RD_aerosol_conc,aerosol_radi_merge,RD_aerosol_radi, &
     !$omp         IS,IE,JS,JE,RD_KADD)
-    !$acc kernels
+    !$acc kernels async(0)
     !$acc loop collapse(3) independent
     do v = 1,  RD_naero
     do j = JS, JE
@@ -937,7 +937,7 @@ contains
             ( ihydro /= I_HC .and. ihydro /= I_HI ) ) then
 !OCL XFILL
           !$omp do OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async(0)
           !$acc loop collapse(2) independent
           do j = JS, JE
           do i = IS, IE
@@ -954,7 +954,7 @@ contains
           !$omp end do nowait
        else
           !$omp do OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async(0)
           !$acc loop collapse(2) independent
           do j = JS, JE
           do i = IS, IE
@@ -985,7 +985,7 @@ contains
     !$omp private(ihydro,k,i,j,RD_k,ij,i1,i2) &
     !$omp shared (aerosol_radi_merge,MP_Re, &
     !$omp         KS,IS,IE,JS,JE,RD_KMAX,RD_KADD)
-    !$acc kernels
+    !$acc kernels async(0)
     !$acc loop collapse(3) independent
     do ihydro = 1, N_HYD
     do j = JS, JE
@@ -1012,7 +1012,7 @@ contains
 
        if ( ATMOS_PHY_RD_MSTRN_USE_AERO ) then
           !$omp do OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async(0)
           !$acc loop collapse(2) independent
           do j = JS, JE
           do i = IS, IE
@@ -1031,7 +1031,7 @@ contains
           !$omp end do nowait
        else
           !$omp do OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async(0)
           !$acc loop collapse(2) independent
           do j = JS, JE
           do i = IS, IE
@@ -1052,7 +1052,7 @@ contains
     !$omp end parallel
 
     !$omp parallel do private(i,j,ij,i1,i2)
-    !$acc kernels
+    !$acc kernels async(0)
     !$acc loop collapse(2) independent
     do j = JS, JE
     do i = IS, IE
@@ -1072,7 +1072,7 @@ contains
 
     !$omp parallel do collapse(3) &
     !$omp private(irgn_alb,idir,i,j,ij,i1,i2)
-    !$acc parallel
+    !$acc parallel async(0)
     !$acc loop collapse(4)
     do irgn_alb = 1, N_RAD_RGN
     do idir = 1, N_RAD_DIR
@@ -1151,7 +1151,7 @@ contains
     !$omp private(ic,k,i,j,RD_k,ij,i1,i2) &
     !$omp shared (flux_rad,flux_rad_merge, &
     !$omp         KS,IS,IE,JS,JE,RD_KMAX,RD_KADD,ncloud_out)
-    !$acc parallel
+    !$acc parallel async(0)
     !$acc loop collapse(3) independent
     do ic = 1, ncloud_out
     do j  = JS, JE
@@ -1179,7 +1179,7 @@ contains
     !$omp private(ic,i,j,ij,i1,i2) &
     !$omp shared (flux_rad_top,flux_rad_merge, &
     !$omp         IS,IE,JS,JE,ncloud_out)
-    !$acc kernels
+    !$acc kernels async(0)
     do ic = 1, ncloud_out
     do j  = JS, JE
     do i  = IS, IE
@@ -1201,7 +1201,7 @@ contains
     !$omp private(irgn_alb,idir,i,j,ij,i1,i2) &
     !$omp shared (flux_rad_sfc_dn,flux_rad_sfc_dn_ij, &
     !$omp         IS,IE,JS,JE)
-    !$acc kernels
+    !$acc kernels async(0)
     do irgn_alb = 1, N_RAD_RGN
     do idir = 1, N_RAD_DIR
     do j  = JS, JE
@@ -1223,7 +1223,7 @@ contains
        !$omp private(k,i,j,RD_k,ij,i1,i2) &
        !$omp shared (dtau_s,tauCLD_067u, &
        !$omp         KS,IS,IE,JS,JE,RD_KMAX,RD_KADD)
-       !$acc parallel
+       !$acc parallel async(0)
        !$acc loop collapse(2) independent
        do j = JS, JE
        do i = IS, IE
@@ -1246,7 +1246,7 @@ contains
        !$omp private(k,i,j,RD_k,ij,i1,i2) &
        !$omp shared (dem_s,emisCLD_105u, &
        !$omp         KS,IS,IE,JS,JE,RD_KMAX,RD_KADD)
-       !$acc parallel
+       !$acc parallel async(0)
        !$acc loop collapse(2) independent
        do j = JS, JE
        do i = IS, IE
@@ -1265,6 +1265,8 @@ contains
     end if
 
     call PROF_rapend('RD_Transpose', 3)
+
+    !$acc wait
 
     if ( use_cldfrac ) then
        !$acc exit data delete(cldfrac_work)
@@ -1754,7 +1756,7 @@ contains
     !$acc create(dz_std, indexP, factP, factT32, factT21, indexR, factR, cosSZA, optparam, tauGAS, tauPR, omgPR, g, bbar, bbarh, b_sfc, fsol_rgn)
     !$acc data copyin(cldfrac) if (present(cldfrac))
 
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     do l = 1, VLEN
        cosSZA(l,i) = max( cosSZA0(l,i), RD_cosSZA_min )
@@ -1762,7 +1764,7 @@ contains
     LOOP_END_INNER
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     do k = 1, rd_kmax
     !DIR$ SIMD
@@ -1792,7 +1794,7 @@ contains
     !$acc end kernels
 
     !---< interpolation of mode radius & hygroscopic parameter (R-fitting) >---
-    !$acc parallel
+    !$acc parallel async(0)
     !$acc loop collapse(2)
     LOOP_INNER
     do iaero = 1, naero
@@ -1840,7 +1842,7 @@ contains
     !$acc end parallel
 
     ! initialize
-    !$acc kernels loop collapse(6)
+    !$acc kernels loop collapse(6) async(0)
     do icloud = 1, ncloud_out
     do idir = 1, 2
     do irgn = 1, 2
@@ -1855,7 +1857,7 @@ contains
     end do
     end do
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async(0)
     do irgn_alb = 1, N_RAD_RGN
     do idir = 1, N_RAD_DIR
     LOOP_INNER
@@ -1866,7 +1868,7 @@ contains
     end do
     end do
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     do k = 1, rd_kmax
     do l = 1, VLEN
@@ -1875,7 +1877,7 @@ contains
     enddo
     LOOP_END_INNER
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     do k = 1, rd_kmax
     do l = 1, VLEN
@@ -1901,7 +1903,7 @@ contains
        chmax = nch(iw)
 
        !---< interpolation of gas parameters (P-T fitting) >---
-       !$acc kernels
+       !$acc kernels async(0)
        LOOP_INNER
        do ich = 1, chmax
        do k = 1, rd_kmax
@@ -1914,7 +1916,7 @@ contains
        !$acc end kernels
 
        !--- Gas line absorption
-       !$acc kernels
+       !$acc kernels async(0)
        LOOP_INNER
        !$acc loop seq
        do igas = 1, ngasabs(iw)
@@ -1943,7 +1945,7 @@ contains
 
        !--- Gas broad absorption
        if ( iflgb(I_H2O_continuum,iw) == 1 ) then
-          !$acc parallel
+          !$acc parallel async(0)
           !$acc loop collapse(2)
           LOOP_INNER
           do ich = 1, chmax
@@ -1971,7 +1973,7 @@ contains
        endif
 
        if ( iflgb(I_CFC_continuum,iw) == 1 ) then
-          !$acc parallel
+          !$acc parallel async(0)
           !$acc loop collapse(2) private(valsum)
           LOOP_INNER
           do k = 1, rd_kmax
@@ -2010,7 +2012,7 @@ contains
        ! im=2,3,4: moments of the volume scattering phase function
 
        !--- Rayleigh scattering
-       !$acc kernels
+       !$acc kernels async(0)
        LOOP_INNER
        do im = 1, MSTRN_nstream*2+2
        do k = 1, rd_kmax
@@ -2028,7 +2030,7 @@ contains
        !$acc end kernels
 
        !--- Cloud scattering
-       !$acc kernels
+       !$acc kernels async(0)
        LOOP_INNER
        !$acc loop seq
        do iaero = hydro_str, hydro_end
@@ -2069,7 +2071,7 @@ contains
        !$acc end kernels
 
        !--- Aerosol scattering
-       !$acc kernels
+       !$acc kernels async(0)
        LOOP_INNER
 #ifndef _OPENACC
        do iaero = aero_str, aero_end
@@ -2100,7 +2102,7 @@ contains
        LOOP_END_INNER
        !$acc end kernels
 
-       !$acc kernels
+       !$acc kernels async(0)
        LOOP_INNER
        do icloud = 1, ncloud_in
        do k = 1, rd_kmax
@@ -2124,7 +2126,7 @@ contains
 
        if ( irgn == I_SW ) then ! solar
 
-          !$acc kernels
+          !$acc kernels async(0)
           LOOP_INNER
           do l = 1, VLEN
              b_sfc(l,i) = 0.0_RP
@@ -2138,7 +2140,7 @@ contains
           wl = 10000.0_RP / sqrt( waveh(iw) * waveh(iw+1) )
 
           ! from temp at cell center
-          !$acc kernels
+          !$acc kernels async(0)
           LOOP_INNER
           do k = 1, rd_kmax
           !DIR$ SIMD
@@ -2155,7 +2157,7 @@ contains
           !$acc end kernels
 
           ! from temp at cell wall
-          !$acc kernels
+          !$acc kernels async(0)
           LOOP_INNER
           do k = 1, rd_kmax+1
           !DIR$ SIMD
@@ -2173,7 +2175,7 @@ contains
 
           ! from temp_sfc
           !DIR$ SIMD
-          !$acc kernels
+          !$acc kernels async(0)
           LOOP_INNER
           do l = 1, VLEN
              beta = 0.0_RP
@@ -2242,6 +2244,8 @@ contains
     enddo ! IW loop
 
     call PROF_rapend('RD', 4)
+
+    !$acc wait
 
     !$acc end data
     !$acc end data
@@ -2374,7 +2378,7 @@ contains
     !$acc data copyin(cldfrac) if (present(cldfrac))
 
     if ( irgn == I_LW ) then
-       !$acc parallel
+       !$acc parallel async(0)
        !$acc loop collapse(5) independent private(tau, zerosw, omg, tau_new, omg_new, g_new, X, Y, sw)
        LOOP_INNER
        do ich = 1, chmax
@@ -2434,7 +2438,7 @@ contains
        LOOP_END_INNER
        !$acc end parallel
     else if ( irgn == I_SW ) then
-       !$acc parallel
+       !$acc parallel async(0)
        !$acc loop collapse(5) independent private(tau, zerosw, omg, tau_new, omg_new, g_new, X, Y, sw)
        LOOP_INNER
        do ich = 1, chmax
@@ -2485,7 +2489,7 @@ contains
 
     !---< consider partial cloud layer: semi-random over-wrapping >---
 
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     do ich = 1, chmax
     do icloud = 1, ncloud_out
@@ -2519,7 +2523,7 @@ contains
 
     if ( ncloud_in > 1 ) then
        if ( irgn == I_LW ) then
-          !$acc kernels
+          !$acc kernels async(0)
           LOOP_INNER
           do ich = 1, chmax
           do icloud = 1, ncloud_out
@@ -2542,7 +2546,7 @@ contains
           LOOP_END_INNER
           !$acc end kernels
        else if ( irgn == I_SW ) then
-          !$acc kernels
+          !$acc kernels async(0)
           LOOP_INNER
           do ich = 1, chmax
           do icloud = 1, ncloud_out
@@ -2564,7 +2568,7 @@ contains
           LOOP_END_INNER
           !$acc end kernels
        end if
-       !$acc kernels
+       !$acc kernels async(0)
        LOOP_INNER
        do ich = 1, chmax
        do icloud = 1, ncloud_out
@@ -2587,7 +2591,7 @@ contains
        !$acc end kernels
     else
        if ( irgn == I_LW ) then
-          !$acc kernels
+          !$acc kernels async(0)
           LOOP_INNER
           do ich = 1, chmax
           do k = 1, rd_kmax
@@ -2600,7 +2604,7 @@ contains
           LOOP_END_INNER
           !$acc end kernels
        else if ( irgn == I_SW ) then
-          !$acc kernels
+          !$acc kernels async(0)
           LOOP_INNER
           do ich = 1, chmax
           do k = 1, rd_kmax
@@ -2613,7 +2617,7 @@ contains
           LOOP_END_INNER
           !$acc end kernels
        end if
-       !$acc kernels
+       !$acc kernels async(0)
        LOOP_INNER
        do ich = 1, chmax
        do k = 1, rd_kmax
@@ -2629,7 +2633,7 @@ contains
 
     !---< Adding-Doubling method >---
     ! [note] TOA->Surface is positive direction. "pls" means upper to lower altitude.
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     do ich = 1, chmax
     do icloud = 1, ncloud_out
@@ -2680,7 +2684,7 @@ contains
     if ( waveh_lb <= 952.0_RP .AND. 952.0_RP < waveh_ub ) then ! 10.5 micron
       ! 10.5 micron emissivity for resolved clouds
 
-      !$acc kernels
+      !$acc kernels async(0)
       LOOP_INNER
       !$acc loop seq
       do ich = 1, chmax
@@ -2694,7 +2698,7 @@ contains
       !$acc end kernels
     endif
 
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     do ich = 1, chmax
     do icloud = 1, ncloud_out
@@ -2721,7 +2725,7 @@ contains
     !$acc end kernels
 
     !--- radiative flux
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     !$acc loop seq
     do ich = 1, chmax
@@ -2739,7 +2743,7 @@ contains
     LOOP_END_INNER
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     !$acc loop seq
     do ich = 1, chmax
@@ -2758,7 +2762,7 @@ contains
     LOOP_END_INNER
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async(0)
     LOOP_INNER
     !$acc loop seq
     do ich = 1, chmax
@@ -2782,6 +2786,8 @@ contains
     enddo
     LOOP_END_INNER
     !$acc end kernels
+
+    !$acc wait
 
     !$acc end data
     !$acc end data
