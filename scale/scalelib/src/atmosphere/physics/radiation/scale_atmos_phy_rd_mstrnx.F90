@@ -1264,9 +1264,9 @@ contains
        !$acc end parallel
     end if
 
-    call PROF_rapend('RD_Transpose', 3)
-
     !$acc wait
+
+    call PROF_rapend('RD_Transpose', 3)
 
     if ( use_cldfrac ) then
        !$acc exit data delete(cldfrac_work)
@@ -1723,12 +1723,30 @@ contains
     real(RP) :: wl, beta
 
     ! for two-stream
-    real(RP) :: tau                                   ! total optical thickness
     real(RP) :: g(VLEN,rd_kmax,0:2,ncloud_in,I2S:I2E) ! two-stream approximation factors
                                                       ! 0: always 1
                                                       ! 1: asymmetry factor
                                                       ! 2: truncation factor
     real(RP) :: fsol_rgn(VLEN,I2S:I2E)                ! solar insolation              (zero if LW)
+
+    ! main factors for two-stream
+    real(RP) :: Tdir0(VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! transmission factor for solar direct (clear-sky/cloud)
+    real(RP) :: R0   (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! reflection   factor                  (clear-sky/cloud)
+    real(RP) :: T0   (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! transmission factor                  (clear-sky/cloud)
+    real(RP) :: Em_s (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! thermal/solar source (sfc->TOA)      (clear-sky/cloud)
+    real(RP) :: Ep_s (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! thermal/solar source (TOA->sfc)      (clear-sky/cloud)
+
+    ! Averaged factors, considering cloud overwrap
+    real(RP) :: tau_bar_sol(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! solar insolation through accumulated optical thickness at each layer
+    real(RP) :: R          (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection   factor
+    real(RP) :: T          (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! transmission factor
+    real(RP) :: Em         (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source (sfc->TOA)
+    real(RP) :: Ep         (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source (TOA->sfc)
+    ! Doubling-Adding
+    real(RP) :: R12mns(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection factor in doubling method
+    real(RP) :: R12pls(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection factor in doubling method
+    real(RP) :: E12mns(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source function   in doubling method
+    real(RP) :: E12pls(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source function   in doubling method
 
     ! work
     real(RP) :: cosSZA(VLEN,I2S:I2E)
@@ -1739,7 +1757,7 @@ contains
     integer  :: ip, ir, irgn, irgn_alb
     integer  :: igas, icfc, iaero, iptype, nradius
     integer  :: iw, ich, iplk, icloud, im, idir
-    integer  :: k, l, n
+    integer  :: k, l
 #ifdef _OPENACC
     integer :: i
     logical :: exit_flag
@@ -1753,7 +1771,8 @@ contains
     !$acc        aerosol_conc, aerosol_radi, aero2ptype, albedo_sfc, &
     !$acc        fact_ocean, fact_land, fact_urban) &
     !$acc copyout(rflux, rflux_sfc_dn, tauCLD_067u, emisCLD_105u) &
-    !$acc create(dz_std, indexP, factP, factT32, factT21, indexR, factR, cosSZA, optparam, tauGAS, tauPR, omgPR, g, bbar, bbarh, b_sfc, fsol_rgn)
+    !$acc create(dz_std, indexP, factP, factT32, factT21, indexR, factR, cosSZA, optparam, tauGAS, tauPR, omgPR, g, bbar, bbarh, b_sfc, fsol_rgn, &
+    !$acc        Tdir0, R0, T0, Em_s, Ep_s, tau_bar_sol, R, T, Em, Ep, R12mns, R12pls, E12mns, E12pls)
     !$acc data copyin(cldfrac) if (present(cldfrac))
 
     !$acc kernels async(0)
@@ -2194,6 +2213,7 @@ contains
        ! two-stream transfer
        ! Use I2S:I2E sections so non-OpenACC (I2S=I2E=i) hits column i, not column 1.
 #ifdef _OPENACC
+       ! The CPU path calls this from inside the OpenMP parallel region.
        call PROF_rapstart('RD_MSTRN_twst', 3)
 #endif
        if ( ncloud_in > 1 ) then
@@ -2215,6 +2235,9 @@ contains
                                     rflux(:,:,:,:,:,I2S:I2E),                  & ! [INOUT]
                                     rflux_sfc_dn(:,:,:,I2S:I2E),               & ! [INOUT]
                                     emisCLD_105u(:,:,I2S:I2E),                 & ! [INOUT]
+                                    Tdir0, R0, T0, Em_s, Ep_s,                 & ! [WORK]
+                                    tau_bar_sol, R, T, Em, Ep,                 & ! [WORK]
+                                    R12mns, R12pls, E12mns, E12pls,            & ! [WORK]
                                     cldfrac = cldfrac(:,:,I2S:I2E)             ) ! [IN,optional]
        else
           call RD_MSTRN_two_stream( RD_KMAX, chmax,        &
@@ -2234,7 +2257,10 @@ contains
                                     waveh(iw), waveh(iw+1), wgtch(:,iw),       & ! [IN]
                                     rflux(:,:,:,:,:,I2S:I2E),                  & ! [INOUT]
                                     rflux_sfc_dn(:,:,:,I2S:I2E),               & ! [INOUT]
-                                    emisCLD_105u(:,:,I2S:I2E)                  ) ! [INOUT]
+                                    emisCLD_105u(:,:,I2S:I2E),                 & ! [INOUT]
+                                    Tdir0, R0, T0, Em_s, Ep_s,                 & ! [WORK]
+                                    tau_bar_sol, R, T, Em, Ep,                 & ! [WORK]
+                                    R12mns, R12pls, E12mns, E12pls             ) ! [WORK]
        end if
 
 #ifdef _OPENACC
@@ -2244,8 +2270,6 @@ contains
     enddo ! IW loop
 
     call PROF_rapend('RD', 4)
-
-    !$acc wait
 
     !$acc end data
     !$acc end data
@@ -2277,6 +2301,12 @@ contains
        wgtch,              &
        flux, flux_sfc_dn,  &
        emisCLD_105u,       &
+       Tdir0, R0, T0,      &
+       Em_s, Ep_s,         &
+       tau_bar_sol, R, T,  &
+       Em, Ep,             &
+       R12mns, R12pls,     &
+       E12mns, E12pls,     &
        cldfrac             )
     use scale_const, only: &
        PI   => CONST_PI,   &
@@ -2305,29 +2335,31 @@ contains
     real(RP), intent(in)  :: albedo_sfc_diffuse(VLEN,I2S:I2E)                        ! surface albedo (DIFFUSE)
     real(RP), intent(in)  :: waveh_lb, waveh_ub                                      ! wavelength
     real(RP), intent(in)  :: wgtch(chmax)                                            ! weight
+
     real(RP), intent(inout) :: flux       (VLEN,rd_kmax+1,2,2,MSTRN_ncloud,I2S:I2E)  ! LW/SW, upward(sfc->TOA)/downward(TOA->sfc) flux (clear-sky/cloud)
     real(RP), intent(inout) :: flux_sfc_dn(VLEN,N_RAD_DIR,N_RAD_RGN,I2S:I2E)         ! surface downward radiation flux (direct/diffuse,IR/NIR/VIS)
     real(RP), intent(inout) :: emisCLD_105u(VLEN,rd_kmax,I2S:I2E)                    ! 10.5 micron cloud emissivity
-    real(RP), intent(in), optional :: cldfrac(VLEN,rd_kmax,I2S:I2E)                  ! cloud fraction
 
-    ! main factors
-    real(RP) :: Tdir0(VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! transmission factor for solar direct (clear-sky/cloud)
-    real(RP) :: R0   (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! reflection   factor                  (clear-sky/cloud)
-    real(RP) :: T0   (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! transmission factor                  (clear-sky/cloud)
-    real(RP) :: Em_s (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! thermal/solar source (sfc->TOA)      (clear-sky/cloud)
-    real(RP) :: Ep_s (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! thermal/solar source (TOA->sfc)      (clear-sky/cloud)
-
+    ! WORK
+    real(RP), intent(out) :: Tdir0(VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! transmission factor for solar direct (clear-sky/cloud)
+    real(RP), intent(out) :: R0   (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! reflection   factor                  (clear-sky/cloud)
+    real(RP), intent(out) :: T0   (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! transmission factor                  (clear-sky/cloud)
+    real(RP), intent(out) :: Em_s (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! thermal/solar source (sfc->TOA)      (clear-sky/cloud)
+    real(RP), intent(out) :: Ep_s (VLEN,rd_kmax,ncloud_in,MSTRN_ch_limit,I2S:I2E) ! thermal/solar source (TOA->sfc)      (clear-sky/cloud)
     ! Averaged factors, considering cloud overwrap
-    real(RP) :: tau_bar_sol(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! solar insolation through accumulated optical thickness at each layer
-    real(RP) :: R          (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection   factor
-    real(RP) :: T          (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! transmission factor
-    real(RP) :: Em         (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source (sfc->TOA)
-    real(RP) :: Ep         (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source (TOA->sfc)
+    real(RP), intent(out) :: tau_bar_sol(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! solar insolation through accumulated optical thickness at each layer
+    real(RP), intent(out) :: R          (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection   factor
+    real(RP), intent(out) :: T          (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! transmission factor
+    real(RP), intent(out) :: Em         (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source (sfc->TOA)
+    real(RP), intent(out) :: Ep         (VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source (TOA->sfc)
     ! Doubling-Adding
-    real(RP) :: R12mns(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection factor in doubling method
-    real(RP) :: R12pls(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection factor in doubling method
-    real(RP) :: E12mns(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source function   in doubling method
-    real(RP) :: E12pls(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source function   in doubling method
+    real(RP), intent(out) :: R12mns(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection factor in doubling method
+    real(RP), intent(out) :: R12pls(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! reflection factor in doubling method
+    real(RP), intent(out) :: E12mns(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source function   in doubling method
+    real(RP), intent(out) :: E12pls(VLEN,rd_kmax+1,ncloud_out,MSTRN_ch_limit,I2S:I2E) ! source function   in doubling method
+
+    ! Optional
+    real(RP), intent(in), optional :: cldfrac(VLEN,rd_kmax,I2S:I2E)                  ! cloud fraction
 
     ! parameters with two-stream truncation
     real(RP) :: tau        ! total optical thickness
@@ -2374,7 +2406,7 @@ contains
 
     !$acc data copyin(cosSZA, fsol, tauGAS, tauPR, omgPR, g, b_sfc, bbar, bbarh, albedo_sfc_direct, albedo_sfc_diffuse, wgtch) &
     !$acc copy(flux, flux_sfc_dn, emisCLD_105u) &
-    !$acc create(Tdir0, R0, T0, Em_s, Ep_s, tau_bar_sol, R, T, Em, Ep, R12mns, R12pls, E12mns, E12pls)
+    !$acc copyout(Tdir0, R0, T0, Em_s, Ep_s, tau_bar_sol, R, T, Em, Ep, R12mns, R12pls, E12mns, E12pls)
     !$acc data copyin(cldfrac) if (present(cldfrac))
 
     if ( irgn == I_LW ) then
@@ -2639,24 +2671,27 @@ contains
     do icloud = 1, ncloud_out
     do l = 1, VLEN
        ! at lambert surface
-       if ( ncloud_in > 1 ) then
-          if ( icloud == I_Cloud ) then
-             R(l,rd_kmax+1,icloud,ich,i) = (        cldfrac(l,rd_kmax,i) ) * albedo_sfc_diffuse(l,i) &
-                                         + ( 1.0_RP-cldfrac(l,rd_kmax,i) ) * albedo_sfc_diffuse(l,i)
-          else
-             R(l,rd_kmax+1,icloud,ich,i) = albedo_sfc_diffuse(l,i) ! I_ClearSky
-          end if
-       else
-          R(l,rd_kmax+1,icloud,ich,i) = albedo_sfc_diffuse(l,i) ! I_Cloud
-       end if
+       ! currently, R for Cloud and ClearSky is the same
+       !if ( ncloud_in > 1 ) then
+       !   if ( icloud == I_Cloud ) then
+       !      R(l,rd_kmax+1,icloud,ich,i) = (        cldfrac(l,rd_kmax,i) ) * albedo_sfc_diffuse(l,i) &
+       !                                  + ( 1.0_RP-cldfrac(l,rd_kmax,i) ) * albedo_sfc_diffuse(l,i)
+       !   else
+       !      R(l,rd_kmax+1,icloud,ich,i) = albedo_sfc_diffuse(l,i) ! I_ClearSky
+       !   end if
+       !else
+       !   R(l,rd_kmax+1,icloud,ich,i) = albedo_sfc_diffuse(l,i) ! I_Cloud
+       !end if
+       R(l,rd_kmax+1,icloud,ich,i) = albedo_sfc_diffuse(l,i) ! for both Cloud and ClearSky
        T(l,rd_kmax+1,icloud,ich,i) = 0.0_RP
 
        ! currently, Em0_Cloud and Em0_ClearSky is the same
        flux_direct = cosSZA(l,i) * tau_bar_sol(l,rd_kmax+1,icloud,ich,i)
        Em0_Cloud    = Wpls(irgn) * ( flux_direct * albedo_sfc_direct(l,i) / (W(irgn)*M(irgn)) &
                          + 2.0_RP * PI * ( 1.0_RP-albedo_sfc_diffuse(l,i) ) * b_sfc(l,i) )
-       Em0_ClearSky = Wpls(irgn) * ( flux_direct * albedo_sfc_direct(l,i) / (W(irgn)*M(irgn)) &
-                         + 2.0_RP * PI * ( 1.0_RP-albedo_sfc_diffuse(l,i) ) * b_sfc(l,i) )
+       !Em0_ClearSky = Wpls(irgn) * ( flux_direct * albedo_sfc_direct(l,i) / (W(irgn)*M(irgn)) &
+       !                  + 2.0_RP * PI * ( 1.0_RP-albedo_sfc_diffuse(l,i) ) * b_sfc(l,i) )
+       Em0_ClearSky = Em0_Cloud
 
        if ( ncloud_in > 1 ) then
           if ( icloud == I_Cloud ) then
@@ -2682,20 +2717,20 @@ contains
 
     ! cloud emissivity
     if ( waveh_lb <= 952.0_RP .AND. 952.0_RP < waveh_ub ) then ! 10.5 micron
-      ! 10.5 micron emissivity for resolved clouds
+       ! 10.5 micron emissivity for resolved clouds
 
-      !$acc kernels async(0)
-      LOOP_INNER
-      !$acc loop seq
-      do ich = 1, chmax
-      do k = 1, rd_kmax
-      do l = 1, VLEN
+       !$acc kernels async(0)
+       LOOP_INNER
+       !$acc loop seq
+       do ich = 1, chmax
+       do k = 1, rd_kmax
+       do l = 1, VLEN
           emisCLD_105u(l,k,i) = emisCLD_105u(l,k,i) + ( 1.0_RP - R(l,k,I_Cloud,ich,i) - T(l,k,I_Cloud,ich,i) ) * wgtch(ich)
-      enddo
-      enddo
-      enddo
-      LOOP_END_INNER
-      !$acc end kernels
+       enddo
+       enddo
+       enddo
+       LOOP_END_INNER
+       !$acc end kernels
     endif
 
     !$acc kernels async(0)
@@ -2786,8 +2821,6 @@ contains
     enddo
     LOOP_END_INNER
     !$acc end kernels
-
-    !$acc wait
 
     !$acc end data
     !$acc end data
