@@ -1059,13 +1059,13 @@ contains
 #endif
 
 #ifdef _OPENACC
-    real(RP) :: N0r_3d(KS:KE,IA,JA), N0s_3d(KS:KE,IA,JA), N0g_3d(KS:KE,IA,JA)
-    real(RP) :: rho_fact_3d(KS:KE,IA,JA)
-    real(RP) :: Vtr_3d(KS:KE,IA,JA), Vts_3d(KS:KE,IA,JA), Vtg_3d(KS:KE,IA,JA)
-    real(RP) :: RLMDg_3d(KS:KE,IA,JA), RLMDg_2_3d(KS:KE,IA,JA), RLMDg_3_3d(KS:KE,IA,JA), RLMDg_3dg_3d(KS:KE,IA,JA)
-    real(RP) :: RLMDs_3d(KS:KE,IA,JA)
-    real(RP) :: Egs_mod_3d(KA,IA,JA)
-    real(RP) :: qc_org(KS:KE,IA,JA), qr_org(KS:KE,IA,JA), qi_org(KS:KE,IA,JA), qs_org(KS:KE,IA,JA), qg_org(KS:KE,IA,JA)
+    real(RP), allocatable :: N0r_3d(:,:,:), N0s_3d(:,:,:), N0g_3d(:,:,:)
+    real(RP), allocatable :: rho_fact_3d(:,:,:)
+    real(RP), allocatable :: Vtr_3d(:,:,:), Vts_3d(:,:,:), Vtg_3d(:,:,:)
+    real(RP), allocatable :: RLMDg_3d(:,:,:), RLMDg_2_3d(:,:,:), RLMDg_3_3d(:,:,:), RLMDg_3dg_3d(:,:,:)
+    real(RP), allocatable :: RLMDs_3d(:,:,:)
+    real(RP), allocatable :: Egs_mod_3d(:,:,:)
+    real(RP), allocatable :: qc_org(:,:,:), qr_org(:,:,:), qi_org(:,:,:), qs_org(:,:,:), qg_org(:,:,:)
 #endif
 
     !---< Roh and Satoh (2014) >---
@@ -1134,8 +1134,8 @@ contains
     real(RP) :: ventr, vents, ventg            !< ventilation factor
     real(RP) :: net, fac, fac_sw
 #ifdef _OPENACC
-    real(RP) :: fack(KA)
-#define fack(k) fack(k)
+    real(RP) :: fack
+#define fack(k) fack
 #else
     real(RP) :: fack(KS:KE)
 #endif
@@ -1143,8 +1143,8 @@ contains
 
     !---< Bergeron process >---
 #ifdef _OPENACC
-    real(RP) :: sw_bergeron
-#define sw_bergeron(k) sw_bergeron
+    real(RP), allocatable :: sw_bergeron_3d(:,:,:)
+#define sw_bergeron(k) sw_bergeron_3d(k,i,j)
 #else
     real(RP) :: sw_bergeron(KS:KE)           !< if 0C<T<30C, sw=1
 #endif
@@ -1223,6 +1223,18 @@ contains
        flg_lt_l = .false.
     end if
 
+#ifdef _OPENACC
+    if ( flg_lt_l ) then
+       allocate( N0r_3d(KS:KE,IA,JA), N0s_3d(KS:KE,IA,JA), N0g_3d(KS:KE,IA,JA) )
+       allocate( rho_fact_3d(KS:KE,IA,JA) )
+       allocate( Vtr_3d(KS:KE,IA,JA), Vts_3d(KS:KE,IA,JA), Vtg_3d(KS:KE,IA,JA) )
+       allocate( RLMDg_3d(KS:KE,IA,JA), RLMDg_2_3d(KS:KE,IA,JA), RLMDg_3_3d(KS:KE,IA,JA), RLMDg_3dg_3d(KS:KE,IA,JA) )
+       allocate( RLMDs_3d(KS:KE,IA,JA) )
+       allocate( Egs_mod_3d(KS:KE,IA,JA) )
+       allocate( qc_org(KS:KE,IA,JA), qr_org(KS:KE,IA,JA), qi_org(KS:KE,IA,JA), qs_org(KS:KE,IA,JA), qg_org(KS:KE,IA,JA) )
+    end if
+#endif
+
     !$acc data copy(TEMP, QTRC, CPtot0, CVtot0) &
     !$acc      copyin(DENS, PRES, CCN) &
     !$acc      copyout(RHOE_t) &
@@ -1249,9 +1261,12 @@ contains
     if ( hist_flag ) then
 #endif
        allocate( w3d(KA,IA,JA,w_nmax) )
-       !$acc data create(w3d)
+       !$acc data create(w3d, sw_bergeron_3d)
 #ifndef _OPENACC
     end if
+#endif
+#ifdef _OPENACC
+    allocate( sw_bergeron_3d(KS:KE,IA,JA) )
 #endif
 
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
@@ -1293,7 +1308,7 @@ contains
     !$acc              RLMDr_1br, RLMDr_2br, RLMDr_3br, RLMDr_dr, RLMDr_3dr, RLMDr_5dr, &
     !$acc              RLMDg_dg, RLMDg_3dg, RLMDg_5dg, RLMDr_7, RLMDr_6dr, &
     !$acc              MOMs_0, MOMs_1, MOMs_2, MOMs_0bs, MOMs_1bs, MOMs_2bs, MOMs_2ds, MOMs_5ds_h, RMOMs_Vt, &
-    !$acc              Vti, Vtr, Vts, Vtg, Egs_mod, Nc, Nu, fack, Glv, Giv, Gil, sw_bergeron, a1, a2, ma2, &
+    !$acc              Vti, Vtr, Vts, Vtg, Egs_mod, Nc, Nu, fack, Glv, Giv, Gil, a1, a2, ma2, &
     !$acc              coef_at, coef_bt)
     do j = JS, JE
     do i = IS, IE
@@ -1743,6 +1758,41 @@ contains
           w(k,I_Psfi ) = qi(k) / dt1
        END_LOOP_K
 
+#ifdef _OPENACC
+
+       if ( flg_lt_l ) then
+          N0r_3d(k,i,j) = N0r(k)
+          N0s_3d(k,i,j) = N0s(k)
+          N0g_3d(k,i,j) = N0g(k)
+          rho_fact_3d(k,i,j) = rho_fact(k)
+          Vtr_3d(k,i,j) = Vtr(k)
+          Vts_3d(k,i,j) = Vts(k)
+          Vtg_3d(k,i,j) = Vtg(k)
+          RLMDg_3d(k,i,j) = RLMDg(k)
+          RLMDg_2_3d(k,i,j) = RLMDg_2(k)
+          RLMDg_3_3d(k,i,j) = RLMDg_3(k)
+          RLMDg_3dg_3d(k,i,j) = RLMDg_3dg(k)
+          RLMDs_3d(k,i,j) = RLMDs
+          Egs_mod_3d(k,i,j) = Egs_mod(k)
+          qc_org(k,i,j) = qc(k)
+          qr_org(k,i,j) = qr(k)
+          qi_org(k,i,j) = qi(k)
+          qs_org(k,i,j) = qs(k)
+          qg_org(k,i,j) = qg(k)
+       end if
+
+    end do ! k
+    end do ! i
+    end do ! j
+    !$acc end parallel
+
+    !$acc parallel
+    !$acc loop collapse(3)
+    do j = JS, JE
+    do i = IS, IE
+       do k = KS, KE
+#endif
+
        LOOP_K
           !---< limiter >---
           w(k,I_Pigen) = min( w(k,I_Pigen), w(k,I_dqv_dt) ) * (        w(k,I_iceflg) ) * sw_expice
@@ -1998,6 +2048,19 @@ contains
           w(k,I_Pgmlt  ) = w(k,I_Pgmlt  ) * fack(k)
        END_LOOP_K
 
+#ifdef _OPENACC
+       end do ! k
+    end do ! i
+    end do ! j
+    !$acc end parallel
+
+    !$acc parallel
+    !$acc loop collapse(3)
+    do j = JS, JE
+    do i = IS, IE
+       do k = KS, KE
+#endif
+
        LOOP_K
           qc_t(k) = + w(k,I_Pimlt  ) & ! [prod] i->c
                     - w(k,I_Praut  ) & ! [loss] c->r
@@ -2123,28 +2186,7 @@ contains
           CPtot0(k,i,j) = CPtot0(k,i,j) + cp_t * dt
        END_LOOP_K
 
-
 #ifdef _OPENACC
-          if ( flg_lt_l ) then
-             N0r_3d(k,i,j) = N0r(k)
-             N0s_3d(k,i,j) = N0s(k)
-             N0g_3d(k,i,j) = N0g(k)
-             rho_fact_3d(k,i,j) = rho_fact(k)
-             Vtr_3d(k,i,j) = Vtr(k)
-             Vts_3d(k,i,j) = Vts(k)
-             Vtg_3d(k,i,j) = Vtg(k)
-             RLMDg_3d(k,i,j) = RLMDg(k)
-             RLMDg_2_3d(k,i,j) = RLMDg_2(k)
-             RLMDg_3_3d(k,i,j) = RLMDg_3(k)
-             RLMDg_3dg_3d(k,i,j) = RLMDg_3dg(k)
-             RLMDs_3d(k,i,j) = RLMDs
-             Egs_mod_3d(k,i,j) = Egs_mod(k)
-             qc_org(k,i,j) = qc(k)
-             qr_org(k,i,j) = qr(k)
-             qi_org(k,i,j) = qi(k)
-             qs_org(k,i,j) = qs(k)
-             qg_org(k,i,j) = qg(k)
-          end if
        end do ! k
     end do ! i
     end do ! j
@@ -2468,6 +2510,10 @@ contains
        if ( HIST_sw(ip) ) call FILE_HISTORY_put( HIST_id(ip), w3d(:,:,:,ip) )
     enddo
 
+    !$acc end data
+    !$acc end data
+    !$acc end data
+
 #ifndef _OPENACC
     if ( hist_flag ) then
 #endif
@@ -2475,11 +2521,18 @@ contains
 #ifndef _OPENACC
     end if
 #endif
-
-    !$acc end data
-    !$acc end data
-    !$acc end data
-
+#ifdef _OPENACC
+    deallocate( sw_bergeron_3d )
+    if ( flg_lt_l ) then
+      deallocate( N0r_3d, N0s_3d, N0g_3d )
+      deallocate( rho_fact_3d )
+      deallocate( Vtr_3d, Vts_3d, Vtg_3d )
+      deallocate( RLMDg_3d, RLMDg_2_3d, RLMDg_3_3d, RLMDg_3dg_3d )
+      deallocate( RLMDs_3d )
+      deallocate( Egs_mod_3d )
+      deallocate( qc_org, qr_org, qi_org, qs_org, qg_org )
+   end if
+#endif
     call PROF_rapend  ('MP_tomita08', 3)
 
 #ifdef _OPENACC
