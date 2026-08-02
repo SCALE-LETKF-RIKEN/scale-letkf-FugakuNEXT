@@ -190,23 +190,29 @@ contains
     !$acc kernels copyin(DENS, CZ, FZ) copyout(PHYD, PHYDH)
     do j = JS, JE
     do i = IS, IE
+       ! k loop is not parallelized due to degradation of performance for OpenACC
        PHYDH(KE,i,j) = PRES(KE,i,j) - DENS(KE,i,j) * GRAV * ( FZ(KE,i,j) - CZ(KE,i,j) )
+       !$acc loop seq
        do k = KE-1, KS-1, -1
           PHYDH(k,i,j) = PHYDH(k+1,i,j) + DENS(k+1,i,j) * GRAV * ( FZ(k+1,i,j) - FZ(k,i,j) )
        end do
        PHYD(KE,i,j) = PRES(KE,i,j)
+       !$acc loop seq
        do k = KE-1, KS, -1
           PHYD(k,i,j) = PHYD(k+1,i,j) + ( DENS(k+1,i,j) + DENS(k,i,j) ) * GRAV * ( CZ(k+1,i,j) - CZ(k,i,j) ) * 0.5_RP
        end do
        diff = 0.0_RP
+       !$acc loop seq
        do k = KS, KE-1
           diff = diff + ( PRES(k,i,j) - PHYD(k,i,j) ) * ( FZ(k,i,j) - FZ(k-1,i,j) )
        end do
        diff = diff / ( FZ(KE,i,j) - FZ(KS-1,i,j) )
        diff = max( diff, EPS - PHYDH(KE,i,j) )
+       !$acc loop seq
        do k = KS-1, KE
           PHYDH(k,i,j) = PHYDH(k,i,j) + diff
        end do
+       !$acc loop seq
        do k = KS, KE
           PHYD(k,i,j) = PHYD(k,i,j) + diff
        end do
