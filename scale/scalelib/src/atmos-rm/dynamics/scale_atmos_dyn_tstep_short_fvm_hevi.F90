@@ -309,8 +309,13 @@ contains
 #endif
 
     ! for implicit solver
+#ifdef _OPENACC
+    real(RP) :: A0, A1
+#else
     real(RP) :: A(KA)
+#endif
     real(RP) :: B
+    real(RP) :: fact
     real(RP) :: Sr(KA,IA,JA)
     real(RP) :: Sw(KA,IA,JA)
     real(RP) :: St(KA,IA,JA)
@@ -984,11 +989,13 @@ contains
        !       between the split kernels below is enforced by an explicit wait.
 #endif
 
-!OCL INDEPENDENT
+       fact = dtrk**2 * J33G
+
+       !OCL INDEPENDENT
 !OCL PREFETCH_SEQUENTIAL(SOFT)
 #ifdef HEVI_FISSION
        !$omp parallel do default(shared) OMP_SCHEDULE_ &
-       !$omp private(k,i,j,A,B)
+       !$omp private(k,i,j)
 #else
 #ifndef __GFORTRAN__
        !$omp parallel do default(none) OMP_SCHEDULE_ &
@@ -1006,7 +1013,7 @@ contains
        !$omp shared(JJS,JJE,IIS,IIE,KA,KMAX,KS,KE) &
        !$omp shared(mflx_hi,tflx_hi,MOMZ_RK,MOMZ0) &
        !$omp shared(DENS_RK,RHOT_RK,DENS0,RHOT0,DENS,MOMZ,POTT,DPRES) &
-       !$omp shared(GRAV,dtrk,REF_dens,Sr,Sw,St,RT2P) &
+       !$omp shared(GRAV,dtrk,fact,REF_dens,Sr,Sw,St,RT2P) &
        !$omp shared(ATMOS_DYN_FVM_flux_valueW_Z) &
        !$omp shared(MAPF,GSQRT,J33G,CDZ,RCDZ,RFDZ)
 #else
@@ -1016,11 +1023,10 @@ contains
 #endif
 #endif
        !$acc parallel async(0)
-       !$acc loop collapse(2) &
+       !$acc loop collapse(2)
 #ifndef HEVI_FISSION
-       !$acc private(PT,Ci,Co,F1,F2,F3) &
+       !$acc private(PT,Ci,Co,F1,F2,F3,work)
 #endif
-       !$acc private(work,A)
        do j = JJS, JJE
 #if LSIZE == 1
        do i = IIS, IIE
@@ -1047,20 +1053,31 @@ contains
              call ATMOS_DYN_FVM_flux_valueW_Z( PT(:,l), & ! (out)
                   MOMZ(:,i,j), POTT(:,i,j), GSQRT(:,i,j,I_XYZ), & ! (in)
                   CDZ )
-             ! An additional fission point was evaluated here, splitting the PT
-             ! calculation above from the A, B and F1-F3 calculations below.
-             ! It degraded performance, and is kept only as a record:
-             !    enddo ! i
-             !    enddo ! j
-             !    !$acc end parallel
-             !
-             !    !$omp parallel do default(shared) OMP_SCHEDULE_ private(k,i,j,A,B)
-             !    !$acc parallel async(0)
-             !    !$acc loop collapse(2) private(A)
-             !    do j = JJS, JJE
-             !    do i = IIS, IIE
+#ifdef HEVI_FISSION
+       enddo ! i
+       enddo ! j
+       !$acc end parallel
+
+       !$omp parallel do default(shared) OMP_SCHEDULE_ private(k,i,j,A,B,fact)
+       !$acc parallel async(0)
+       !$acc loop collapse(3)
+       do j = JJS, JJE
+       do i = IIS, IIE
+#endif
+#ifdef _OPENACC
+             do k = KS, KE-1
+                A0 = fact * RCDZ(k  ) * RT2P(k  ,i,j) * J33G / GSQRT(k  ,i,j,I_XYZ)
+                A1 = fact * RCDZ(k+1) * RT2P(k+1,i,j) * J33G / GSQRT(k+1,i,j,I_XYZ)
+                B = GRAV * fact / ( CDZ(k+1) + CDZ(k) )
+                if ( k < KE-1 ) &
+                F1(k,l) =        - ( PT(k+1,l) * RFDZ(k) *   A1      + B ) / GSQRT(k,i,j,I_XYW)
+                F2(k,l) = 1.0_RP + ( PT(k  ,l) * RFDZ(k) * ( A1+A0 )     ) / GSQRT(k,i,j,I_XYW)
+                if ( k > KS ) &
+                F3(k,l) =        - ( PT(k-1,l) * RFDZ(k) *      A0   - B ) / GSQRT(k,i,j,I_XYW)
+             end do
+#else
              do k = KS, KE
-                A(k) = dtrk**2 * J33G * RCDZ(k) * RT2P(k,i,j) * J33G / GSQRT(k,i,j,I_XYZ)
+                A(k) = fact * RCDZ(k) * RT2P(k,i,j) * J33G / GSQRT(k,i,j,I_XYZ)
              enddo
 
              ! Note: F3(KS,l) (the sub-diagonal of the first row) and F1(KE-1,l)
@@ -1071,18 +1088,19 @@ contains
              !       Zeroing them costs a measurable amount of time, so it is
              !       not done. If the solver implementation is changed, check
              !       whether the new one requires them to be zero.
-             B = GRAV * dtrk**2 * J33G / ( CDZ(KS+1) + CDZ(KS) )
+             B = GRAV * fact / ( CDZ(KS+1) + CDZ(KS) )
              F1(KS,l) =        - ( PT(KS+1,l) * RFDZ(KS) *   A(KS+1)         + B ) / GSQRT(KS,i,j,I_XYW)
              F2(KS,l) = 1.0_RP + ( PT(KS  ,l) * RFDZ(KS) * ( A(KS+1)+A(KS) )     ) / GSQRT(KS,i,j,I_XYW)
              do k = KS+1, KE-2
-                B = GRAV * dtrk**2 * J33G / ( CDZ(k+1) + CDZ(k) )
+                B = GRAV * fact / ( CDZ(k+1) + CDZ(k) )
                 F1(k,l) =        - ( PT(k+1,l) * RFDZ(k) *   A(k+1)        + B ) / GSQRT(k,i,j,I_XYW)
                 F2(k,l) = 1.0_RP + ( PT(k  ,l) * RFDZ(k) * ( A(k+1)+A(k) )     ) / GSQRT(k,i,j,I_XYW)
                 F3(k,l) =        - ( PT(k-1,l) * RFDZ(k) *          A(k)   - B ) / GSQRT(k,i,j,I_XYW)
              enddo
-             B = GRAV * dtrk**2 * J33G / ( CDZ(KE) + CDZ(KE-1) )
+             B = GRAV * fact / ( CDZ(KE) + CDZ(KE-1) )
              F2(KE-1,l) = 1.0_RP + ( PT(KE-1,l) * RFDZ(KE-1) * ( A(KE)+A(KE-1) )    ) / GSQRT(KE-1,i,j,I_XYW)
              F3(KE-1,l) =        - ( PT(KE-2,l) * RFDZ(KE-1) *         A(KE-1)  - B ) / GSQRT(KE-1,i,j,I_XYW)
+#endif
 #ifdef HEVI_FISSION
           enddo ! i
           enddo ! j
