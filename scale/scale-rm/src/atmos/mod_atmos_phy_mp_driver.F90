@@ -218,7 +218,7 @@ contains
           QA_MP = ATMOS_PHY_MP_suzuki10_ntracers
 !       case ( 'AMPS' )
 !          call ATMOS_PHY_MP_amps_tracer_setup
-!          
+!
 !          call ATMOS_HYDROMETEOR_regist( &
 !               ATMOS_PHY_MP_amps_nwaters,                & ! [IN]
 !               ATMOS_PHY_MP_amps_nices,                  & ! [IN]
@@ -865,6 +865,10 @@ contains
     real(RP) :: mflux_crg(KA), sflux_crg(2), eflux_crg
     real(RP) :: QSPLT_in(KA,IA,JA,3)
     real(RP) :: dqcrg(KA,IA,JA), beta_crg(KA,IA,JA)
+
+#ifdef _OPENACC
+    real(RP) :: logPRES(KA,IA,JA)
+#endif
     !---------------------------------------------------------------------------
 
     !$acc data copy(DENS_t, MOMZ_t, RHOU_t, RHOV_t, RHOQ_t(:,:,:,:), RHOH, &
@@ -876,6 +880,7 @@ contains
     !$acc             ATMOS_PHY_MP_TYPE, ATMOS_PHY_PRECIP_TYPE) &
     !$acc      create(RHOE_t, TEMP1, CPtot1, CVtot1, CCN, QTRC1, CPtot_t, CVtot_t, precip, &
     !$acc             QTRC1_crg, QSPLT_in, dqcrg, beta_crg, &
+    !$acc             logPRES, &
     !$acc             hist_vterm_idx)
     !$acc data copy(RHOC_t_MP) if (flg_lt)
 
@@ -1233,6 +1238,18 @@ contains
              !$acc end kernels
           end if
 
+#ifdef _OPENACC
+          !$acc parallel loop collapse(3)
+          do j = JS, JE
+          do i = IS, IE
+          do k = KS, KE
+             logPRES(k,i,j) = log( PRES(k,i,j) / PRE00 )
+          end do
+          end do
+          end do
+          !$acc end parallel
+#endif
+
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp shared (KA,KS,KE,IS,IE,JS,JE,QS_MP,QE_MP,QHA,QHS,QHE,QLA,QIA, &
           !$omp         QA_LT,QS_LT,QE_LT, &
@@ -1441,7 +1458,13 @@ contains
                 CV_t = ( CVtot2(k) - CVtot(k,i,j) ) / dt_MP
                 RHOH_MP(k,i,j) = RHOH_MP(k,i,j) &
                      + ( RHOE2(k) - RHOE(k) ) / dt_MP &
-                     - ( CP_t + log( PRES(k,i,j) / PRE00 ) * ( CVtot(k,i,j) / CPtot(k,i,j) * CP_t - CV_t ) ) &
+                     - ( CP_t &
+#ifdef _OPENACC
+                         + logPRES(k,i,j) &
+#else
+                         + log( PRES(k,i,j) / PRE00 ) &
+#endif
+                         * ( CVtot(k,i,j) / CPtot(k,i,j) * CP_t - CV_t ) ) &
                      * DENS(k,i,j) * TEMP(k,i,j)
 !                RHOT_t_MP(k,i,j) = RHOT_t_MP(k,i,j) &
 !                     + ( RHOE2(k) - RHOE(k) ) / ( dt_MP * EXNER(k,i,j) * CPtot(k,i,j) ) &
