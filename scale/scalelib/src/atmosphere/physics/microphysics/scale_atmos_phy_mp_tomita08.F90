@@ -1261,12 +1261,12 @@ contains
     if ( hist_flag ) then
 #endif
        allocate( w3d(KA,IA,JA,w_nmax) )
-       !$acc data create(w3d, sw_bergeron_3d)
 #ifndef _OPENACC
     end if
 #endif
 #ifdef _OPENACC
     allocate( sw_bergeron_3d(KS:KE,IA,JA) )
+    !$acc data create(w3d, sw_bergeron_3d)
 #endif
 
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
