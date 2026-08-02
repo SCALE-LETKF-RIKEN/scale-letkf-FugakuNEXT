@@ -295,6 +295,9 @@ contains
     real(RP) :: div   ! divergence damping
     real(RP) :: pg    ! pressure gradient force
     real(RP) :: cf    ! colioris force
+    real(RP) :: advc  ! advection
+    real(RP) :: momy_u ! momentum y at u point
+    real(RP) :: momx_v ! momentum x at v point
 #ifdef HIST_TEND
     real(RP) :: advch_t(KA,IA,JA,5)
     real(RP) :: advcv_t(KA,IA,JA,5)
@@ -316,6 +319,8 @@ contains
     ! work arrays to pass intermediate values between the split kernels
     real(RP) :: pg_work(KA,IA,JA)
     real(RP) :: cf_work(KA,IA,JA)
+    real(RP) :: advc_work(KA,IA,JA)
+    real(RP) :: div_work(KA,IA,JA)
 #endif
 
 #ifdef HEVI_FISSION
@@ -438,10 +443,18 @@ contains
     !$acc create(POTT,DPRES, &
     !$acc        qflx_hi,qflx_J13,qflx_J23, &
 #ifdef HEVI_FISSION
-    !$acc        pg_work,cf_work, &
+    !$acc        pg_work,cf_work,advc_work,div_work, &
     !$acc        PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work, &
 #endif
     !$acc        Sr,Sw,St)
+
+#ifdef HEVI_FISSION
+    if ( divdmp_coef .le. 0.0_RP ) then
+       !$acc kernels
+       div_work(:,:,:) = 0.0_RP
+       !$acc end kernels
+    end if
+#endif
 
     do JJS = JS, JE, JBLOCK
     JJE = JJS+JBLOCK-1
@@ -1401,7 +1414,7 @@ contains
        else
           iee = min(IIE,IEH)
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,advch,advcv,pg,cf,div) &
+          !$omp private(i,j,k,advch,advcv,advc,pg,cf,div) &
 #ifdef HEVI_FISSION
           !$omp shared(pg_work) &
 #endif
@@ -1483,18 +1496,13 @@ contains
           enddo
           enddo
           !$acc end kernels
-          ! wait for pg_work (async(0)) and cf_work (async(1))
-          !$acc wait
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,advcv,advch,div,pg,cf)
-          !$acc kernels
+          !$omp private(i,j,k,advcv,advch,advc)
+          !$acc kernels async(2)
           do j = JJS, JJE
           do i = IIS, iee
-
           do k = KS, KE
-             pg = pg_work(k,i,j)
-             cf = cf_work(k,i,j)
 #endif
              advcv = -   ( qflx_hi (k,i,j,ZDIR) - qflx_hi (k-1,i  ,j  ,ZDIR) &
                          + qflx_J13(k,i,j)      - qflx_J13(k-1,i  ,j       ) &
@@ -1502,14 +1510,56 @@ contains
              advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k  ,i-1,j  ,XDIR) ) * RFDX(i) &
                        + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k  ,i  ,j-1,YDIR) ) * RCDY(j) ) &
                    * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY)
-             div = divdmp_coef / dtrk * ( DDIV(k,i+1,j)/MAPF(i+1,j,2,I_XY) - DDIV(k,i,j)/MAPF(i,j,1,I_XY) ) &
-                 * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) * FDX(i) ! divergence damping
-             MOMX_RK(k,i,j) = MOMX0(k,i,j) &
-                  + dtrk * ( ( advcv + advch - pg ) / GSQRT(k,i,j,I_UYZ) + cf + div + MOMX_t(k,i,j) )
+             advc = advcv + advch
 #ifdef HIST_TEND
              if ( lhist ) then
                 advcv_t(k,i,j,I_MOMX) = advcv / GSQRT(k,i,j,I_UYZ)
                 advch_t(k,i,j,I_MOMX) = advch / GSQRT(k,i,j,I_UYZ)
+             end if
+#endif
+#ifdef HEVI_FISSION
+             advc_work(k,i,j) = advc
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+
+          if ( divdmp_coef > 0.0_RP ) then
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,div)
+          !$acc kernels async(3)
+          do j = JJS, JJE
+          do i = IIS, iee
+          do k = KS, KE
+#endif
+             div = divdmp_coef / dtrk * ( DDIV(k,i+1,j)/MAPF(i+1,j,2,I_XY) - DDIV(k,i,j)/MAPF(i,j,1,I_XY) ) &
+                 * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) * FDX(i) ! divergence damping
+#ifdef HEVI_FISSION
+             div_work(k,i,j) = div
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+          end if
+
+          ! wait for pg_work (async(0)), cf_work (async(1)), advc_work (async(2)), and div_work (async(3))
+          !$acc wait
+
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,pg,cf,advc,div)
+          !$acc kernels
+          do j = JJS, JJE
+          do i = IIS, iee
+          do k = KS, KE
+             pg = pg_work(k,i,j)
+             cf = cf_work(k,i,j)
+             advc = advc_work(k,i,j)
+             div = div_work(k,i,j)
+#endif
+             MOMX_RK(k,i,j) = MOMX0(k,i,j) &
+                  + dtrk * ( ( advc - pg ) / GSQRT(k,i,j,I_UYZ) + cf + div + MOMX_t(k,i,j) )
+#ifdef HIST_TEND
+             if ( lhist ) then
                 pg_t(k,i,j,2) = - pg / GSQRT(k,i,j,I_UYZ)
                 cf_t(k,i,j,1) = cf
                 ddiv_t(k,i,j,2) = div
@@ -1633,7 +1683,7 @@ contains
           !$acc end kernels
        else
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,advch,advcv,pg,cf,div) &
+          !$omp private(i,j,k,advch,advcv,advc,pg,cf,div) &
 #ifdef HEVI_FISSION
           !$omp shared(pg_work) &
 #endif
@@ -1716,17 +1766,13 @@ contains
           enddo
           enddo
           !$acc end kernels
-          ! wait for pg_work (async(0)) and cf_work (async(1))
-          !$acc wait
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,advcv,advch,div,pg,cf)
-          !$acc kernels
+          !$omp private(i,j,k,advcv,advch,advc)
+          !$acc kernels async(2)
           do j = JJS, min(JJE,JEH)
           do i = IIS, IIE
           do k = KS, KE
-             pg = pg_work(k,i,j)
-             cf = cf_work(k,i,j)
 #endif
              advcv = -   ( qflx_hi (k,i,j,ZDIR) - qflx_hi (k-1,i  ,j  ,ZDIR) &
                          + qflx_J13(k,i,j)      - qflx_J13(k-1,i  ,j  )      &
@@ -1734,14 +1780,56 @@ contains
              advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k  ,i-1,j  ,XDIR) ) * RCDX(i) &
                        + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k  ,i  ,j-1,YDIR) ) * RFDY(j) ) &
                      * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV)
-             div = divdmp_coef / dtrk * ( DDIV(k,i,j+1)/MAPF(i,j+1,1,I_XY) - DDIV(k,i,j)/MAPF(i,j,1,I_XY) ) &
-                 * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) * FDY(j) ! divergence damping
-             MOMY_RK(k,i,j) = MOMY0(k,i,j) &
-                            + dtrk * ( ( advcv + advch - pg ) / GSQRT(k,i,j,I_XVZ) + cf + div + MOMY_t(k,i,j) )
+             advc = advcv + advch
 #ifdef HIST_TEND
              if ( lhist ) then
                 advcv_t(k,i,j,I_MOMY) = advcv / GSQRT(k,i,j,I_XVZ)
                 advch_t(k,i,j,I_MOMY) = advch / GSQRT(k,i,j,I_XVZ)
+             end if
+#endif
+#ifdef HEVI_FISSION
+             advc_work(k,i,j) = advc
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+
+          if ( divdmp_coef > 0.0_RP ) then
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,pg,cf,advc)
+          !$acc kernels async(3)
+          do j = JJS, min(JJE,JEH)
+          do i = IIS, IIE
+          do k = KS, KE
+#endif
+             div = divdmp_coef / dtrk * ( DDIV(k,i,j+1)/MAPF(i,j+1,1,I_XY) - DDIV(k,i,j)/MAPF(i,j,1,I_XY) ) &
+                 * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) * FDY(j) ! divergence damping
+#ifdef HEVI_FISSION
+             div_work(k,i,j) = div
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+          end if
+
+          ! wait for pg_work (async(0)), cf_work (async(1)), advc_work (async(2)), and div_work (async(3))
+          !$acc wait
+
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,advc,div,pg,cf)
+          !$acc kernels
+          do j = JJS, min(JJE,JEH)
+          do i = IIS, IIE
+          do k = KS, KE
+             pg = pg_work(k,i,j)
+             cf = cf_work(k,i,j)
+             advc = advc_work(k,i,j)
+             div = div_work(k,i,j)
+#endif
+             MOMY_RK(k,i,j) = MOMY0(k,i,j) &
+                            + dtrk * ( ( advc - pg ) / GSQRT(k,i,j,I_XVZ) + cf + div + MOMY_t(k,i,j) )
+#ifdef HIST_TEND
+             if ( lhist ) then
                 pg_t(k,i,j,3) = - pg / GSQRT(k,i,j,I_XVZ)
                 cf_t(k,i,j,2) = cf
                 ddiv_t(k,i,j,3) = div
