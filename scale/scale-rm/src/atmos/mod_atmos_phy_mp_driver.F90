@@ -67,6 +67,18 @@ module mod_atmos_phy_mp_driver
   !
   !++ Private parameters & variables
   !
+  integer,  private, parameter :: I_NONE     = 0
+  integer,  private, parameter :: I_KESSLER  = 1
+  integer,  private, parameter :: I_TOMITA08 = 2
+  integer,  private, parameter :: I_SN14     = 3
+  integer,  private, parameter :: I_SUZUKI10 = 4
+  integer,  private, parameter :: I_AMPS     = 5
+  integer,  private            :: MP_model_id = I_NONE
+
+  integer,  private, parameter :: I_UPWIND  = 1
+  integer,  private, parameter :: I_SEMILAG = 2
+  integer,  private            :: MP_upwind_scheme_id = I_UPWIND
+
   logical,  private :: MP_do_precipitation    !> apply sedimentation (precipitation)?
   logical,  private :: MP_do_negative_fixer   !> apply negative fixer?
   real(RP), private :: MP_limit_negative      !> Abort if abs(fixed negative vaue) > abs(MP_limit_negative)
@@ -218,7 +230,7 @@ contains
           QA_MP = ATMOS_PHY_MP_suzuki10_ntracers
 !       case ( 'AMPS' )
 !          call ATMOS_PHY_MP_amps_tracer_setup
-!          
+!
 !          call ATMOS_HYDROMETEOR_regist( &
 !               ATMOS_PHY_MP_amps_nwaters,                & ! [IN]
 !               ATMOS_PHY_MP_amps_nices,                  & ! [IN]
@@ -288,6 +300,7 @@ contains
        MONITOR_put
     use mod_atmos_admin, only: &
        ATMOS_PHY_MP_TYPE, &
+       ATMOS_PHY_PRECIP_TYPE, &
        ATMOS_sw_phy_mp
     use mod_atmos_phy_mp_vars, only: &
        ATMOS_PHY_MP_cldfrac_thleshold, &
@@ -408,13 +421,16 @@ contains
        select case ( ATMOS_PHY_MP_TYPE )
        case ( 'KESSLER' )
           call ATMOS_PHY_MP_kessler_setup
+          MP_model_id = I_KESSLER
        case ( 'TOMITA08' )
           call ATMOS_PHY_MP_tomita08_setup( &
                  KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                  flg_lt )
+          MP_model_id = I_TOMITA08
        case ( 'SN14' )
           call ATMOS_PHY_MP_sn14_setup( &
                KA, IA, JA )
+          MP_model_id = I_SN14
        case ( 'SUZUKI10' )
           call ATMOS_PHY_MP_suzuki10_setup( &
                   KA, IA, JA, &
@@ -431,13 +447,15 @@ contains
                                        HIST_crg_id(iq)                                     ) ! [OUT]
              enddo
           endif
-!       case ( 'AMPS' )
+          MP_model_id = I_SUZUKI10
+       case ( 'AMPS' )
 !          call ATMOS_PHY_MP_amps_setup( &
 !               KA, KS, KE, IA, IS, IE, JA, JS, JE)
 !          if (MP_do_precipitation) then
 !             LOG_ERROR("ATMOS_PHY_MP_driver_setup",*) 'Precipitation should be off if AMPS is used. Check!'
 !             call PRC_abort
 !          endif
+          MP_model_id = I_AMPS
        end select
 
        ! history putput
@@ -447,6 +465,16 @@ contains
           do iq = QS_MP+1, QE_MP
              call FILE_HISTORY_reg( 'Vterm_'//trim(TRACER_NAME(iq)), 'terminal velocity of '//trim(TRACER_NAME(iq)), 'm/s', hist_vterm_id(iq) )
           end do
+
+          select case ( ATMOS_PHY_PRECIP_TYPE )
+          case ( 'Upwind-Euler' )
+             MP_upwind_scheme_id = I_UPWIND
+          case ( 'Semilag' )
+             MP_upwind_scheme_id = I_SEMILAG
+          case default
+             LOG_ERROR("ATMOS_PHY_MP_driver_setup",*) 'ATMOS_PHY_PRECIP_TYPE is invalid: ', trim(ATMOS_PHY_PRECIP_TYPE)
+             call PRC_abort
+          end select
 
        else
 
@@ -865,6 +893,10 @@ contains
     real(RP) :: mflux_crg(KA), sflux_crg(2), eflux_crg
     real(RP) :: QSPLT_in(KA,IA,JA,3)
     real(RP) :: dqcrg(KA,IA,JA), beta_crg(KA,IA,JA)
+
+#ifdef _OPENACC
+    real(RP) :: logPRES(KA,IA,JA)
+#endif
     !---------------------------------------------------------------------------
 
     !$acc data copy(DENS_t, MOMZ_t, RHOU_t, RHOV_t, RHOQ_t(:,:,:,:), RHOH, &
@@ -876,6 +908,7 @@ contains
     !$acc             ATMOS_PHY_MP_TYPE, ATMOS_PHY_PRECIP_TYPE) &
     !$acc      create(RHOE_t, TEMP1, CPtot1, CVtot1, CCN, QTRC1, CPtot_t, CVtot_t, precip, &
     !$acc             QTRC1_crg, QSPLT_in, dqcrg, beta_crg, &
+    !$acc             logPRES, &
     !$acc             hist_vterm_idx)
     !$acc data copy(RHOC_t_MP) if (flg_lt)
 
@@ -886,8 +919,8 @@ contains
        CCN(:,:,:) = CCN_t(:,:,:) * dt_MP
        !$acc end kernels
 
-       select case ( ATMOS_PHY_MP_TYPE )
-       case ( 'KESSLER' )
+       select case ( MP_model_id )
+       case ( I_KESSLER )
           !$omp workshare
           !$acc kernels
 !OCL XFILL
@@ -932,7 +965,7 @@ contains
           end do
           !$acc end kernels
 
-       case ( 'TOMITA08' )
+       case ( I_TOMITA08 )
 !OCL XFILL
           !$omp parallel do collapse(2)
           !$acc parallel async
@@ -1069,7 +1102,7 @@ contains
 
           !$acc wait
 
-       case ( 'SN14' )
+       case ( I_SN14 )
 
           !$acc update host(DENS,W,QTRC(:,:,:,QS_MP:QE_MP),PRES,TEMP,Qdry,CPtot,CVtot,CCN)
           if( flg_lt ) then
@@ -1099,7 +1132,7 @@ contains
           endif
           !$acc update device(RHOQ_t_MP(:,:,:,QS_MP:QE_MP),RHOE_t,CPtot_t,CVtot_t,EVAPORATE)
 
-       case ( 'SUZUKI10' )
+       case ( I_SUZUKI10 )
 
           !$acc update host(DENS,PRES,TEMP,QTRC(:,:,:,QS_MP:QE_MP),QDRY,CPtot,CVtot,CCN)
           if( flg_lt ) then
@@ -1172,7 +1205,7 @@ contains
 
           endif
 
-!       case ( 'AMPS' )
+!       case ( I_AMPS )
 !
 !          !$acc update host(U,V,W,MOMZ,DENS,PRES,TEMP,POTT,EXNER,QTRC(:,:,:,QS_MP:QE_MP),QDRY,CPtot,CVtot,CCN)
 !          call ATMOS_PHY_MP_amps_tendency( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
@@ -1233,12 +1266,25 @@ contains
              !$acc end kernels
           end if
 
+#ifdef _OPENACC
+          !$acc parallel loop collapse(3)
+          do j = JS, JE
+          do i = IS, IE
+          do k = KS, KE
+             logPRES(k,i,j) = log( PRES(k,i,j) / PRE00 )
+          end do
+          end do
+          end do
+          !$acc end parallel
+#endif
+
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp shared (KA,KS,KE,IS,IE,JS,JE,QS_MP,QE_MP,QHA,QHS,QHE,QLA,QIA, &
           !$omp         QA_LT,QS_LT,QE_LT, &
           !$omp         PRE00,LHF, &
           !$omp         ATMOS_PHY_MP_TYPE, ATMOS_PHY_PRECIP_TYPE, &
-          !$omp         dt_MP,MP_NSTEP_SEDIMENTATION,MP_RNSTEP_SEDIMENTATION, &
+          !$omp         dt_MP,MP_model_id,MP_upwind_scheme_id, &
+          !$omp         MP_NSTEP_SEDIMENTATION,MP_RNSTEP_SEDIMENTATION, &
           !$omp         REAL_CZ,REAL_FZ, &
           !$omp         DENS,MOMZ,U,V,TEMP,PRES,QTRC,CPtot,CVtot, &
           !$omp         DENS_t_MP,MOMZ_t_MP,RHOU_t_MP,RHOV_t_MP,RHOQ_t_MP,RHOH_MP, &
@@ -1303,28 +1349,28 @@ contains
              !$acc loop seq
              do step = 1, MP_NSTEP_SEDIMENTATION
 
-                select case ( ATMOS_PHY_MP_TYPE )
-                case ( 'KESSLER' )
+                select case ( MP_model_id )
+                case ( I_KESSLER )
                    call ATMOS_PHY_MP_kessler_terminal_velocity( &
                         KA, KS, KE, &
                         DENS2(:), RHOQ2(:,:), & ! [IN]
                         REFSTATE_dens(:,i,j), & ! [IN]
                         vterm(:,:)            ) ! [OUT]
-                case ( 'TOMITA08' )
+                case ( I_TOMITA08 )
                    call ATMOS_PHY_MP_tomita08_terminal_velocity( &
                         KA, KS, KE, &
                         DENS2(:), TEMP2(:), RHOQ2(:,:), & ! [IN]
                         vterm(:,:)                      ) ! [OUT]
-                case ( 'SN14' )
+                case ( I_SN14 )
                    call ATMOS_PHY_MP_sn14_terminal_velocity( &
                         KA, KS, KE, &
                         DENS2(:), TEMP2(:), RHOQ2(:,:), PRES2(:), & ! [IN]
                         vterm(:,:)                                ) ! [OUT]
-                case ( 'SUZUKI10' )
+                case ( I_SUZUKI10 )
                    call ATMOS_PHY_MP_suzuki10_terminal_velocity( &
                         KA,        & ! [IN]
                         vterm(:,:) ) ! [OUT]
-                case ( 'AMPS' )
+                case ( I_AMPS )
                    ! do nothing
                 case default
                    !$acc loop seq
@@ -1347,8 +1393,8 @@ contains
                    end if
                 end do
 
-                select case ( ATMOS_PHY_PRECIP_TYPE )
-                case ( 'Upwind-Euler' )
+                select case ( MP_upwind_scheme_id )
+                case ( I_UPWIND )
                    call ATMOS_PHY_MP_precipitation_upwind( &
                         KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
                         TEMP2(:), vterm(:,:),   & ! [IN]
@@ -1360,7 +1406,7 @@ contains
                         RHOE2(:),               & ! [INOUT]
                         mflux(:), sflux(:),     & ! [OUT]
                         eflux                   ) ! [OUT]
-                case ( 'Semilag' )
+                case ( I_SEMILAG )
                    call ATMOS_PHY_MP_precipitation_semilag( &
                         KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
                         TEMP2(:), vterm(:,:),   & ! [IN]
@@ -1380,8 +1426,8 @@ contains
 
                 if( flg_lt ) then
 
-                   select case ( ATMOS_PHY_PRECIP_TYPE )
-                   case ( 'Upwind-Euler' )
+                   select case ( MP_upwind_scheme_id )
+                   case ( I_UPWIND )
                       call ATMOS_PHY_MP_precipitation_upwind( &
                            KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
                            TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
@@ -1393,7 +1439,7 @@ contains
                            RHOE2(:),                   & ! [INOUT]
                            mflux_crg(:), sflux_crg(:), & ! [OUT] dummy
                            eflux_crg                   ) ! [OUT] dummy
-                   case ( 'Semilag' )
+                   case ( I_SEMILAG )
                       call ATMOS_PHY_MP_precipitation_semilag( &
                            KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
                            TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
@@ -1441,7 +1487,13 @@ contains
                 CV_t = ( CVtot2(k) - CVtot(k,i,j) ) / dt_MP
                 RHOH_MP(k,i,j) = RHOH_MP(k,i,j) &
                      + ( RHOE2(k) - RHOE(k) ) / dt_MP &
-                     - ( CP_t + log( PRES(k,i,j) / PRE00 ) * ( CVtot(k,i,j) / CPtot(k,i,j) * CP_t - CV_t ) ) &
+                     - ( CP_t &
+#ifdef _OPENACC
+                         + logPRES(k,i,j) &
+#else
+                         + log( PRES(k,i,j) / PRE00 ) &
+#endif
+                         * ( CVtot(k,i,j) / CPtot(k,i,j) * CP_t - CV_t ) ) &
                      * DENS(k,i,j) * TEMP(k,i,j)
 !                RHOT_t_MP(k,i,j) = RHOT_t_MP(k,i,j) &
 !                     + ( RHOE2(k) - RHOE(k) ) / ( dt_MP * EXNER(k,i,j) * CPtot(k,i,j) ) &
@@ -1657,15 +1709,15 @@ contains
     !$acc data copyin(QV, QHYD) copyout(QTRC)
     !$acc data copyin(QNUM) if(present(QNUM))
 
-    select case( ATMOS_PHY_MP_TYPE )
-    case ( "NONE" )
+    select case( MP_model_id )
+    case ( I_NONE )
        if ( associated( ATMOS_PHY_MP_USER_qhyd2qtrc ) ) then
           call ATMOS_PHY_MP_USER_qhyd2qtrc( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                                             QV(:,:,:), QHYD(:,:,:,:), & ! [IN]
                                             QTRC(:,:,:,:),            & ! [OUT]
                                             QNUM=QNUM                 ) ! [IN]
        end if
-    case ( "KESSLER" )
+    case ( I_KESSLER )
        !$omp parallel do OMP_SCHEDULE_
        !$acc kernels
        do j = JS, JE
@@ -1679,7 +1731,7 @@ contains
        call ATMOS_PHY_MP_KESSLER_qhyd2qtrc( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                                             QHYD(:,:,:,:),  & ! [IN]
                                             QTRC(:,:,:,2:)  ) ! [OUT]
-    case ( "TOMITA08" )
+    case ( I_TOMITA08 )
        !$omp parallel do OMP_SCHEDULE_
        !$acc kernels
        do j = JS, JE
@@ -1693,7 +1745,7 @@ contains
        call ATMOS_PHY_MP_TOMITA08_qhyd2qtrc( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                                              QHYD(:,:,:,:),  & ! [IN]
                                              QTRC(:,:,:,2:)  ) ! [OUT]
-    case ( "SN14" )
+    case ( I_SN14 )
        !$omp parallel do OMP_SCHEDULE_
        do j = JS, JE
        do i = IS, IE
@@ -1709,7 +1761,7 @@ contains
                                          QNUM=QNUM       ) ! [IN]
        !$acc update device(QTRC(:,:,:,2:))
        !$acc update device(QNUM) if(present(QNUM))
-    case ( "SUZUKI10" )
+    case ( I_SUZUKI10 )
        !$omp parallel do OMP_SCHEDULE_
        do j = JS, JE
        do i = IS, IE
@@ -1725,7 +1777,7 @@ contains
                                              QNUM=QNUM       ) ! [IN]
        !$acc update device(QTRC(:,:,:,2:))
        !$acc update device(QNUM) if(present(QNUM))
-!    case ( "AMPS" )
+!    case ( I_AMPS )
 !       !$omp parallel do OMP_SCHEDULE_
 !       do j = JS, JE
 !       do i = IS, IE
@@ -1740,7 +1792,7 @@ contains
 !                                         QTRC(:,:,:,2:), & ! [OUT]
 !                                         QNUM=QNUM       ) ! [IN]
     case default
-       LOG_ERROR("ATMOS_PHY_MP_driver_qhyd2qtrc",*) 'ATMOS_PHY_MP_TYPE (', trim(ATMOS_PHY_MP_TYPE), ') is not supported'
+       LOG_ERROR("ATMOS_PHY_MP_driver_qhyd2qtrc",*) 'MP_model_id is invalid: ', MP_model_id
        call PRC_abort
     end select
 
