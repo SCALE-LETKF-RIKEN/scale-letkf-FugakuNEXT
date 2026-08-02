@@ -1680,7 +1680,11 @@ contains
     integer , intent(in)  :: JJE
     logical , intent(in)  :: twoD
 
+#ifdef _OPENACC
+    real(RP) :: fluxZ0, fluxZ1
+#else
     real(RP) :: fluxZ(KA)
+#endif
     integer  :: k, i, j
 
     if ( twoD ) then
@@ -1692,8 +1696,8 @@ contains
        !$omp shared(JJS,JJE,i,KS,KE,I_UYW,I_UY, &
        !$omp        MOMZ_t_TB,QFLX_MOMZ,GSQRT,J13G,J23G,J33G,MAPF,RFDZ,RCDX,RCDY)
        !$acc kernels
-       !$acc loop private(fluxZ)
        do j = JJS, JJE
+#ifndef _OPENACC
           do k = KS+1, KE-1
              fluxZ(k) = ( &
                         + ( QFLX_MOMZ(k  ,i,j,YDIR) + QFLX_MOMZ(k  ,i,j-1,YDIR) &
@@ -1703,13 +1707,39 @@ contains
           end do
           fluxZ(KS) = 0.0_RP
           fluxZ(KE) = 0.0_RP
+#endif
           do k = KS, KE-1
+#ifdef _OPENACC
+          if ( k == KS ) then
+             fluxZ0 = 0.0_RP
+          else
+             fluxZ0 = ( &
+                      + ( QFLX_MOMZ(k  ,i,j,YDIR) + QFLX_MOMZ(k  ,i,j-1,YDIR) &
+                        + QFLX_MOMZ(k-1,i,j,YDIR) + QFLX_MOMZ(k-1,i,j-1,YDIR) ) * J23G(k,i,j,I_XYZ) * MAPF(i,j,2,I_XY) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_MOMZ(k,i,j,ZDIR)
+          end if
+          if ( k == KE-1 ) then
+             fluxZ1 = 0.0_RP
+          else
+             fluxZ1 = ( &
+                      + ( QFLX_MOMZ(k+1,i,j,YDIR) + QFLX_MOMZ(k+1,i,j-1,YDIR) &
+                        + QFLX_MOMZ(k  ,i,j,YDIR) + QFLX_MOMZ(k  ,i,j-1,YDIR) ) * J23G(k+1,i,j,I_XYZ) * MAPF(i,j,2,I_XY) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_MOMZ(k+1,i,j,ZDIR)
+          end if
+#endif
              MOMZ_t_TB(k,i,j) = &
                   - ( ( &
                       + ( GSQRT(k,i,j  ,I_XVW) * QFLX_MOMZ(k,i,j  ,YDIR) / MAPF(i,j  ,1,I_XV) &
                         - GSQRT(k,i,j-1,I_XVW) * QFLX_MOMZ(k,i,j-1,YDIR) / MAPF(i,j-1,1,I_XV) ) * RCDY(j) &
                       ) * MAPF(i,j,2,I_XY) &
-                    + ( fluxZ(k+1) - fluxZ(k) ) * RFDZ(k) &
+#ifdef _OPENACC
+                    + ( fluxZ1 - fluxZ0 ) &
+#else
+                    + ( fluxZ(k+1) - fluxZ(k) ) &
+#endif
+                    * RFDZ(k) &
                     ) / GSQRT(k,i,j,I_XYW)
           enddo
        enddo
@@ -1724,8 +1754,8 @@ contains
        !$omp        MOMZ_t_TB,QFLX_MOMZ,GSQRT,J13G,J23G,J33G,MAPF,RFDZ,RCDX,RCDY)
        !$acc kernels
        do j = JJS, JJE
-       !$acc loop private(fluxZ)
        do i = IIS, IIE
+#ifndef _OPENACC
           do k = KS+1, KE-1
              fluxZ(k) = ( ( QFLX_MOMZ(k  ,i,j,XDIR) + QFLX_MOMZ(k  ,i-1,j,XDIR) &
                           + QFLX_MOMZ(k-1,i,j,XDIR) + QFLX_MOMZ(k-1,i-1,j,XDIR) ) * J13G(k,i,j,I_XYZ) * MAPF(i,j,1,I_XY) &
@@ -1736,14 +1766,42 @@ contains
           end do
           fluxZ(KS) = 0.0_RP
           fluxZ(KE) = 0.0_RP
+#endif
           do k = KS, KE-1
+#ifdef _OPENACC
+          if ( k == KS ) then
+             fluxZ0 = 0.0_RP
+          else
+             fluxZ0 = ( ( QFLX_MOMZ(k  ,i,j,XDIR) + QFLX_MOMZ(k  ,i-1,j,XDIR) &
+                        + QFLX_MOMZ(k-1,i,j,XDIR) + QFLX_MOMZ(k-1,i-1,j,XDIR) ) * J13G(k,i,j,I_XYZ) * MAPF(i,j,1,I_XY) &
+                      + ( QFLX_MOMZ(k  ,i,j,YDIR) + QFLX_MOMZ(k  ,i,j-1,YDIR) &
+                        + QFLX_MOMZ(k-1,i,j,YDIR) + QFLX_MOMZ(k-1,i,j-1,YDIR) ) * J23G(k,i,j,I_XYZ) * MAPF(i,j,2,I_XY) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_MOMZ(k,i,j,ZDIR)
+          end if
+          if ( k == KE-1 ) then
+             fluxZ1 = 0.0_RP
+          else
+             fluxZ1 = ( ( QFLX_MOMZ(k+1,i,j,XDIR) + QFLX_MOMZ(k+1,i-1,j,XDIR) &
+                        + QFLX_MOMZ(k  ,i,j,XDIR) + QFLX_MOMZ(k  ,i-1,j,XDIR) ) * J13G(k+1,i,j,I_XYZ) * MAPF(i,j,1,I_XY) &
+                      + ( QFLX_MOMZ(k+1,i,j,YDIR) + QFLX_MOMZ(k+1,i,j-1,YDIR) &
+                        + QFLX_MOMZ(k  ,i,j,YDIR) + QFLX_MOMZ(k  ,i,j-1,YDIR) ) * J23G(k+1,i,j,I_XYZ) * MAPF(i,j,2,I_XY) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_MOMZ(k+1,i,j,ZDIR)
+          end if
+#endif
              MOMZ_t_TB(k,i,j) = &
                   - ( ( ( GSQRT(k,i  ,j,I_UYW) * QFLX_MOMZ(k,i  ,j,XDIR) / MAPF(i  ,j,2,I_UY) &
                         - GSQRT(k,i-1,j,I_UYW) * QFLX_MOMZ(k,i-1,j,XDIR) / MAPF(i-1,j,2,I_UY) ) * RCDX(i) &
                       + ( GSQRT(k,i,j  ,I_XVW) * QFLX_MOMZ(k,i,j  ,YDIR) / MAPF(i,j  ,1,I_XV) &
                         - GSQRT(k,i,j-1,I_XVW) * QFLX_MOMZ(k,i,j-1,YDIR) / MAPF(i,j-1,1,I_XV) ) * RCDY(j) &
                       ) * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) &
-                    + ( fluxZ(k+1) - fluxZ(k) ) * RFDZ(k) &
+#ifdef _OPENACC
+                    + ( fluxZ1 - fluxZ0 ) &
+#else
+                    + ( fluxZ(k+1) - fluxZ(k) ) &
+#endif
+                    * RFDZ(k) &
                     ) / GSQRT(k,i,j,I_XYW)
           enddo
        enddo
@@ -1778,7 +1836,11 @@ contains
     integer , intent(in)  :: JJS
     integer , intent(in)  :: JJE
 
+#ifdef _OPENACC
+    real(RP) :: fluxZ0, fluxZ1
+#else
     real(RP) :: fluxZ(KA)
+#endif
     integer  :: k, i, j
 
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
@@ -1788,8 +1850,8 @@ contains
     !$omp        MOMX_t_TB,QFLX_MOMX,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RFDX,RCDY)
     !$acc kernels
     do j = JJS, JJE
-    !$acc loop private(fluxZ)
     do i = IIS, IIE
+#ifndef _OPENACC
        do k = KS, KE-1
           fluxZ(k) = ( ( QFLX_MOMX(k+1,i+1,j,XDIR) + QFLX_MOMX(k+1,i,j  ,XDIR) &
                        + QFLX_MOMX(k  ,i+1,j,XDIR) + QFLX_MOMX(k  ,i,j  ,XDIR) ) * J13G(k,i,j,I_UYW) * MAPF(i,j,1,I_UY) &
@@ -1800,14 +1862,42 @@ contains
        end do
        fluxZ(KS-1) = 0.0_RP
        fluxZ(KE  ) = 0.0_RP
+#endif
        do k = KS, KE
+#ifdef _OPENACC
+       if ( k == KS ) then
+          fluxZ0 = 0.0_RP
+       else
+          fluxZ0 = ( ( QFLX_MOMX(k  ,i+1,j,XDIR) + QFLX_MOMX(k  ,i,j  ,XDIR) &
+                     + QFLX_MOMX(k-1,i+1,j,XDIR) + QFLX_MOMX(k-1,i,j  ,XDIR) ) * J13G(k-1,i,j,I_UYW) * MAPF(i,j,1,I_UY) &
+                   + ( QFLX_MOMX(k  ,i  ,j,YDIR) + QFLX_MOMX(k  ,i,j-1,YDIR) &
+                     + QFLX_MOMX(k-1,i  ,j,YDIR) + QFLX_MOMX(k-1,i,j-1,YDIR) ) * J23G(k-1,i,j,I_UYW) * MAPF(i,j,2,I_UY) &
+                   ) * 0.25_RP &
+                 + J33G * QFLX_MOMX(k-1,i,j,ZDIR)
+       end if
+       if ( k == KE ) then
+          fluxZ1 = 0.0_RP
+       else
+          fluxZ1 = ( ( QFLX_MOMX(k+1,i+1,j,XDIR) + QFLX_MOMX(k+1,i,j  ,XDIR) &
+                     + QFLX_MOMX(k  ,i+1,j,XDIR) + QFLX_MOMX(k  ,i,j  ,XDIR) ) * J13G(k,i,j,I_UYW) * MAPF(i,j,1,I_UY) &
+                   + ( QFLX_MOMX(k+1,i  ,j,YDIR) + QFLX_MOMX(k+1,i,j-1,YDIR) &
+                     + QFLX_MOMX(k  ,i  ,j,YDIR) + QFLX_MOMX(k  ,i,j-1,YDIR) ) * J23G(k,i,j,I_UYW) * MAPF(i,j,2,I_UY) &
+                   ) * 0.25_RP &
+                 + J33G * QFLX_MOMX(k,i,j,ZDIR)
+       end if
+#endif
           MOMX_t_TB(k,i,j) = &
                - ( ( ( GSQRT(k,i+1,j,I_XYZ) * QFLX_MOMX(k,i+1,j,XDIR) / MAPF(i+1,j  ,2,I_XY) &
                      - GSQRT(k,i  ,j,I_XYZ) * QFLX_MOMX(k,i  ,j,XDIR) / MAPF(i  ,j  ,2,I_XY) ) * RFDX(i) &
                    + ( GSQRT(k,i,j  ,I_UVZ) * QFLX_MOMX(k,i,j  ,YDIR) / MAPF(i  ,j  ,1,I_UV) &
                      - GSQRT(k,i,j-1,I_UVZ) * QFLX_MOMX(k,i,j-1,YDIR) / MAPF(i  ,j-1,1,I_UV) ) * RCDY(j) &
                    ) * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) &
-                 + ( fluxZ(k) - fluxZ(k-1) ) * RCDZ(k) &
+#ifdef _OPENACC
+                 + ( fluxZ1 - fluxZ0 ) &
+#else
+                 + ( fluxZ(k) - fluxZ(k-1) ) &
+#endif
+                 * RCDZ(k) &
                  ) / GSQRT(k,i,j,I_UYZ)
        enddo
     enddo
@@ -1843,7 +1933,11 @@ contains
     integer , intent(in)  :: JJE
     logical , intent(in)  :: twoD
 
+#ifdef _OPENACC
+    real(RP) :: fluxZ0, fluxZ1
+#else
     real(RP) :: fluxZ(KA)
+#endif
     integer  :: k, i, j
 
     if ( twoD ) then
@@ -1855,8 +1949,8 @@ contains
        !$omp shared(JJS,JJE,i,KS,KE,I_UVZ,I_UV, &
        !$omp        MOMY_t_TB,QFLX_MOMY,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RCDX,RFDY)
        !$acc kernels
-       !$acc loop private(fluxZ)
        do j = JJS, JJE
+#ifndef _OPENACC
           do k = KS, KE-1
              fluxZ(k) = ( &
                         + ( QFLX_MOMY(k+1,i,j+1,YDIR) + QFLX_MOMY(k+1,i  ,j,YDIR) &
@@ -1866,13 +1960,39 @@ contains
           end do
           fluxZ(KS-1) = 0.0_RP
           fluxZ(KE  ) = 0.0_RP
+#endif
           do k = KS, KE
+#ifdef _OPENACC
+          if ( k == KS ) then
+             fluxZ0 = 0.0_RP
+          else
+             fluxZ0 = ( &
+                      + ( QFLX_MOMY(k  ,i,j+1,YDIR) + QFLX_MOMY(k  ,i  ,j,YDIR) &
+                        + QFLX_MOMY(k-1,i,j+1,YDIR) + QFLX_MOMY(k-1,i  ,j,YDIR) ) * J23G(k-1,i,j,I_XVW) * MAPF(i,j,2,I_XV) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_MOMY(k-1,i,j,ZDIR)
+          end if
+          if ( k == KE ) then
+             fluxZ1 = 0.0_RP
+          else
+             fluxZ1 = ( &
+                      + ( QFLX_MOMY(k+1,i,j+1,YDIR) + QFLX_MOMY(k+1,i  ,j,YDIR) &
+                        + QFLX_MOMY(k  ,i,j+1,YDIR) + QFLX_MOMY(k  ,i  ,j,YDIR) ) * J23G(k,i,j,I_XVW) * MAPF(i,j,2,I_XV) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_MOMY(k,i,j,ZDIR)
+          end if
+#endif
              MOMY_t_TB(k,i,j) = &
                   - ( ( &
                       + ( GSQRT(k,i  ,j+1,I_XYZ) * QFLX_MOMY(k,i,j+1,YDIR) / MAPF(i,j+1,2,I_XY) &
                         - GSQRT(k,i  ,j  ,I_XYZ) * QFLX_MOMY(k,i,j  ,YDIR) / MAPF(i,j  ,2,I_XY) ) * RFDY(j) &
                       ) * MAPF(i,j,2,I_XV) &
-                    + ( fluxZ(k) - fluxZ(k-1) ) * RCDZ(k) &
+#ifdef _OPENACC
+                    + ( fluxZ1 - fluxZ0 ) &
+#else
+                    + ( fluxZ(k) - fluxZ(k-1) ) &
+#endif
+                    * RCDZ(k) &
                     ) / GSQRT(k,i,j,I_XVZ)
           enddo
        enddo
@@ -1887,8 +2007,8 @@ contains
        !$omp        MOMY_t_TB,QFLX_MOMY,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RCDX,RFDY)
        !$acc kernels
        do j = JJS, JJE
-       !$acc loop private(fluxZ)
        do i = IIS, IIE
+#ifndef _OPENACC
           do k = KS, KE-1
              fluxZ(k) = ( ( QFLX_MOMY(k+1,i,j  ,XDIR) + QFLX_MOMY(k+1,i-1,j,XDIR) &
                           + QFLX_MOMY(k  ,i,j  ,XDIR) + QFLX_MOMY(k  ,i-1,j,XDIR) ) * J13G(k,i,j,I_XVW) * MAPF(i,j,1,I_XV) &
@@ -1899,14 +2019,42 @@ contains
           end do
           fluxZ(KS-1) = 0.0_RP
           fluxZ(KE  ) = 0.0_RP
+#endif
           do k = KS, KE
+#ifdef _OPENACC
+          if ( k == KS ) then
+             fluxZ0 = 0.0_RP
+          else
+             fluxZ0 = ( ( QFLX_MOMY(k  ,i,j  ,XDIR) + QFLX_MOMY(k  ,i-1,j,XDIR) &
+                        + QFLX_MOMY(k-1,i,j  ,XDIR) + QFLX_MOMY(k-1,i-1,j,XDIR) ) * J13G(k-1,i,j,I_XVW) * MAPF(i,j,1,I_XV) &
+                      + ( QFLX_MOMY(k  ,i,j+1,YDIR) + QFLX_MOMY(k  ,i  ,j,YDIR) &
+                        + QFLX_MOMY(k-1,i,j+1,YDIR) + QFLX_MOMY(k-1,i  ,j,YDIR) ) * J23G(k-1,i,j,I_XVW) * MAPF(i,j,2,I_XV) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_MOMY(k-1,i,j,ZDIR)
+          end if
+          if ( k == KE ) then
+             fluxZ1 = 0.0_RP
+          else
+             fluxZ1 = ( ( QFLX_MOMY(k+1,i,j  ,XDIR) + QFLX_MOMY(k+1,i-1,j,XDIR) &
+                        + QFLX_MOMY(k  ,i,j  ,XDIR) + QFLX_MOMY(k  ,i-1,j,XDIR) ) * J13G(k,i,j,I_XVW) * MAPF(i,j,1,I_XV) &
+                      + ( QFLX_MOMY(k+1,i,j+1,YDIR) + QFLX_MOMY(k+1,i  ,j,YDIR) &
+                        + QFLX_MOMY(k  ,i,j+1,YDIR) + QFLX_MOMY(k  ,i  ,j,YDIR) ) * J23G(k,i,j,I_XVW) * MAPF(i,j,2,I_XV) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_MOMY(k,i,j,ZDIR)
+          end if
+#endif
              MOMY_t_TB(k,i,j) = &
                   - ( ( ( GSQRT(k,i  ,j  ,I_UVZ) * QFLX_MOMY(k,i  ,j,XDIR) / MAPF(i  ,j,2,I_UV) &
                         - GSQRT(k,i-1,j  ,I_UVZ) * QFLX_MOMY(k,i-1,j,XDIR) / MAPF(i-1,j,2,I_UV) ) * RCDX(i) &
                       + ( GSQRT(k,i  ,j+1,I_XYZ) * QFLX_MOMY(k,i,j+1,YDIR) / MAPF(i,j+1,2,I_XY) &
                         - GSQRT(k,i  ,j  ,I_XYZ) * QFLX_MOMY(k,i,j  ,YDIR) / MAPF(i,j  ,2,I_XY) ) * RFDY(j) &
                       ) * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) &
-                    + ( fluxZ(k) - fluxZ(k-1) ) * RCDZ(k) &
+#ifdef _OPENACC
+                    + ( fluxZ1 - fluxZ0 ) &
+#else
+                    + ( fluxZ(k) - fluxZ(k-1) ) &
+#endif
+                    * RCDZ(k) &
                     ) / GSQRT(k,i,j,I_XVZ)
           enddo
        enddo
@@ -1945,7 +2093,11 @@ contains
     integer , intent(in)  :: JJE
     logical , intent(in)  :: twoD
 
+#ifdef _OPENACC
+    real(RP) :: fluxZ0, fluxZ1
+#else
     real(RP) :: fluxZ(0:KA)
+#endif
     integer  :: k, i, j
 
     if ( twoD ) then
@@ -1958,8 +2110,8 @@ contains
        !$omp        phi_t_TB,QFLX_phi,GSQRT,MAPF, &
        !$omp        J23G,J33G,RCDZ,RCDX,RCDY)
        !$acc kernels
-       !$acc loop private(fluxZ)
        do j = JJS, JJE
+#ifndef _OPENACC
           do k = KS, KE-1
              fluxZ(k) = ( &
                         + ( QFLX_phi(k+1,i,j,YDIR) + QFLX_phi(k+1,i,j-1,YDIR) &
@@ -1969,13 +2121,39 @@ contains
           end do
           fluxZ(KS-1) = 0.0_RP
           fluxZ(KE  ) = 0.0_RP
+#endif
           do k = KS, KE
+#ifdef _OPENACC
+          if ( k == KS ) then
+             fluxZ0 = 0.0_RP
+          else
+             fluxZ0 = ( &
+                      + ( QFLX_phi(k  ,i,j,YDIR) + QFLX_phi(k  ,i,j-1,YDIR) &
+                        + QFLX_phi(k-1,i,j,YDIR) + QFLX_phi(k-1,i,j-1,YDIR) ) * J23G(k-1,i,j,I_XYW) * MAPF(i,j,2,I_XY) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_phi(k-1,i,j,ZDIR)
+          end if
+          if ( k == KE ) then
+             fluxZ1 = 0.0_RP
+          else
+             fluxZ1 = ( &
+                      + ( QFLX_phi(k+1,i,j,YDIR) + QFLX_phi(k+1,i,j-1,YDIR) &
+                        + QFLX_phi(k  ,i,j,YDIR) + QFLX_phi(k  ,i,j-1,YDIR) ) * J23G(k,i,j,I_XYW) * MAPF(i,j,2,I_XY) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_phi(k,i,j,ZDIR)
+          end if
+#endif
              phi_t_TB(k,i,j) = &
                   - ( ( &
                       + ( GSQRT(k,i,j  ,I_XVZ) * QFLX_phi(k,i,j  ,YDIR) / MAPF(i,j  ,1,I_XV) &
                         - GSQRT(k,i,j-1,I_XVZ) * QFLX_phi(k,i,j-1,YDIR) / MAPF(i,j-1,1,I_XV) ) * RCDY(j) &
                       ) * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) &
-                    + ( fluxZ(k) - fluxZ(k-1) ) * RCDZ(k) &
+#ifdef _OPENACC
+                    + ( fluxZ1 - fluxZ0 ) &
+#else
+                    + ( fluxZ(k) - fluxZ(k-1) ) &
+#endif
+                    * RCDZ(k) &
                     ) / GSQRT(k,i,j,I_XYZ)
           enddo
        enddo
@@ -1991,8 +2169,8 @@ contains
        !$omp        J13G,J23G,J33G,RCDZ,RCDX,RCDY)
        !$acc kernels
        do j = JJS, JJE
-       !$acc loop private(fluxZ)
        do i = IIS, IIE
+#ifndef _OPENACC
           do k = KS, KE-1
              fluxZ(k) = ( ( QFLX_phi(k+1,i,j,XDIR) + QFLX_phi(k+1,i-1,j,XDIR) &
                           + QFLX_phi(k  ,i,j,XDIR) + QFLX_phi(k  ,i-1,j,XDIR) ) * J13G(k,i,j,I_XYW) * MAPF(i,j,1,I_XY) &
@@ -2003,14 +2181,42 @@ contains
           end do
           fluxZ(KS-1) = 0.0_RP
           fluxZ(KE  ) = 0.0_RP
+#endif
           do k = KS, KE
+#ifdef _OPENACC
+          if ( k == KS ) then
+             fluxZ0 = 0.0_RP
+          else
+             fluxZ0 = ( ( QFLX_phi(k  ,i,j,XDIR) + QFLX_phi(k  ,i-1,j,XDIR) &
+                        + QFLX_phi(k-1,i,j,XDIR) + QFLX_phi(k-1,i-1,j,XDIR) ) * J13G(k-1,i,j,I_XYW) * MAPF(i,j,1,I_XY) &
+                      + ( QFLX_phi(k  ,i,j,YDIR) + QFLX_phi(k  ,i,j-1,YDIR) &
+                        + QFLX_phi(k-1,i,j,YDIR) + QFLX_phi(k-1,i,j-1,YDIR) ) * J23G(k-1,i,j,I_XYW) * MAPF(i,j,2,I_XY) &
+                      ) * 0.25_RP &
+                    + J33G * QFLX_phi(k-1,i,j,ZDIR)
+          end if
+          if ( k == KE ) then
+             fluxZ1 = 0.0_RP
+          else
+             fluxZ1 = ( ( QFLX_phi(k+1,i,j,XDIR) + QFLX_phi(k+1,i-1,j,XDIR) &
+                    + QFLX_phi(k  ,i,j,XDIR) + QFLX_phi(k  ,i-1,j,XDIR) ) * J13G(k,i,j,I_XYW) * MAPF(i,j,1,I_XY) &
+                  + ( QFLX_phi(k+1,i,j,YDIR) + QFLX_phi(k+1,i,j-1,YDIR) &
+                    + QFLX_phi(k  ,i,j,YDIR) + QFLX_phi(k  ,i,j-1,YDIR) ) * J23G(k,i,j,I_XYW) * MAPF(i,j,2,I_XY) &
+                  ) * 0.25_RP &
+                + J33G * QFLX_phi(k,i,j,ZDIR)
+          end if
+#endif
              phi_t_TB(k,i,j) = &
                   - ( ( ( GSQRT(k,i  ,j,I_UYZ) * QFLX_phi(k,i  ,j,XDIR) / MAPF(i  ,j,2,I_UY) &
                         - GSQRT(k,i-1,j,I_UYZ) * QFLX_phi(k,i-1,j,XDIR) / MAPF(i-1,j,2,I_UY) ) * RCDX(i) &
                       + ( GSQRT(k,i,j  ,I_XVZ) * QFLX_phi(k,i,j  ,YDIR) / MAPF(i,j  ,1,I_XV) &
                         - GSQRT(k,i,j-1,I_XVZ) * QFLX_phi(k,i,j-1,YDIR) / MAPF(i,j-1,1,I_XV) ) * RCDY(j) &
                       ) * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) &
-                    + ( fluxZ(k) - fluxZ(k-1) ) * RCDZ(k) &
+#ifdef _OPENACC
+                    + ( fluxZ1 - fluxZ0 ) &
+#else
+                    + ( fluxZ(k) - fluxZ(k-1) ) &
+#endif
+                    * RCDZ(k) &
                     ) / GSQRT(k,i,j,I_XYZ)
           enddo
        enddo
