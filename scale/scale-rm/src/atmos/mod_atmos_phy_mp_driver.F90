@@ -1283,7 +1283,8 @@ contains
           !$omp         QA_LT,QS_LT,QE_LT, &
           !$omp         PRE00,LHF, &
           !$omp         ATMOS_PHY_MP_TYPE, ATMOS_PHY_PRECIP_TYPE, &
-          !$omp         dt_MP,MP_NSTEP_SEDIMENTATION,MP_RNSTEP_SEDIMENTATION, &
+          !$omp         dt_MP,MP_model_id,MP_upwind_scheme_id, &
+          !$omp         MP_NSTEP_SEDIMENTATION,MP_RNSTEP_SEDIMENTATION, &
           !$omp         REAL_CZ,REAL_FZ, &
           !$omp         DENS,MOMZ,U,V,TEMP,PRES,QTRC,CPtot,CVtot, &
           !$omp         DENS_t_MP,MOMZ_t_MP,RHOU_t_MP,RHOV_t_MP,RHOQ_t_MP,RHOH_MP, &
