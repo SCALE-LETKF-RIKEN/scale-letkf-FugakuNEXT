@@ -1414,7 +1414,7 @@ contains
        else
           iee = min(IIE,IEH)
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,advch,advcv,advc,pg,cf,div) &
+          !$omp private(i,j,k,advch,advcv,advc,pg,cf,momy_u,div) &
 #ifdef HEVI_FISSION
           !$omp shared(pg_work) &
 #endif
@@ -1474,22 +1474,18 @@ contains
           !$acc end kernels
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,cf)
+          !$omp private(i,j,k,momy_u,cf)
           !$acc kernels async(1)
           do j = JJS, JJE
           do i = IIS, iee
           do k = KS, KE
 #endif
-             cf = 0.125_RP * ( CORIOLI(i+1,j  )+CORIOLI(i,j  ) ) & ! [x,y,z->u,y,z]
-                * ( MOMY   (k,i+1,j  )+MOMY   (k,i,j  ) &
-                  + MOMY   (k,i+1,j-1)+MOMY   (k,i,j-1) ) &  ! [x,v,z->u,y,z]
-                + 0.25_RP * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) &
-                * ( MOMY(k,i,j) + MOMY(k,i,j-1) + MOMY(k,i+1,j) + MOMY(k,i+1,j-1) ) &
-                * ( ( MOMY(k,i,j) + MOMY(k,i,j-1) + MOMY(k,i+1,j) + MOMY(k,i+1,j-1) ) * 0.25_RP &
-                    * ( 1.0_RP/MAPF(i+1,j,2,I_XY) - 1.0_RP/MAPF(i,j,2,I_XY) ) * RFDX(i) &
-                      - MOMX(k,i,j) &
-                      * ( 1.0_RP/MAPF(i,j,1,I_UV) - 1.0_RP/MAPF(i,j-1,1,I_UV) ) * RCDY(j) ) &
-                * 2.0_RP / ( DENS(k,i+1,j) + DENS(k,i,j) ) ! metric term
+             momy_u = ( MOMY(k,i,j) + MOMY(k,i,j-1) + MOMY(k,i+1,j) + MOMY(k,i+1,j-1) ) * 0.25_RP
+             cf = 0.5_RP * ( CORIOLI(i+1,j  )+CORIOLI(i,j  ) ) * momy_u &
+                + MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) &
+                * ( momy_u      * ( 1.0_RP/MAPF(i+1,j,2,I_XY) - 1.0_RP/MAPF(i,j  ,2,I_XY) ) * RFDX(i) &
+                  - MOMX(k,i,j) * ( 1.0_RP/MAPF(i  ,j,1,I_UV) - 1.0_RP/MAPF(i,j-1,1,I_UV) ) * RCDY(j) ) &
+                * 2.0_RP * momy_u / ( DENS(k,i+1,j) + DENS(k,i,j) ) ! metric term
 #ifdef HEVI_FISSION
              cf_work(k,i,j) = cf
           enddo
@@ -1683,7 +1679,7 @@ contains
           !$acc end kernels
        else
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,advch,advcv,advc,pg,cf,div) &
+          !$omp private(i,j,k,advch,advcv,advc,pg,cf,momx_v,div) &
 #ifdef HEVI_FISSION
           !$omp shared(pg_work) &
 #endif
@@ -1744,22 +1740,18 @@ contains
           !$acc end kernels
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,cf)
+          !$omp private(i,j,k,cf,momx_v)
           !$acc kernels async(1)
           do j = JJS, min(JJE,JEH)
           do i = IIS, IIE
           do k = KS, KE
 #endif
-             cf = - 0.125_RP * ( CORIOLI(i  ,j+1)+CORIOLI(i  ,j) ) & ! [x,y,z->x,v,z]
-                             * ( MOMX   (k,i  ,j+1)+MOMX   (k,i  ,j) &
-                               + MOMX   (k,i-1,j+1)+MOMX   (k,i-1,j) ) & ! [u,y,z->x,v,z]
-                  - 0.25_RP * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) &
-                  * ( MOMX(k,i,j) + MOMX(k,i-1,j) + MOMX(k,i,j+1) + MOMX(k,i-1,j+1) ) &
-                  * ( MOMY(k,i,j) &
-                    * ( 1.0_RP/MAPF(i,j,2,I_UV) - 1.0_RP/MAPF(i-1,j,2,I_UV) ) * RCDX(i) &
-                    - 0.25_RP * ( MOMX(k,i,j)+MOMX(k,i-1,j)+MOMX(k,i,j+1)+MOMX(k,i-1,j+1) ) &
-                    * ( 1.0_RP/MAPF(i,j+1,1,I_XY) - 1.0_RP/MAPF(i,j,1,I_XY) ) * RFDY(j) ) &
-                  * 2.0_RP / ( DENS(k,i,j+1) + DENS(k,i,j) ) ! metoric term
+             momx_v = ( MOMX(k,i,j) + MOMX(k,i-1,j) + MOMX(k,i,j+1) + MOMX(k,i-1,j+1) ) * 0.25_RP
+             cf = - 0.5_RP * ( CORIOLI(i  ,j+1)+CORIOLI(i  ,j) ) * momx_v &
+                  - MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) &
+                  * ( MOMY(k,i,j) * ( 1.0_RP/MAPF(i,j  ,2,I_UV) - 1.0_RP/MAPF(i-1,j,2,I_UV) ) * RCDX(i) &
+                    - momx_v      * ( 1.0_RP/MAPF(i,j+1,1,I_XY) - 1.0_RP/MAPF(i  ,j,1,I_XY) ) * RFDY(j) ) &
+                  * 2.0_RP * momx_v/ ( DENS(k,i,j+1) + DENS(k,i,j) ) ! metoric term
 #ifdef HEVI_FISSION
              cf_work(k,i,j) = cf
           enddo
@@ -1796,7 +1788,7 @@ contains
 
           if ( divdmp_coef > 0.0_RP ) then
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,pg,cf,advc)
+          !$omp private(i,j,k,pg,div)
           !$acc kernels async(3)
           do j = JJS, min(JJE,JEH)
           do i = IIS, IIE
