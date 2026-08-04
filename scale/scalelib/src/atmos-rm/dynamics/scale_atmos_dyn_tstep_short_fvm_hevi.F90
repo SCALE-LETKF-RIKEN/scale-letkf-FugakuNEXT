@@ -463,6 +463,9 @@ contains
     !$acc        Sr,Sw,St)
 
 #ifdef HEVI_FISSION
+    ! Note: div_work is read unconditionally in the Sw, MOMX, and MOMY updates,
+    !       while the kernels that fill it are skipped when the divergence
+    !       damping is disabled. Zero it once here for that case.
     if ( divdmp_coef .le. 0.0_RP ) then
        !$acc kernels
        div_work(:,:,:) = 0.0_RP
@@ -813,16 +816,43 @@ contains
           enddo
           !$acc end kernels
        else
+#ifdef HEVI_FISSION
+          ! div_work has already been filled with zero at the beginning of this
+          ! routine when divdmp_coef <= 0, so this kernel can be skipped.
+          if ( divdmp_coef > 0.0_RP ) then
+          !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
+          !$omp private(i,j,k,div)
+          !$acc kernels async(0)
+          do j = JJS, JJE
+          do i = IIS, IIE
+          do k = KS, KE-1
+             div = divdmp_coef / dtrk * ( DDIV(k+1,i,j)-DDIV(k,i,j) ) * FDZ(k) ! divergence damping
+             div_work(k,i,j) = div
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+          end if
+#endif
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,advcv,advch,cf,wdmp,div,tmp) &
 #ifdef HIST_TEND
           !$omp shared(lhist,advcv_t,advch_t,wdmp_t,ddiv_t) &
 #endif
+#ifdef HEVI_FISSION
+          !$omp shared(div_work) &
+#endif
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE) &
           !$omp shared(qflx_hi,qflx_J13,qflx_J23,DDIV,MOMZ0,MOMZ_t,Sw) &
           !$omp shared(RFDZ,RCDX,RCDY,FDZ,dtrk,wdamp_coef,divdmp_coef) &
           !$omp shared(MAPF,GSQRT)
+#ifdef HEVI_FISSION
+          ! same queue as the kernel above, so that div_work is ready here
+          ! without a synchronization with the host in between
+          !$acc kernels async(0)
+#else
           !$acc kernels
+#endif
           do j = JJS, JJE
           do i = IIS, IIE
 !OCL NORECURRENCE
@@ -850,7 +880,11 @@ contains
                        + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k,i  ,j-1,YDIR) ) * RCDY(j) ) &
                    * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY)
              wdmp = - wdamp_coef(k) * MOMZ0(k,i,j)
+#ifdef HEVI_FISSION
+             div = div_work(k,i,j)
+#else
              div = divdmp_coef / dtrk * ( DDIV(k+1,i,j)-DDIV(k,i,j) ) * FDZ(k) ! divergence damping
+#endif
              Sw(k,i,j) = ( advcv + advch ) / GSQRT(k,i,j,I_XYW) &
                        + wdmp + div + MOMZ_t(k,i,j)
 #ifdef HIST_TEND
@@ -866,6 +900,10 @@ contains
           enddo
           enddo
           !$acc end kernels
+#ifdef HEVI_FISSION
+          ! wait for Sw; it is read by the Ci kernel on another queue
+          !$acc wait
+#endif
        end if
        PROFILE_STOP("hevi_sw")
 #ifdef DEBUG
@@ -1563,6 +1601,8 @@ contains
           !$acc end kernels
 
           if ( divdmp_coef > 0.0_RP ) then
+          ! div_work has already been filled with zero at the beginning of this
+          ! routine when divdmp_coef <= 0, so this kernel can be skipped.
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,div)
           !$acc kernels async(3)
