@@ -341,8 +341,8 @@ contains
 
        ! pressure, pott. temp.
 
-       !$omp parallel private(i,j,k) 
-      
+       !$omp parallel private(i,j,k)
+
        !$omp do OMP_SCHEDULE_ collapse(2)
        do j = JJS-1, JJE+1
        do i = max(IIS-1,1), min(IIE+1,IA)
@@ -475,7 +475,7 @@ contains
        ! continuity equation (total rho)
        !########################################################################
 
-       !$omp parallel private(i,j,k,advcv,advch) 
+       !$omp parallel private(i,j,k,advcv,advch)
 
        !-----< high order flux >-----
 
@@ -698,8 +698,8 @@ contains
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
-      
-       !$omp parallel private(i,j,k,advcv,advch,wdamp,div)  
+
+       !$omp parallel private(i,j,k,advcv,advch,wdamp,div)
 
        ! pressure gradient force at (x, y, w)
 
@@ -712,7 +712,7 @@ contains
        enddo
        enddo
        !$omp end do nowait
-       
+
        ! buoyancy force at (x, y, w)
 
        !$omp do OMP_SCHEDULE_ collapse(2)
@@ -1009,11 +1009,11 @@ contains
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
-      
-       !$omp parallel private(i,j,k,advcv,advch,div) 
-       
+
+       !$omp parallel private(i,j,k,advcv,advch,div)
+
        ! pressure gradient force at (u, y, z)
-      
+
        if ( .not. TwoD ) then
           !$omp do OMP_SCHEDULE_ collapse(2)
           do j = JJS, JJE
@@ -1023,11 +1023,11 @@ contains
                             - GSQRT(k,i  ,j,I_XYZ) * DPRES(k,i  ,j) & ! [x,y,z]
                             ) * RFDX(i) &
                           + ( J13G(k  ,i,j,I_UYW) &
-                            * 0.5_RP * ( F2H(k,1,I_UYZ) * ( DPRES(k+1,i+1,j)+DPRES(k+1,i,j) ) &
-                                       + F2H(k,2,I_UYZ) * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) ) & ! [x,y,z->u,y,w]
+                            * 0.5_RP * ( F2H(k  ,1,I_UYZ) * ( DPRES(k+1,i+1,j)+DPRES(k+1,i,j) ) &
+                                       + F2H(k  ,2,I_UYZ) * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) ) & ! [x,y,z->u,y,w]
                             - J13G(k-1,i,j,I_UYW) &
-                            * 0.5_RP * ( F2H(k,1,I_UYZ) * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) &
-                                       + F2H(k,2,I_UYZ) * ( DPRES(k-1,i+1,j)+DPRES(k-1,i,j) ) ) & ! [x,y,z->u,y,w]
+                            * 0.5_RP * ( F2H(k-1,1,I_UYZ) * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) &
+                                       + F2H(k-1,2,I_UYZ) * ( DPRES(k-1,i+1,j)+DPRES(k-1,i,j) ) ) & ! [x,y,z->u,y,w]
                             ) * RCDZ(k) ) &
                         * MAPF(i,j,1,I_UY)
           enddo
@@ -1159,7 +1159,7 @@ contains
           !$omp end do nowait
        end if
 
-       !$omp end parallel       
+       !$omp end parallel
 #ifdef DEBUG
        k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -1353,8 +1353,8 @@ contains
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
-      
-       !$omp parallel private(i,j,k,advcv,advch,div) 
+
+       !$omp parallel private(i,j,k,advcv,advch,div)
 
        ! pressure gradient force at (x, v, z)
 
@@ -1506,7 +1506,7 @@ contains
           !$omp end do nowait
        end if
 
-       !$omp end parallel       
+       !$omp end parallel
 #ifdef DEBUG
        k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
