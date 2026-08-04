@@ -78,9 +78,10 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   !++ Private procedure
   !
 #if 1
-#define F2H(k,p,idx) (CDZ(k+p-1)*GSQRT(k+p-1,i,j,idx)/(CDZ(k)*GSQRT(k,i,j,idx)+CDZ(k+1)*GSQRT(k+1,i,j,idx)))
+! weight for full-level k+1; weight for k is 1 - F2H(k,idx)
+#define F2H(k,idx) (CDZ(k)*GSQRT(k,i,j,idx)/(CDZ(k)*GSQRT(k,i,j,idx)+CDZ(k+1)*GSQRT(k+1,i,j,idx)))
 #else
-# define F2H(k,p,idx) 0.5_RP
+#define F2H(k,idx) 0.5_RP
 #endif
 
   !-----------------------------------------------------------------------------
@@ -298,6 +299,8 @@ contains
     real(RP) :: advc  ! advection
     real(RP) :: momy_u ! momentum y at u point
     real(RP) :: momx_v ! momentum x at v point
+    real(RP) :: f2h1, f2h2   ! F2H weights at k (f2h2 = 1 - f2h1)
+    real(RP) :: f2h1m, f2h2m ! F2H weights at k-1
 #ifdef HIST_TEND
     real(RP) :: advch_t(KA,IA,JA,5)
     real(RP) :: advcv_t(KA,IA,JA,5)
@@ -1432,7 +1435,8 @@ contains
        else
           iee = min(IIE,IEH)
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,advch,advcv,advc,pg,cf,momy_u,div) &
+
+          !$omp private(i,j,k,advch,advcv,advc,pg,cf,momy_u,div,f2h1,f2h2,f2h1m,f2h2m) &
 #ifdef HEVI_FISSION
           !$omp shared(pg_work) &
 #endif
@@ -1473,15 +1477,20 @@ contains
              call CHECK( __LINE__, DDIV(k,i  ,j) )
              call CHECK( __LINE__, MOMX0(k,i,j) )
 #endif
+             f2h1 = F2H(k,I_UYZ)
+             f2h2 = 1.0_RP - f2h1
+             f2h1m = F2H(k-1,I_UYZ)
+             f2h2m = 1.0_RP - f2h1m
+
              pg = ( ( GSQRT(k,i+1,j,I_XYZ) * DPRES(k,i+1,j) & ! [x,y,z]
                     - GSQRT(k,i  ,j,I_XYZ) * DPRES(k,i  ,j) & ! [x,y,z]
                     ) * RFDX(i) &
                   + ( J13G(k  ,i,j,I_UYW) &
-                    * 0.5_RP * ( F2H(k,1,I_UYZ) * ( DPRES(k+1,i+1,j)+DPRES(k+1,i,j) ) &
-                               + F2H(k,2,I_UYZ) * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) ) & ! [x,y,z->u,y,w]
+                    * 0.5_RP * ( f2h1  * ( DPRES(k+1,i+1,j)+DPRES(k+1,i,j) ) &
+                               + f2h2  * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) ) & ! [x,y,z->u,y,w]
                     - J13G(k-1,i,j,I_UYW) &
-                    * 0.5_RP * ( F2H(k,1,I_UYZ) * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) &
-                               + F2H(k,2,I_UYZ) * ( DPRES(k-1,i+1,j)+DPRES(k-1,i,j) ) ) & ! [x,y,z->u,y,w]
+                    * 0.5_RP * ( f2h1m * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) &
+                               + f2h2m * ( DPRES(k-1,i+1,j)+DPRES(k-1,i,j) ) ) & ! [x,y,z->u,y,w]
                     ) * RCDZ(k) ) &
                   * MAPF(i,j,1,I_UY)
 #ifdef HEVI_FISSION
@@ -1632,7 +1641,7 @@ contains
        if ( TwoD ) then
           i = IS
           !$omp parallel do default(none) OMP_SCHEDULE_ &
-          !$omp private(j,k,advch,advcv,pg,cf,div) &
+          !$omp private(j,k,advch,advcv,pg,cf,div,f2h1,f2h2,f2h1m,f2h2m) &
 #ifdef HIST_TEND
           !$omp shared(lhist,advch_t,advcv_t,pg_t,cf_t,ddiv_t) &
 #endif
@@ -1666,15 +1675,19 @@ contains
                        + qflx_J23(k,IS,j)      - qflx_J23(k-1,IS,j  )      ) * RCDZ(k)
              advch = - ( qflx_hi (k,IS,j,YDIR) - qflx_hi (k  ,IS,j-1,YDIR) ) * RFDY(j) &
                      * MAPF(IS,j,2,I_XV)
+             f2h1  = F2H(k  ,I_XVZ)
+             f2h2  = 1.0_RP - f2h1
+             f2h1m = F2H(k-1,I_XVZ)
+             f2h2m = 1.0_RP - f2h1m
              pg = ( ( GSQRT(k,IS,j+1,I_XYZ) * DPRES(k,IS,j+1) & ! [x,y,z]
                     - GSQRT(k,IS,j  ,I_XYZ) * DPRES(k,IS,j  ) & ! [x,y,z]
                     ) * RFDY(j) &
                   + ( J23G(k  ,IS,j,I_XVW) &
-                    * 0.5_RP * ( F2H(k  ,1,I_XVZ) * ( DPRES(k+1,IS,j+1)+DPRES(k+1,IS,j) ) &
-                               + F2H(k  ,2,I_XVZ) * ( DPRES(k  ,IS,j+1)+DPRES(k  ,IS,j) ) ) & ! [x,y,z->x,v,w]
+                    * 0.5_RP * ( f2h1  * ( DPRES(k+1,IS,j+1)+DPRES(k+1,IS,j) ) &
+                               + f2h2  * ( DPRES(k  ,IS,j+1)+DPRES(k  ,IS,j) ) ) & ! [x,y,z->x,v,w]
                     - J23G(k-1,IS,j,I_XVW) &
-                    * 0.5_RP * ( F2H(k-1,1,I_XVZ) * ( DPRES(k  ,IS,j+1)+DPRES(k  ,IS,j) ) &
-                               + F2H(k-1,2,I_XVZ) * ( DPRES(k-1,IS,j+1)+DPRES(k-1,IS,j) ) ) & ! [x,y,z->x,v,w]
+                    * 0.5_RP * ( f2h1m * ( DPRES(k  ,IS,j+1)+DPRES(k  ,IS,j) ) &
+                               + f2h2m * ( DPRES(k-1,IS,j+1)+DPRES(k-1,IS,j) ) ) & ! [x,y,z->x,v,w]
                     ) * RCDZ(k) ) &
                   * MAPF(IS,j,2,I_XV)
              cf = - 0.25_RP * ( CORIOLI(  IS,j+1)+CORIOLI(  IS,j) ) & ! [x,y,z->x,v,z]
@@ -1697,7 +1710,7 @@ contains
           !$acc end kernels
        else
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
-          !$omp private(i,j,k,advch,advcv,advc,pg,cf,momx_v,div) &
+          !$omp private(i,j,k,advch,advcv,advc,pg,cf,momx_v,div,f2h1,f2h2,f2h1m,f2h2m) &
 #ifdef HEVI_FISSION
           !$omp shared(pg_work) &
 #endif
@@ -1739,15 +1752,19 @@ contains
              call CHECK( __LINE__, MOMY_t(k,i,j) )
              call CHECK( __LINE__, MOMY0(k,i,j) )
 #endif
+             f2h1  = F2H(k  ,I_XVZ)
+             f2h2  = 1.0_RP - f2h1
+             f2h1m = F2H(k-1,I_XVZ)
+             f2h2m = 1.0_RP - f2h1m
              pg = ( ( GSQRT(k,i,j+1,I_XYZ) * DPRES(k,i,j+1) & ! [x,y,z]
                     - GSQRT(k,i,j  ,I_XYZ) * DPRES(k,i,j  ) & ! [x,y,z]
                     ) * RFDY(j) &
                   + ( J23G(k  ,i,j,I_XVW) &
-                    * 0.5_RP * ( F2H(k  ,1,I_XVZ) * ( DPRES(k+1,i,j+1)+DPRES(k+1,i,j) ) &
-                               + F2H(k  ,2,I_XVZ) * ( DPRES(k  ,i,j+1)+DPRES(k  ,i,j) ) ) & ! [x,y,z->x,v,w]
+                    * 0.5_RP * ( f2h1  * ( DPRES(k+1,i,j+1)+DPRES(k+1,i,j) ) &
+                               + f2h2  * ( DPRES(k  ,i,j+1)+DPRES(k  ,i,j) ) ) & ! [x,y,z->x,v,w]
                     - J23G(k-1,i,j,I_XVW) &
-                    * 0.5_RP * ( F2H(k-1,1,I_XVZ) * ( DPRES(k  ,i,j+1)+DPRES(k  ,i,j) ) &
-                               + F2H(k-1,2,I_XVZ) * ( DPRES(k-1,i,j+1)+DPRES(k-1,i,j) ) ) & ! [x,y,z->x,v,w]
+                    * 0.5_RP * ( f2h1m * ( DPRES(k  ,i,j+1)+DPRES(k  ,i,j) ) &
+                               + f2h2m * ( DPRES(k-1,i,j+1)+DPRES(k-1,i,j) ) ) & ! [x,y,z->x,v,w]
                     ) * RCDZ(k) ) &
                   * MAPF(i,j,2,I_XV)
 #ifdef HEVI_FISSION
