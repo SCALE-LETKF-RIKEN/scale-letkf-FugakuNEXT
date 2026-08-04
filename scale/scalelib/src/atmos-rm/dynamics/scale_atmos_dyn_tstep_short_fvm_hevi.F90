@@ -1282,6 +1282,11 @@ contains
           enddo ! j
           !$acc end parallel
 
+#ifdef DEBUG_HEVI2HEVE
+          ! Co is written by the above kernel, so wait for it
+          !$acc wait
+#endif
+
           !$omp parallel do default(shared) OMP_SCHEDULE_ &
           !$omp private(k,i,j,advcv)
           !$acc parallel async(1)
