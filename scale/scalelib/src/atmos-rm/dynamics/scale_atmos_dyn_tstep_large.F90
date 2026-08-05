@@ -79,8 +79,8 @@ module scale_atmos_dyn_tstep_large
        real(RP), intent(inout) :: RHOT_av(KA,IA,JA)
        real(RP), intent(inout) :: QTRC_av(KA,IA,JA,QA)
 
-       real(RP), intent(out)   :: num_diff(KA,IA,JA,5,3)
-       real(RP), intent(out)   :: num_diff_q(KA,IA,JA,3)
+       real(RP), intent(inout) :: num_diff(KA,IA,JA,5,3)
+       real(RP), intent(inout) :: num_diff_q(KA,IA,JA,3)
 
        real(RP), intent(in)    :: QTRC0(KA,IA,JA,QA)
 
