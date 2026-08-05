@@ -48,9 +48,10 @@ module scale_atmos_dyn_tstep_short_fvm_heve
   !++ Private procedure
   !
 #if 1
-#define F2H(k,p,idx) (CDZ(k+p-1)*GSQRT(k+p-1,i,j,idx)/(CDZ(k)*GSQRT(k,i,j,idx)+CDZ(k+1)*GSQRT(k+1,i,j,idx)))
+! weight for full-level k+1; weight for k is 1 - F2H(k,idx)
+#define F2H(k,idx) (CDZ(k)*GSQRT(k,i,j,idx)/(CDZ(k)*GSQRT(k,i,j,idx)+CDZ(k+1)*GSQRT(k+1,i,j,idx)))
 #else
-#define F2H(k,p,idx) 0.5_RP
+#define F2H(k,idx) 0.5_RP
 #endif
 
   !-----------------------------------------------------------------------------
@@ -270,6 +271,8 @@ contains
     real(RP) :: advcv ! vertical advection
     real(RP) :: wdamp ! rayleight damping for W
     real(RP) :: div   ! divergence damping
+    real(RP) :: f2h1, f2h2, f2h1m, f2h2m
+    real(RP) :: dpresm, dpresk, dpresp
 #ifdef HIST_TEND
     real(RP) :: advch_t(KA,IA,JA,5)
     real(RP) :: advcv_t(KA,IA,JA,5)
@@ -1010,7 +1013,7 @@ contains
             IIS, IIE, JJS, JJE ) ! (in)
 
 
-       !$omp parallel private(i,j,k,advcv,advch,div)
+       !$omp parallel private(i,j,k,advcv,advch,div,f2h1,f2h2,f2h1m,f2h2m,dpresm,dpresk,dpresp)
 
        ! pressure gradient force at (u, y, z)
 
@@ -1019,15 +1022,20 @@ contains
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
+             f2h1 = F2H(k,I_UYZ)
+             f2h2 = 1.0_RP - f2h1
+             f2h1m = F2H(k-1,I_UYZ)
+             f2h2m = 1.0_RP - f2h1m
+             dpresm = 0.5_RP * ( DPRES(k-1,i+1,j) + DPRES(k-1,i,j) ) ! [x,y,z->u,y,w]
+             dpresk = 0.5_RP * ( DPRES(k  ,i+1,j) + DPRES(k  ,i,j) ) ! [x,y,z->u,y,w]
+             dpresp = 0.5_RP * ( DPRES(k+1,i+1,j) + DPRES(k+1,i,j) ) ! [x,y,z->u,y,w]
              pgf(k,i,j) = ( ( GSQRT(k,i+1,j,I_XYZ) * DPRES(k,i+1,j) & ! [x,y,z]
                             - GSQRT(k,i  ,j,I_XYZ) * DPRES(k,i  ,j) & ! [x,y,z]
                             ) * RFDX(i) &
                           + ( J13G(k  ,i,j,I_UYW) &
-                            * 0.5_RP * ( F2H(k  ,1,I_UYZ) * ( DPRES(k+1,i+1,j)+DPRES(k+1,i,j) ) &
-                                       + F2H(k  ,2,I_UYZ) * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) ) & ! [x,y,z->u,y,w]
+                            * ( f2h1  * dpresp + f2h2  * dpresk ) & ! [u,y,z->u,y,w]
                             - J13G(k-1,i,j,I_UYW) &
-                            * 0.5_RP * ( F2H(k-1,1,I_UYZ) * ( DPRES(k  ,i+1,j)+DPRES(k  ,i,j) ) &
-                                       + F2H(k-1,2,I_UYZ) * ( DPRES(k-1,i+1,j)+DPRES(k-1,i,j) ) ) & ! [x,y,z->u,y,w]
+                            * ( f2h1m * dpresk + f2h2m * dpresm ) & ! [u,y,z->u,y,w]
                             ) * RCDZ(k) ) &
                         * MAPF(i,j,1,I_UY)
           enddo
@@ -1354,7 +1362,7 @@ contains
             IIS, IIE, JJS, JJE ) ! (in)
 
 
-       !$omp parallel private(i,j,k,advcv,advch,div)
+       !$omp parallel private(i,j,k,advcv,advch,div,f2h1,f2h2,f2h1m,f2h2m,dpresm,dpresk,dpresp)
 
        ! pressure gradient force at (x, v, z)
 
@@ -1362,15 +1370,20 @@ contains
        do j = JJS, JJE
        do i = IIS, IIE
        do k = KS, KE
+          f2h1 = F2H(k,I_XVZ)
+          f2h2 = 1.0_RP - f2h1
+          f2h1m = F2H(k-1,I_XVZ)
+          f2h2m = 1.0_RP - f2h1m
+          dpresm = 0.5_RP * ( DPRES(k-1,i,j+1) + DPRES(k-1,i,j) ) ! [x,y,z->x,v,w]
+          dpresk = 0.5_RP * ( DPRES(k  ,i,j+1) + DPRES(k  ,i,j) ) ! [x,y,z->x,v,w]
+          dpresp = 0.5_RP * ( DPRES(k+1,i,j+1) + DPRES(k+1,i,j) ) ! [x,y,z->x,v,w]
           pgf(k,i,j) = ( ( GSQRT(k,i,j+1,I_XYZ) * DPRES(k,i,j+1) & ! [x,y,z]
                          - GSQRT(k,i,j  ,I_XYZ) * DPRES(k,i,j  ) & ! [x,y,z]
                          ) * RFDY(j) &
                        + ( J23G(k  ,i,j,I_XVW) &
-                         * 0.5_RP * ( F2H(k  ,1,I_XVZ) * ( DPRES(k+1,i,j+1)+DPRES(k+1,i,j) ) &
-                                    + F2H(k  ,2,I_XVZ) * ( DPRES(k  ,i,j+1)+DPRES(k  ,i,j) ) ) & ! [x,y,z->x,v,w]
+                         * ( f2h1  * dpresp + f2h2  * dpresk ) & ! [x,v,z->x,v,w]
                          - J23G(k-1,i,j,I_XVW) &
-                         * 0.5_RP * ( F2H(k-1,1,I_XVZ) * ( DPRES(k  ,i,j+1)+DPRES(k  ,i,j) ) &
-                                    + F2H(k-1,2,I_XVZ) * ( DPRES(k-1,i,j+1)+DPRES(k-1,i,j) ) ) & ! [x,y,z->x,v,w]
+                         * ( f2h1m * dpresk + f2h2m * dpresm ) & ! [x,v,z->x,v,w]
                          ) * RCDZ(k) ) &
                       * MAPF(i,j,2,I_XV)
        enddo
