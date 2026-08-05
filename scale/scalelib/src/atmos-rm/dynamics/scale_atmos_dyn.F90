@@ -124,6 +124,9 @@ contains
        ATMOS_DYN_FVM_flux_setup
     use scale_spnudge, only: &
        SPNUDGE_setup
+#ifdef USE_CUDALIB
+    use cudafor
+#endif
     implicit none
 
     character(len=*),  intent(in)    :: DYN_Tinteg_Short_TYPE
@@ -153,6 +156,9 @@ contains
     logical, optional, intent(in)    :: none
 
     integer :: iv, iq
+#ifdef USE_CUDALIB
+    integer :: istat
+#endif
     !---------------------------------------------------------------------------
 
     DYN_NONE = .false.
@@ -173,9 +179,36 @@ contains
        allocate( num_diff  (KA,IA,JA,5,3) )
        allocate( num_diff_q(KA,IA,JA,3)   )
        allocate( wdamp_coef(KA)           )
-       num_diff  (:,:,:,:,:) = UNDEF
-       num_diff_q(:,:,:,:)   = UNDEF
        !$acc enter data create(num_diff, num_diff_q, wdamp_coef)
+       ! always initialize to zero; reused as-is when ND_COEF / ND_COEF_Q == 0
+#ifdef USE_CUDALIB
+       ! index calculation causes a significant drop in performance, since num_diff is a 5D array
+       !$acc host_data use_device(num_diff)
+       istat = cudaMemset(num_diff, 0.0_RP, KA*IA*JA*5*3)
+       !$acc end host_data
+       if ( istat /= cudaSuccess ) then
+          LOG_ERROR("ATMOS_DYN_setup",*)'cudaMemset for num_diff failed'
+          LOG_ERROR_CONT(*)'istat = ', istat
+          LOG_ERROR_CONT(*)'cudaErrorString = ', cudaGetErrorString(istat)
+          call PRC_abort
+       endif
+       !$acc host_data use_device(num_diff_q)
+       istat = cudaMemset(num_diff_q, 0.0_RP, KA*IA*JA*3)
+       !$acc end host_data
+       if ( istat /= cudaSuccess ) then
+          LOG_ERROR("ATMOS_DYN_setup",*)'cudaMemset for num_diff_q failed'
+          LOG_ERROR_CONT(*)'istat = ', istat
+          LOG_ERROR_CONT(*)'cudaErrorString = ', cudaGetErrorString(istat)
+          call PRC_abort
+       endif
+#else
+       !$omp parallel workshare
+       !$acc kernels
+       num_diff  (:,:,:,:,:) = 0.0_RP
+       num_diff_q(:,:,:,:)   = 0.0_RP
+       !$acc end kernels
+       !$omp end parallel workshare
+#endif
 
        call ATMOS_DYN_FVM_flux_setup     ( DYN_FVM_FLUX_TYPE,            & ! [IN]
                                            DYN_FVM_FLUX_TYPE_TRACER      ) ! [IN]
@@ -549,7 +582,7 @@ contains
     call ATMOS_DYN_tinteg_large( DENS,    MOMZ,    MOMX,    MOMY,    RHOT,    QTRC,    & ! [INOUT]
                                  PROG,                                                 & ! [INOUT]
                                  DENS_av, MOMZ_av, MOMX_av, MOMY_av, RHOT_av, QTRC_av, & ! [INOUT]
-                                 num_diff, num_diff_q,                                 & ! [OUT;WORK]
+                                 num_diff, num_diff_q,                                 & ! [INOUT]
                                  DENS_tp, MOMZ_tp, MOMX_tp, MOMY_tp, RHOT_tp, RHOQ_tp, & ! [IN]
                                  CORIOLIS,                                             & ! [IN]
                                  CDZ, CDX, CDY, FDZ, FDX, FDY,                         & ! [IN]
@@ -566,7 +599,7 @@ contains
                                  DAMP_VELY,       DAMP_POTT,       DAMP_QTRC,          & ! [IN]
                                  DAMP_alpha_DENS, DAMP_alpha_VELZ, DAMP_alpha_VELX,    & ! [IN]
                                  DAMP_alpha_VELY, DAMP_alpha_POTT, DAMP_alpha_QTRC,    & ! [IN]
-                                 MFLUX_OFFSET_X, MFLUX_OFFSET_Y,                       & ! [IN] 
+                                 MFLUX_OFFSET_X, MFLUX_OFFSET_Y,                       & ! [IN]
                                  wdamp_coef, divdmp_coef,                              & ! [IN]
                                  FLAG_TRACER_SPLIT_TEND,                               & ! [IN]
                                  FLAG_FCT_MOMENTUM, FLAG_FCT_T, FLAG_FCT_TRACER,       & ! [IN]

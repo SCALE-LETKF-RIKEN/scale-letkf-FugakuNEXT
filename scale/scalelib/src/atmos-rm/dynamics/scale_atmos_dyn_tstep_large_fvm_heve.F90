@@ -531,6 +531,9 @@ contains
     use scale_dft, only: &
        DFT_g2g_divfree, &
        DFT_g2g
+#ifdef USE_CUDALIB
+    use cudafor
+#endif
     implicit none
 
     real(RP), intent(inout) :: DENS(KA,IA,JA)
@@ -548,8 +551,8 @@ contains
     real(RP), intent(inout) :: RHOT_av(KA,IA,JA)
     real(RP), intent(inout) :: QTRC_av(KA,IA,JA,QA)
 
-    real(RP), intent(out)   :: num_diff(KA,IA,JA,5,3)
-    real(RP), intent(out)   :: num_diff_q(KA,IA,JA,3)
+    real(RP), intent(inout) :: num_diff(KA,IA,JA,5,3)
+    real(RP), intent(inout) :: num_diff_q(KA,IA,JA,3)
 
     real(RP), intent(in)    :: QTRC0(KA,IA,JA,QA)
 
@@ -683,11 +686,14 @@ contains
     integer  :: i, j, k, iq, iqb, step
     integer  :: iv
     integer  :: n
+#ifdef USE_CUDALIB
+    integer :: istat
+#endif
     !---------------------------------------------------------------------------
 
     call PROF_rapstart("DYN_Large_Preparation", 2)
 
-    !$acc data copy(DENS, MOMZ, MOMX, MOMY, RHOT, QTRC, PROG) &
+    !$acc data copy(DENS, MOMZ, MOMX, MOMY, RHOT, QTRC, PROG, num_diff, num_diff_q) &
     !$acc      copyin(QTRC0, DENS_tp, MOMZ_tp, MOMX_tp, MOMY_tp, RHOT_tp, RHOQ_tp, &
     !$acc             CORIOLI, &
     !$acc             CDZ, CDX, CDY, FDZ, FDX, FDY, RCDZ, RCDX, RCDY, RFDZ, RFDX, RFDY, &
@@ -697,8 +703,7 @@ contains
     !$acc             DAMP_DENS, DAMP_VELZ, DAMP_VELX, DAMP_VELY, DAMP_POTT, DAMP_QTRC, &
     !$acc             DAMP_alpha_DENS, DAMP_alpha_VELZ, DAMP_alpha_VELX, DAMP_alpha_VELY, DAMP_alpha_POTT, DAMP_alpha_QTRC, &
     !$acc             MFLUX_OFFSET_X, MFLUX_OFFSET_Y) &
-    !$acc      create(num_diff, num_diff_q, &
-    !$acc             DENS00, qflx, DDIV, DPRES0, RT2P, REF_rhot, &
+    !$acc      create(DENS00, qflx, DDIV, DPRES0, RT2P, REF_rhot, &
     !$acc             DENS_tq, diff, diff2, diff3, damp_t_DENS, damp_t_MOMZ, damp_t_MOMX, damp_t_MOMY, damp_t_RHOT, damp_t_QTRC, &
     !$acc             tflx, mflx_av, &
     !$acc             qflx_west, qflx_east, qflx_south, qflx_north)
@@ -722,7 +727,6 @@ contains
 
     !$acc kernels
     DENS00  (:,:,:) = UNDEF
-    num_diff (:,:,:,:,:) = UNDEF
     !$acc end kernels
 #endif
 
@@ -1544,13 +1548,28 @@ contains
        call PROF_rapstart("DYN_Large_Numfilter", 2)
 
        !-----< prepare the fluxes of explicit numerical diffusion >-----
-       if ( ND_COEF == 0.0_RP .or. EVAL_TYPE_NUMFILTER == 'FILTER' ) then
+       if ( ND_COEF == 0.0_RP ) then
+          ! already initialized to zero in ATMOS_DYN_setup
+       else if ( EVAL_TYPE_NUMFILTER == 'FILTER' ) then
+#ifdef USE_CUDALIB
+          ! index calculation causes a significant drop in performance, since num_diff is a 5D array
+          !$acc host_data use_device(num_diff)
+          istat = cudaMemset(num_diff, 0.0_RP, KA*IA*JA*5*3)
+          !$acc end host_data
+          if ( istat /= cudaSuccess ) then
+            LOG_ERROR("ATMOS_DYN_Tstep_large_fvm_heve",*)'cudaMemset failed'
+            LOG_ERROR_CONT(*)'istat = ', istat
+            LOG_ERROR_CONT(*)'cudaErrorString = ', cudaGetErrorString(istat)
+            call PRC_abort
+          endif
+#else
           !$omp parallel workshare
           !$acc kernels
 !OCL XFILL
           num_diff(:,:,:,:,:) = 0.0_RP
           !$acc end kernels
           !$omp end parallel workshare
+#endif
        else
           call ATMOS_DYN_FVM_numfilter_flux( num_diff(:,:,:,:,:),                          & ! [OUT]
                                          DENS, MOMZ, MOMX, MOMY, RHOT,                     & ! [IN]
@@ -1753,12 +1772,7 @@ contains
           call PROF_rapstart("DYN_Large_Numfilter", 2)
 
           if ( ND_COEF_Q == 0.0_RP ) then
-             !$omp parallel workshare
-             !$acc kernels
-!OCL XFILL
-             num_diff_q(:,:,:,:) = 0.0_RP
-             !$acc end kernels
-             !$omp end parallel workshare
+             ! already initialized to zero in ATMOS_DYN_setup
           else
              call ATMOS_DYN_FVM_numfilter_flux_q( num_diff_q(:,:,:,:),                & ! [OUT]
                                               DENS00, QTRC(:,:,:,iq), iq==I_QV,       & ! [IN]
