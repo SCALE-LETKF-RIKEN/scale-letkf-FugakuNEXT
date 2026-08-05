@@ -20,15 +20,6 @@
 #define PROFILE_STOP(name)
 #endif
 
-! NVTX is provided by the NVHPC compiler (-cudalib=nvtx)
-#if defined(_OPENACC) && defined(NVIDIA)
-#define NVTX_PUSH(name) nvtx_level = nvtxRangePush(name)
-#define NVTX_POP()      nvtx_level = nvtxRangePop()
-#else
-#define NVTX_PUSH(name)
-#define NVTX_POP()
-#endif
-
 #include "scalelib.h"
 
 ! the vector length macro is defined in scalelib.h,
@@ -54,9 +45,6 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   use scale_const, only: &
      UNDEF  => CONST_UNDEF, &
      IUNDEF => CONST_UNDEF2
-#endif
-#if defined(_OPENACC) && defined(NVIDIA)
-  use nvtx
 #endif
   !-----------------------------------------------------------------------------
   implicit none
@@ -361,9 +349,6 @@ contains
 
 #ifdef _OPENACC
     real(RP) :: work(KMAX-1,4) ! for CR
-#endif
-#if defined(_OPENACC) && defined(NVIDIA)
-    integer :: nvtx_level
 #endif
 
     ! for temporary variables
@@ -1034,7 +1019,6 @@ contains
        PROFILE_START("hevi_solver")
 
        call PROF_rapstart("DYN_HEVI", 3)
-       NVTX_PUSH("DYN_HEVI")
 
 #ifdef HEVI_FISSION
        ! Note: async(0) is a queue distinct from the synchronous (null) queue,
@@ -1397,7 +1381,6 @@ contains
        !$acc wait
 #endif
 
-       NVTX_POP()
        call PROF_rapend("DYN_HEVI", 3)
 
        PROFILE_STOP("hevi_solver")

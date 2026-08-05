@@ -15,6 +15,9 @@ module scale_prof
   !
   use scale_precision
   use scale_io
+#if defined(_OPENACC) && defined(NVIDIA)
+  use nvtx
+#endif
   !-----------------------------------------------------------------------------
   implicit none
   private
@@ -187,6 +190,9 @@ contains
     integer :: tn
     integer :: i
     logical :: disable_barrier_
+#if defined(_OPENACC) && defined(NVIDIA)
+    integer :: nvtx_level
+#endif
     !$ integer :: omp_get_thread_num
     !---------------------------------------------------------------------------
 
@@ -236,6 +242,14 @@ contains
        call FAPP_START( rapname(1:i-1)//"_"//trim(rapname(i+1:)), id, level_ )
     end if
 #endif
+#if defined(_OPENACC) && defined(NVIDIA)
+    i = index(rapname," ")
+    if ( i == 0 .or. i > len_trim(rapname)) then
+       nvtx_level = nvtxRangePush(trim(rapname))
+    else
+       nvtx_level = nvtxRangePush(rapname(1:i-1)//"_"//trim(rapname(i+1:)))
+    end if
+#endif
 
     return
   end subroutine PROF_rapstart
@@ -259,6 +273,9 @@ contains
     integer :: tn
     integer :: i
     logical :: disable_barrier_
+#if defined(_OPENACC) && defined(NVIDIA)
+    integer :: nvtx_level
+#endif
     !$ integer :: omp_get_thread_num
     !---------------------------------------------------------------------------
 
@@ -299,6 +316,9 @@ contains
     else
        call FAPP_STOP( rapname(1:i-1)//"_"//trim(rapname(i+1:)), id, level_ )
     end if
+#endif
+#if defined(_OPENACC) && defined(NVIDIA)
+    nvtx_level = nvtxRangePop()
 #endif
 
     PROF_rapttot(id) = PROF_rapttot(id) + ( PRC_MPItime()-PROF_raptstr(id) )
