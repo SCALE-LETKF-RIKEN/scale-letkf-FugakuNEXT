@@ -72,9 +72,10 @@ module scale_atmos_dyn_fvm_flux_cd2
   !++ Private procedure
   !
 #if 1
-#define F2H(k,p,q) (CDZ(k+p-1)*GSQRT(k+p-1,i,j)/(CDZ(k)*GSQRT(k,i,j)+CDZ(k+1)*GSQRT(k+1,i,j)))
+! weight for full-level k+1; weight for k is 1 - F2H(k,q)
+#define F2H(k,q) (CDZ(k)*GSQRT(k,i,j)/(CDZ(k)*GSQRT(k,i,j)+CDZ(k+1)*GSQRT(k+1,i,j)))
 #else
-#define F2H(k,p,q) 0.5_RP
+#define F2H(k,q) 0.5_RP
 #endif
   !-----------------------------------------------------------------------------
   !
@@ -156,7 +157,7 @@ contains
 
     !$omp parallel default(none) private(i,j,k, vel)                    &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff,EPS)
-    
+
     !$acc data copy(flux) copyin(mflx, val, GSQRT, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -198,10 +199,10 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
-    !$omp end parallel    
+    !$omp end parallel
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -396,7 +397,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
     !$omp end parallel
@@ -450,7 +451,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -475,7 +476,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
     !$omp end parallel
@@ -528,7 +529,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -553,7 +554,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
     !$omp end parallel
@@ -585,10 +586,12 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+    real(RP) :: f2h1_UYZ_k, f2h2_UYZ_k
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                           &
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp private(f2h1_UYZ_k,f2h2_UYZ_k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,MAPF,num_diff) &
     !$omp shared(CDZ)
 
@@ -607,14 +610,12 @@ contains
        call CHECK( __LINE__, val(k,i+1,j) )
 
 #endif
-       vel = ( F2H(k,1,I_UYZ) &
-             * mom(k+1,i,j) &
-             + F2H(k,2,I_UYZ) &
-             * mom(k,i,j) ) &
-           / ( F2H(k,1,I_UYZ) &
-             * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
-             + F2H(k,2,I_UYZ) &
-             * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       f2h1_UYZ_k = F2H(k,I_UYZ)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
+       vel = ( f2h1_UYZ_k * mom(k+1,i,j) &
+             + f2h2_UYZ_k * mom(k,i,j) ) &
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
        flux(k,i,j) = GSQRT(k,i,j) / MAPF(i,j,+2) * vel &
                    * ( F2 * ( val(k,i+1,j)+val(k,i,j) ) ) &
                    + GSQRT(k,i,j) * num_diff(k,i,j)
@@ -636,7 +637,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
     !$omp end parallel
@@ -670,10 +671,12 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+    real(RP) :: f2h1_XVZ_k, f2h2_XVZ_k
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                           &
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp private(f2h1_XVZ_k,f2h2_XVZ_k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,MAPF,num_diff) &
     !$omp shared(CDZ)
 
@@ -692,14 +695,12 @@ contains
        call CHECK( __LINE__, val(k,i,j+1) )
 
 #endif
-       vel = ( F2H(k,1,I_XVZ) &
-             * mom(k+1,i,j) &
-             + F2H(k,2,I_XVZ) &
-             * mom(k,i,j) ) &
-           / ( F2H(k,1,I_XVZ) &
-             * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
-             + F2H(k,2,I_XVZ) &
-             * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       f2h1_XVZ_k = F2H(k,I_XVZ)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
+       vel = ( f2h1_XVZ_k * mom(k+1,i,j) &
+             + f2h2_XVZ_k * mom(k,i,j) ) &
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
        flux(k,i,j) = GSQRT(k,i,j) / MAPF(i,j,+1) * vel &
                    * ( F2 * ( val(k,i,j+1)+val(k,i,j) ) ) &
                    + GSQRT(k,i,j) * num_diff(k,i,j)
@@ -721,7 +722,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
     !$omp end parallel
@@ -756,10 +757,13 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+    real(RP) :: f2h1_XYZ_k, f2h2_XYZ_k
+    real(RP) :: f2h1_UYZ_k, f2h2_UYZ_k
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                           &
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp private(f2h1_XYZ_k,f2h2_XYZ_k,f2h1_UYZ_k,f2h2_UYZ_k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,J33G,GSQRT,num_diff) &
     !$omp shared(CDZ,TwoD)
 
@@ -780,11 +784,11 @@ contains
        call CHECK( __LINE__, val(k+1,i,j) )
 
 #endif
+       f2h1_XYZ_k = F2H(k,I_XYZ)
+       f2h2_XYZ_k = 1.0_RP - f2h1_XYZ_k
        vel = ( mom(k,i,j) ) &
-           / ( F2H(k,1,I_XYZ) &
-             * DENS(k+1,i,j) &
-             + F2H(k,2,I_XYZ) &
-             * DENS(k,i,j) )
+           / ( f2h1_XYZ_k * DENS(k+1,i,j) &
+             + f2h2_XYZ_k * DENS(k,i,j) )
        flux(k,i,j) = J33G * vel &
                    * ( F2 * ( val(k+1,i,j)+val(k,i,j) ) ) &
                    + GSQRT(k,i,j) * num_diff(k,i,j)
@@ -816,7 +820,7 @@ contains
     else
 
 
-    !$omp do OMP_SCHEDULE_ collapse(2) 
+    !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
     do i = IIS, IIE
@@ -829,11 +833,11 @@ contains
        call CHECK( __LINE__, val(k+1,i,j) )
 
 #endif
+       f2h1_UYZ_k = F2H(k,I_UYZ)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
        vel = ( 0.5_RP * ( mom(k,i,j)+mom(k,i+1,j) ) ) &
-           / ( F2H(k,1,I_UYZ) &
-             * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
-             + F2H(k,2,I_UYZ) &
-             * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
        flux(k,i,j) = J33G * vel &
                    * ( F2 * ( val(k+1,i,j)+val(k,i,j) ) ) &
                    + GSQRT(k,i,j) * num_diff(k,i,j)
@@ -846,7 +850,7 @@ contains
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
 
-    !$omp do OMP_SCHEDULE_ collapse(2) 
+    !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
     do i = IIS, IIE
@@ -864,7 +868,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
 
-    end if    
+    end if
 
 
     !$acc end data
@@ -899,13 +903,15 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+    real(RP) :: f2h1_UYZ_k, f2h2_UYZ_k
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                      &
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp private(f2h1_UYZ_k,f2h2_UYZ_k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,J13G,MAPF) &
     !$omp shared(GSQRT,CDZ,TwoD)
-  
+
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J13G, MAPF, CDZ)
 
 
@@ -915,14 +921,12 @@ contains
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS, KE-1
-       vel = ( F2H(k,1,I_UYZ) &
-             * mom(k+1,i,j) &
-             + F2H(k,2,I_UYZ) &
-             * mom(k,i,j) ) &
-           / ( F2H(k,1,I_UYZ) &
-             * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
-             + F2H(k,2,I_UYZ) &
-             * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       f2h1_UYZ_k = F2H(k,I_UYZ)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
+       vel = ( f2h1_UYZ_k * mom(k+1,i,j) &
+             + f2h2_UYZ_k * mom(k,i,j) ) &
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
        vel = vel * J13G(k,i,j)
        flux(k,i,j) = vel / MAPF(i,j,+2) &
                    * ( F2 * ( val(k+1,i,j)+val(k,i,j) ) )
@@ -946,7 +950,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
 
 
     !$acc end data
@@ -977,13 +981,16 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+    real(RP) :: f2h1_XYZ_k, f2h2_XYZ_k
+    real(RP) :: f2h1_UYZ_k, f2h2_UYZ_k
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                      &
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp private(f2h1_XYZ_k,f2h2_XYZ_k,f2h1_UYZ_k,f2h2_UYZ_k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,J23G,MAPF) &
     !$omp shared(GSQRT,CDZ,TwoD)
-  
+
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J23G, MAPF, CDZ)
 
 
@@ -994,14 +1001,12 @@ contains
     do j = JJS, JJE
     do k = KS, KE-1
        i = IIS
-       vel = ( F2H(k,1,I_XYZ) &
-             * 0.5_RP * ( mom(k+1,i,j)+mom(k+1,i,j-1) ) &
-             + F2H(k,2,I_XYZ) &
-             * 0.5_RP * ( mom(k,i,j)+mom(k,i,j-1) ) ) &
-           / ( F2H(k,1,I_XYZ) &
-             * DENS(k+1,i,j) &
-             + F2H(k,2,I_XYZ) &
-             * DENS(k,i,j) )
+       f2h1_XYZ_k = F2H(k,I_XYZ)
+       f2h2_XYZ_k = 1.0_RP - f2h1_XYZ_k
+       vel = ( f2h1_XYZ_k * 0.5_RP * ( mom(k+1,i,j)+mom(k+1,i,j-1) ) &
+             + f2h2_XYZ_k * 0.5_RP * ( mom(k,i,j)+mom(k,i,j-1) ) ) &
+           / ( f2h1_XYZ_k * DENS(k+1,i,j) &
+             + f2h2_XYZ_k * DENS(k,i,j) )
        vel = vel * J23G(k,i,j)
        flux(k,i,j) = vel * ( F2 * ( val(k+1,i,j)+val(k,i,j) ) )
     enddo
@@ -1031,14 +1036,12 @@ contains
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS, KE-1
-       vel = ( F2H(k,1,I_UYZ) &
-             * 0.25_RP * ( mom(k+1,i,j)+mom(k+1,i+1,j)+mom(k+1,i,j-1)+mom(k+1,i+1,j-1) ) &
-             + F2H(k,2,I_UYZ) &
-             * 0.25_RP * ( mom(k,i,j)+mom(k,i+1,j)+mom(k,i,j-1)+mom(k,i+1,j-1) ) ) &
-           / ( F2H(k,1,I_UYZ) &
-             * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
-             + F2H(k,2,I_UYZ) &
-             * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       f2h1_UYZ_k = F2H(k,I_UYZ)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
+       vel = ( f2h1_UYZ_k * 0.25_RP * ( mom(k+1,i,j)+mom(k+1,i+1,j)+mom(k+1,i,j-1)+mom(k+1,i+1,j-1) ) &
+             + f2h2_UYZ_k * 0.25_RP * ( mom(k,i,j)+mom(k,i+1,j)+mom(k,i,j-1)+mom(k,i+1,j-1) ) ) &
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
        vel = vel * J23G(k,i,j)
        flux(k,i,j) = vel / MAPF(i,j,+1) &
                    * ( F2 * ( val(k+1,i,j)+val(k,i,j) ) )
@@ -1062,7 +1065,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
 
     end if
 
@@ -1255,17 +1258,19 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+    real(RP) :: f2h1_XVZ_k, f2h2_XVZ_k
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                           &
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp private(f2h1_XVZ_k,f2h2_XVZ_k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,J33G,GSQRT,num_diff) &
     !$omp shared(CDZ,TwoD)
 
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, num_diff, CDZ)
 
 
-    !$omp do OMP_SCHEDULE_ collapse(2) 
+    !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
     do i = IIS, IIE
@@ -1278,11 +1283,11 @@ contains
        call CHECK( __LINE__, val(k+1,i,j) )
 
 #endif
+       f2h1_XVZ_k = F2H(k,I_XVZ)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
        vel = ( 0.5_RP * ( mom(k,i,j)+mom(k,i,j+1) ) ) &
-           / ( F2H(k,1,I_XVZ) &
-             * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
-             + F2H(k,2,I_XVZ) &
-             * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
        flux(k,i,j) = J33G * vel &
                    * ( F2 * ( val(k+1,i,j)+val(k,i,j) ) ) &
                    + GSQRT(k,i,j) * num_diff(k,i,j)
@@ -1295,7 +1300,7 @@ contains
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
 
-    !$omp do OMP_SCHEDULE_ collapse(2) 
+    !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
     do i = IIS, IIE
@@ -1346,13 +1351,15 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+    real(RP) :: f2h1_XVZ_k, f2h2_XVZ_k
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                      &
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp private(f2h1_XVZ_k,f2h2_XVZ_k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,J13G,MAPF) &
     !$omp shared(GSQRT,CDZ,TwoD)
-  
+
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J13G, MAPF, CDZ)
 
 
@@ -1362,14 +1369,12 @@ contains
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS, KE-1
-       vel = ( F2H(k,1,I_XVZ) &
-             * 0.25_RP * ( mom(k+1,i,j)+mom(k+1,i-1,j)+mom(k+1,i,j+1)+mom(k+1,i-1,j+1) ) &
-             + F2H(k,2,I_XVZ) &
-             * 0.25_RP * ( mom(k,i,j)+mom(k,i-1,j)+mom(k,i,j+1)+mom(k,i-1,j+1) ) ) &
-           / ( F2H(k,1,I_XVZ) &
-             * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
-             + F2H(k,2,I_XVZ) &
-             * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       f2h1_XVZ_k = F2H(k,I_XVZ)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
+       vel = ( f2h1_XVZ_k * 0.25_RP * ( mom(k+1,i,j)+mom(k+1,i-1,j)+mom(k+1,i,j+1)+mom(k+1,i-1,j+1) ) &
+             + f2h2_XVZ_k * 0.25_RP * ( mom(k,i,j)+mom(k,i-1,j)+mom(k,i,j+1)+mom(k,i-1,j+1) ) ) &
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
        vel = vel * J13G(k,i,j)
        flux(k,i,j) = vel / MAPF(i,j,+2) &
                    * ( F2 * ( val(k+1,i,j)+val(k,i,j) ) )
@@ -1393,7 +1398,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
 
 
     !$acc end data
@@ -1424,13 +1429,15 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+    real(RP) :: f2h1_XVZ_k, f2h2_XVZ_k
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                      &
+    !$omp parallel default(none) private(i,j,k,vel) &
+    !$omp private(f2h1_XVZ_k,f2h2_XVZ_k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,J23G,MAPF) &
     !$omp shared(GSQRT,CDZ,TwoD)
-  
+
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J23G, MAPF, CDZ)
 
 
@@ -1440,14 +1447,12 @@ contains
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS, KE-1
-       vel = ( F2H(k,1,I_XVZ) &
-             * mom(k+1,i,j) &
-             + F2H(k,2,I_XVZ) &
-             * mom(k,i,j) ) &
-           / ( F2H(k,1,I_XVZ) &
-             * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
-             + F2H(k,2,I_XVZ) &
-             * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       f2h1_XVZ_k = F2H(k,I_XVZ)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
+       vel = ( f2h1_XVZ_k * mom(k+1,i,j) &
+             + f2h2_XVZ_k * mom(k,i,j) ) &
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
        vel = vel * J23G(k,i,j)
        flux(k,i,j) = vel / MAPF(i,j,+1) &
                    * ( F2 * ( val(k+1,i,j)+val(k,i,j) ) )
@@ -1471,7 +1476,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
 
 
     !$acc end data

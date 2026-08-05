@@ -22,7 +22,7 @@ else
 end
 class String
   def +(other)
-    if Fixnum === other
+    if Integer === other
       if /\A(\w+)?([+-]?\d+)?\Z/ =~ self
         off = $2.to_i + other
         if off == 0
@@ -45,7 +45,7 @@ class String
     end
   end
 end
-class Fixnum
+class Integer
   alias :_inspect :inspect
   def inspect
     0==self ? "" : self>0 ? "+"+_inspect : _inspect
@@ -124,10 +124,10 @@ def flux(vel, order, dir, k="k", i="i", j="j", dim=3)
   idx3 = idx3.join(",")
   idxn3 = idx.dup
   idxn3[dir] = idxn3[dir]-3
-  idxn3 = idxn3.join(",")  
+  idxn3 = idxn3.join(",")
   idx4 = idx.dup
   idx4[dir] = idx4[dir]+4
-  idx4 = idx4.join(",")  
+  idx4 = idx4.join(",")
   if Array===order && order.max % 2 == 0
     order = order.min
   end
@@ -156,9 +156,9 @@ def flux(vel, order, dir, k="k", i="i", j="j", dim=3)
     when 5
        fu = flux5(idx2,idx1,idx0,idxn1,idxn2)
     when 6
-       fu = flux6(idx3,idx2,idx1,idx0,idxn1,idxn2) 
+       fu = flux6(idx3,idx2,idx1,idx0,idxn1,idxn2)
     when 7
-       fu = flux7(idx3,idx2,idx1,idx0,idxn1,idxn2,idxn3)         
+       fu = flux7(idx3,idx2,idx1,idx0,idxn1,idxn2,idxn3)
     else
        raise "invalid order: #{order}"
     end
@@ -183,9 +183,9 @@ def flux(vel, order, dir, k="k", i="i", j="j", dim=3)
     when 5
        fd = flux5(idxn1,idx0,idx1,idx2,idx3)
     when 6
-       fd = flux6(idx3,idx1,idx0,idxn1,idxn2,idxn3) 
+       fd = flux6(idx3,idx1,idx0,idxn1,idxn2,idxn3)
     when 7
-       fd = flux7(idxn2,idxn1,idx0,idx1,idx2,idx3,idx4)            
+       fd = flux7(idxn2,idxn1,idx0,idx1,idx2,idx3,idx4)
     else
        raise "invalid order: #{order}"
     end
@@ -230,13 +230,13 @@ def flux(vel, order, dir, k="k", i="i", j="j", dim=3)
                        + F76 * ( val(#{idx2})-val(#{idxn1}) ) &
                        + F77 * ( val(#{idx1})-val(#{idx0}) ) ) * sign(1.0_RP,#{vel})"
   when 8
-                      "#{flux8(idx4,idx3,idx2,idx1,idx0,idxn1,idxn2,idxn3)}"                         
+                      "#{flux8(idx4,idx3,idx2,idx1,idx0,idxn1,idxn2,idxn3)}"
   else
     raise "invalid order: #{order}"
   end
 end
 
-def interp(val, src, dst, k="k", i="i", j="j")
+def interp(val, src, dst, k="k", i="i", j="j", scalars=nil)
   ret = nil
   case
   when src == dst
@@ -244,12 +244,13 @@ def interp(val, src, dst, k="k", i="i", j="j")
   when src[2] == dst[2] # z==z
     ret = interpH(val, src[0..1], dst[0..1], k, i, j)
   when src[2..2] == "Z" # Z->W
+    raise "scalars Hash is required for Z->W interpolation" if scalars.nil?
     v0 = interpH(val, src[0..1], dst[0..1], k  , i, j)
     v1 = interpH(val, src[0..1], dst[0..1], k+1, i, j)
-    ret = "F2H(#{k},1,I_#{dst[0..1]}Z) &
-             * #{v1} &
-             + F2H(#{k},2,I_#{dst[0..1]}Z) &
-             * #{v0}"
+    sname1, sname2 = register_f2h(scalars, dst, k)
+    # No line break is needed between sname and v. Keep a line break between v1 and v0.
+    ret = "#{sname1} * #{v1} &
+             + #{sname2} * #{v0}"
   else # W=>Z
     v0 = interpH(val, src[0..1], dst[0..1], k-1, i, j)
     v1 = interpH(val, src[0..1], dst[0..1], k  , i, j)
@@ -257,6 +258,55 @@ def interp(val, src, dst, k="k", i="i", j="j")
                         + #{v1} )"
   end
   return ret ? "( #{ret} )" : raise("BUG")
+end
+
+def f2h_snames(dst, k)
+  tag = "#{dst[0..1]}Z_#{k}".gsub("+", "p").gsub("-", "m").gsub(/[^a-zA-Z0-9_]/, "_")
+  ["f2h1_#{tag}", "f2h2_#{tag}"]
+end
+
+def register_f2h(scalars, dst, k)
+  h1, h2 = f2h_snames(dst, k)
+  unless scalars.key?(h1)
+    scalars[h1] = { h1: h1, h2: h2, expr: "F2H(#{k},I_#{dst[0..1]}Z)" }
+  end
+  [h1, h2]
+end
+
+def f2h_decls(scalars)
+  return "" if scalars.nil? || scalars.empty?
+  scalars.each_value.map { |info|
+    "    real(RP) :: #{info[:h1]}, #{info[:h2]}"
+  }.join("\n")
+end
+
+def f2h_privates(scalars, chunk=4)
+  return "" if scalars.nil? || scalars.empty?
+  names = []
+  scalars.each_value do |info|
+    names << info[:h1] << info[:h2]
+  end
+  names.each_slice(chunk).map { |ns|
+    "    !$omp private(#{ns.join(",")}) &"
+  }.join("\n")
+end
+
+# Assign only F2H scalars that appear in the given expression strings.
+def f2h_assigns(scalars, *exprs)
+  return "" if scalars.nil? || scalars.empty? || exprs.empty?
+  indent = "       "
+  text = exprs.join(" ")
+  lines = []
+  scalars.each_value do |info|
+    h1 = info[:h1]
+    # Word-boundary match: avoid f2h1_UYZ_KS matching inside f2h1_UYZ_KSp1
+    next unless text.match?(/\b#{Regexp.escape(h1)}\b/)
+    h2 = info[:h2]
+    lines << "#{indent}#{h1} = #{info[:expr]}"
+    lines << "#{indent}#{h2} = 1.0_RP - #{h1}"
+  end
+  return "" if lines.empty?
+  lines.join("\n")
 end
 
 def interpH(val, src, dst, k="k", i="i", j="j")
@@ -365,9 +415,10 @@ module <%= modname %>
   !++ Private procedure
   !
 #if 1
-#define F2H(k,p,q) (CDZ(k+p-1)*GSQRT(k+p-1,i,j)/(CDZ(k)*GSQRT(k,i,j)+CDZ(k+1)*GSQRT(k+1,i,j)))
+! weight for full-level k+1; weight for k is 1 - F2H(k,q)
+#define F2H(k,q) (CDZ(k)*GSQRT(k,i,j)/(CDZ(k)*GSQRT(k,i,j)+CDZ(k+1)*GSQRT(k+1,i,j)))
 #else
-#define F2H(k,p,q) 0.5_RP
+#define F2H(k,q) 0.5_RP
 #endif
   !-----------------------------------------------------------------------------
   !
@@ -495,7 +546,7 @@ contains
 
     !$omp parallel default(none) private(i,j,k, vel)                    &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff,EPS)
-    
+
     !$acc data copy(flux) copyin(mflx, val, GSQRT, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -550,10 +601,10 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
-    !$omp end parallel    
+    !$omp end parallel
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -716,7 +767,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
     !$omp end parallel
@@ -774,7 +825,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -811,7 +862,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
     !$omp end parallel
@@ -824,6 +875,9 @@ contains
      ["X", "UY", 1, 0],
      ["Y", "XV", 0, 1]
    ].each do |dir, xyz, i, j|
+  scalars_xyw = {}
+  mom_xyw = interp("mom", xyz+"Z", xyz+"W", "k", "i", "j", scalars_xyw)
+  dens_xyw = interp("DENS", "XYZ", xyz+"W", "k", "i", "j", scalars_xyw)
 %>
   !-----------------------------------------------------------------------------
   !> calculation <%=dir%>-flux at XYW
@@ -848,10 +902,12 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+<%= f2h_decls(scalars_xyw) %>
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                           &
+    !$omp parallel default(none) private(i,j,k,vel) &
+<%= f2h_privates(scalars_xyw) %>
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,MAPF,num_diff) &
     !$omp shared(CDZ)
 
@@ -870,8 +926,9 @@ contains
        call CHECK( __LINE__, val(k,i<%= (n+1)*i%>,j<%= (n+1)*j%>) )
 <% end %>
 #endif
-       vel = <%= interp("mom", xyz+"Z", xyz+"W") %> &
-           / <%= interp("DENS", "XYZ", xyz+"W") %>
+<%= f2h_assigns(scalars_xyw, mom_xyw, dens_xyw) %>
+       vel = <%= mom_xyw %> &
+           / <%= dens_xyw %>
        flux(k,i,j) = GSQRT(k,i,j) / MAPF(i,j,<%=i*2+j%>) * vel &
                    * ( <%= flux("vel", order, i+2*j) %> ) <%= num_diff() %>
     enddo
@@ -892,7 +949,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
     !$acc end data
 
     !$omp end parallel
@@ -908,6 +965,35 @@ contains
      ["UY", 1, 0],
      ["XV", 0, 1],
    ].each do |uv, i, j|
+  scalars_z = {}
+  mom_xyw_k = nil
+  dens_xyw_k = nil
+  bnd_xyw = []
+  if i == 1
+    mom_xyw_k = interp("mom", "XYW", "XYW", "k", "i", "j", scalars_z)
+    dens_xyw_k = interp("DENS", "XYZ", "XYW", "k", "i", "j", scalars_z)
+    nh.times do |kk|
+      bnd_xyw << [
+        kk,
+        interp("mom", "XYW", "XYW", "KS"+kk, "i", "j", scalars_z),
+        interp("DENS", "XYZ", "XYW", "KS"+kk, "i", "j", scalars_z),
+        interp("mom", "XYW", "XYW", "KE"-(kk+1), "i", "j", scalars_z),
+        interp("DENS", "XYZ", "XYW", "KE"-(kk+1), "i", "j", scalars_z)
+      ]
+    end
+  end
+  mom_uvw_k = interp("mom", "XYW", uv+"W", "k", "i", "j", scalars_z)
+  dens_uvw_k = interp("DENS", "XYZ", uv+"W", "k", "i", "j", scalars_z)
+  bnd_uvw = []
+  nh.times do |kk|
+    bnd_uvw << [
+      kk,
+      interp("mom", "XYW", uv+"W", "KS"+kk, "i", "j", scalars_z),
+      interp("DENS", "XYZ", uv+"W", "KS"+kk, "i", "j", scalars_z),
+      interp("mom", "XYW", uv+"W", "KE"-(kk+1), "i", "j", scalars_z),
+      interp("DENS", "XYZ", uv+"W", "KE"-(kk+1), "i", "j", scalars_z)
+    ]
+  end
 %>
   !-----------------------------------------------------------------------------
   !> calculation z-flux at <%=uv%>
@@ -932,10 +1018,12 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+<%= f2h_decls(scalars_z) %>
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                           &
+    !$omp parallel default(none) private(i,j,k,vel) &
+<%= f2h_privates(scalars_z) %>
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,J33G,GSQRT,num_diff) &
     !$omp shared(CDZ,TwoD)
 
@@ -956,8 +1044,9 @@ contains
        call CHECK( __LINE__, val(k<%=k+1%>,i,j) )
 <% end %>
 #endif
-       vel = <%= interp("mom", "XYW", "XYW") %> &
-           / <%= interp("DENS", "XYZ", "XYW") %>
+<%= f2h_assigns(scalars_z, mom_xyw_k, dens_xyw_k) %>
+       vel = <%= mom_xyw_k %> &
+           / <%= dens_xyw_k %>
        flux(k,i,j) = J33G * vel &
                    * ( <%= flux("vel", order, 0) %> ) <%= num_diff() %>
     enddo
@@ -983,15 +1072,17 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(KS-1,i,j) = 0.0_RP
-<% nh.times do |k| %>
-       vel = <%= interp("mom", "XYW", "XYW", "KS"+k) %> &
-           / <%= interp("DENS", "XYZ", "XYW", "KS"+k) %>
-       flux(KS<%=k%>,i,j) = J33G * vel &
-                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> ) <%= num_diff("KS"+k) %>
-       vel = <%= interp("mom", "XYW", "XYW", "KE"-(k+1)) %> &
-           / <%= interp("DENS", "XYZ", "XYW", "KE"-(k+1)) %>
-       flux(KE<%=-k-1%>,i,j) = J33G * vel &
-                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> ) <%= num_diff("KE"-(k+1)) %>
+<% bnd_xyw.each do |kk, mks, dks, mke, dke| %>
+<%= f2h_assigns(scalars_z, mks, dks) %>
+       vel = <%= mks %> &
+           / <%= dks %>
+       flux(KS<%=kk%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-kk)*2,[order,2].min].max,[order-(nh-kk-1)*2,[order,2].min].max], 0, "KS"+kk) %> ) <%= num_diff("KS"+kk) %>
+<%= f2h_assigns(scalars_z, mke, dke) %>
+       vel = <%= mke %> &
+           / <%= dke %>
+       flux(KE<%=-kk-1%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-kk-1)*2,[order,2].min].max,[order-(nh-kk)*2,[order,2].min].max], 0, "KE"-(kk+1)) %> ) <%= num_diff("KE"-(kk+1)) %>
 <% end %>
        flux(KE,i,j) = 0.0_RP
     enddo
@@ -1001,7 +1092,7 @@ contains
     else
 
 <% end %>
-    !$omp do OMP_SCHEDULE_ collapse(2) 
+    !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
     do i = IIS, IIE
@@ -1014,8 +1105,9 @@ contains
        call CHECK( __LINE__, val(k<%=k+1%>,i,j) )
 <% end %>
 #endif
-       vel = <%= interp("mom", "XYW", uv+"W") %> &
-           / <%= interp("DENS", "XYZ", uv+"W") %>
+<%= f2h_assigns(scalars_z, mom_uvw_k, dens_uvw_k) %>
+       vel = <%= mom_uvw_k %> &
+           / <%= dens_uvw_k %>
        flux(k,i,j) = J33G * vel &
                    * ( <%= flux("vel", order, 0) %> ) <%= num_diff() %>
     enddo
@@ -1027,7 +1119,7 @@ contains
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
 
-    !$omp do OMP_SCHEDULE_ collapse(2) 
+    !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
     do i = IIS, IIE
@@ -1043,15 +1135,17 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(KS-1,i,j) = 0.0_RP
-<% nh.times do |k| %>
-       vel = <%= interp("mom", "XYW", uv+"W", "KS"+k) %> &
-           / <%= interp("DENS", "XYZ", uv+"W", "KS"+k) %>
-       flux(KS<%=k%>,i,j) = J33G * vel &
-                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> ) <%= num_diff("KS"+k) %>
-       vel = <%= interp("mom", "XYW", uv+"W", "KE"-(k+1)) %> &
-           / <%= interp("DENS", "XYZ", uv+"W", "KE"-(k+1)) %>
-       flux(KE<%=-k-1%>,i,j) = J33G * vel &
-                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> ) <%= num_diff("KE"-(k+1)) %>
+<% bnd_uvw.each do |kk, mks, dks, mke, dke| %>
+<%= f2h_assigns(scalars_z, mks, dks) %>
+       vel = <%= mks %> &
+           / <%= dks %>
+       flux(KS<%=kk%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-kk)*2,[order,2].min].max,[order-(nh-kk-1)*2,[order,2].min].max], 0, "KS"+kk) %> ) <%= num_diff("KS"+kk) %>
+<%= f2h_assigns(scalars_z, mke, dke) %>
+       vel = <%= mke %> &
+           / <%= dke %>
+       flux(KE<%=-kk-1%>,i,j) = J33G * vel &
+                   * ( <%= flux("vel", [[order-(nh-kk-1)*2,[order,2].min].max,[order-(nh-kk)*2,[order,2].min].max], 0, "KE"-(kk+1)) %> ) <%= num_diff("KE"-(kk+1)) %>
 <% end %>
        flux(KE,i,j) = 0.0_RP
     enddo
@@ -1059,7 +1153,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
 <% if i==1 %>
-    end if    
+    end if
 <% end %>
 
     !$acc end data
@@ -1075,6 +1169,35 @@ contains
      ["J13", "UYZ", 2],
      ["J23", "XVZ", 1]
    ].each do |dir, xyz, im|
+  scalars_j = {}
+  mom_xyw_k = nil
+  dens_xyw_k = nil
+  bnd_xyw = []
+  if i == 1 && im == 1
+    mom_xyw_k = interp("mom", xyz, "XYW", "k", "i", "j", scalars_j)
+    dens_xyw_k = interp("DENS", "XYZ", "XYW", "k", "i", "j", scalars_j)
+    nh.times do |kk|
+      bnd_xyw << [
+        kk,
+        interp("mom", xyz, "XYW", "KS"+kk, "i", "j", scalars_j),
+        interp("DENS", "XYZ", "XYW", "KS"+kk, "i", "j", scalars_j),
+        interp("mom", xyz, "XYW", "KE"-(kk+1), "i", "j", scalars_j),
+        interp("DENS", "XYZ", "XYW", "KE"-(kk+1), "i", "j", scalars_j)
+      ]
+    end
+  end
+  mom_uvw_k = interp("mom", xyz, uv+"W", "k", "i", "j", scalars_j)
+  dens_uvw_k = interp("DENS", "XYZ", uv+"W", "k", "i", "j", scalars_j)
+  bnd_uvw = []
+  nh.times do |kk|
+    bnd_uvw << [
+      kk,
+      interp("mom", xyz, uv+"W", "KS"+kk, "i", "j", scalars_j),
+      interp("DENS", "XYZ", uv+"W", "KS"+kk, "i", "j", scalars_j),
+      interp("mom", xyz, uv+"W", "KE"-(kk+1), "i", "j", scalars_j),
+      interp("DENS", "XYZ", uv+"W", "KE"-(kk+1), "i", "j", scalars_j)
+    ]
+  end
 %>
   !-----------------------------------------------------------------------------
   !> calculation <%=dir%>-flux at <%=uv%>Z
@@ -1098,13 +1221,15 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+<%= f2h_decls(scalars_j) %>
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
-    !$omp parallel default(none) private(i,j,k,vel)                      &
+    !$omp parallel default(none) private(i,j,k,vel) &
+<%= f2h_privates(scalars_j) %>
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,<%=dir%>G,MAPF) &
     !$omp shared(GSQRT,CDZ,TwoD)
-  
+
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, <%=dir%>G, MAPF, CDZ)
 
 <% if i==1 && im==1 %>
@@ -1115,8 +1240,9 @@ contains
     do j = JJS, JJE
     do k = KS<%=nh%>, KE<%=-nh-1%>
        i = IIS
-       vel = <%= interp("mom", xyz, "XYW") %> &
-           / <%= interp("DENS", "XYZ", "XYW") %>
+<%= f2h_assigns(scalars_j, mom_xyw_k, dens_xyw_k) %>
+       vel = <%= mom_xyw_k %> &
+           / <%= dens_xyw_k %>
        vel = vel * <%=dir%>G(k,i,j)
        flux(k,i,j) = vel * ( <%= flux("vel", order, 0) %> )
     enddo
@@ -1132,18 +1258,20 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(KS-1,i,j) = 0.0_RP
-<% nh.times do |k| %>
-       vel = <%= interp("mom", xyz, "XYW", "KS"+k) %> &
-           / <%= interp("DENS", "XYZ", "XYW", "KS"+k) %>
-       vel = vel * <%=dir%>G(KS<%=k%>,i,j)
-       flux(KS<%=k%>,i,j) = vel / MAPF(i,j,<%=im%>) &
-                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> )
+<% bnd_xyw.each do |kk, mks, dks, mke, dke| %>
+<%= f2h_assigns(scalars_j, mks, dks) %>
+       vel = <%= mks %> &
+           / <%= dks %>
+       vel = vel * <%=dir%>G(KS<%=kk%>,i,j)
+       flux(KS<%=kk%>,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", [[order-(nh-kk)*2,[order,2].min].max,[order-(nh-kk-1)*2,[order,2].min].max], 0, "KS"+kk) %> )
 
-       vel = <%= interp("mom", xyz, "XYW", "KE"-(k+1)) %> &
-           / <%= interp("DENS", "XYZ", "XYW", "KE"-(k+1)) %>
-       vel = vel * <%=dir%>G(KE<%=-k-1%>,i,j)
-       flux(KE<%=-k-1%>,i,j) = vel / MAPF(i,j,<%=im%>) &
-                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> )
+<%= f2h_assigns(scalars_j, mke, dke) %>
+       vel = <%= mke %> &
+           / <%= dke %>
+       vel = vel * <%=dir%>G(KE<%=-kk-1%>,i,j)
+       flux(KE<%=-kk-1%>,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", [[order-(nh-kk-1)*2,[order,2].min].max,[order-(nh-kk)*2,[order,2].min].max], 0, "KE"-(kk+1)) %> )
 <% end %>
        flux(KE  ,i,j) = 0.0_RP
     enddo
@@ -1158,8 +1286,9 @@ contains
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS<%=nh%>, KE<%=-nh-1%>
-       vel = <%= interp("mom", xyz, uv+"W") %> &
-           / <%= interp("DENS", "XYZ", uv+"W") %>
+<%= f2h_assigns(scalars_j, mom_uvw_k, dens_uvw_k) %>
+       vel = <%= mom_uvw_k %> &
+           / <%= dens_uvw_k %>
        vel = vel * <%=dir%>G(k,i,j)
        flux(k,i,j) = vel / MAPF(i,j,<%=im%>) &
                    * ( <%= flux("vel", order, 0) %> )
@@ -1177,25 +1306,27 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(KS-1,i,j) = 0.0_RP
-<% nh.times do |k| %>
-       vel = <%= interp("mom", xyz, uv+"W", "KS"+k) %> &
-           / <%= interp("DENS", "XYZ", uv+"W", "KS"+k) %>
-       vel = vel * <%=dir%>G(KS<%=k%>,i,j)
-       flux(KS<%=k%>,i,j) = vel / MAPF(i,j,<%=im%>) &
-                   * ( <%= flux("vel", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k) %> )
+<% bnd_uvw.each do |kk, mks, dks, mke, dke| %>
+<%= f2h_assigns(scalars_j, mks, dks) %>
+       vel = <%= mks %> &
+           / <%= dks %>
+       vel = vel * <%=dir%>G(KS<%=kk%>,i,j)
+       flux(KS<%=kk%>,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", [[order-(nh-kk)*2,[order,2].min].max,[order-(nh-kk-1)*2,[order,2].min].max], 0, "KS"+kk) %> )
 
-       vel = <%= interp("mom", xyz, uv+"W", "KE"-(k+1)) %> &
-           / <%= interp("DENS", "XYZ", uv+"W", "KE"-(k+1)) %>
-       vel = vel * <%=dir%>G(KE<%=-k-1%>,i,j)
-       flux(KE<%=-k-1%>,i,j) = vel / MAPF(i,j,<%=im%>) &
-                   * ( <%= flux("vel", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1)) %> )
+<%= f2h_assigns(scalars_j, mke, dke) %>
+       vel = <%= mke %> &
+           / <%= dke %>
+       vel = vel * <%=dir%>G(KE<%=-kk-1%>,i,j)
+       flux(KE<%=-kk-1%>,i,j) = vel / MAPF(i,j,<%=im%>) &
+                   * ( <%= flux("vel", [[order-(nh-kk-1)*2,[order,2].min].max,[order-(nh-kk)*2,[order,2].min].max], 0, "KE"-(kk+1)) %> )
 <% end %>
        flux(KE  ,i,j) = 0.0_RP
     enddo
     enddo
     !$acc end kernels
     !$omp end do nowait
-    
+
 <% if i==1 && im==1 %>
     end if
 <% end %>
@@ -1347,7 +1478,7 @@ contains
     real(RP), intent(in) :: v2
     real(RP), intent(in) :: v3
 #endif
-    
+
     real(RP) :: r2
     real(RP) :: zerosw1, zerosw2
     !---------------------------------------------------------------------------
