@@ -1574,7 +1574,7 @@ contains
                    call ATMOS_PHY_MP_precipitation_semilag( &
                         KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
                         TEMP2(:), vterm(:,:),   & ! [IN]
-                        REAL_FZ(:,i,j),         & ! [IN]
+                        REAL_FZ(1:KA,i,j),      & ! [IN]
                         FDZ(:), RCDZ(:),        & ! [IN]
                         MP_DTSEC_SEDIMENTATION, & ! [IN]
                         i, j,                   & ! [IN]
@@ -1646,7 +1646,7 @@ contains
                       call ATMOS_PHY_MP_precipitation_semilag( &
                            KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
                            TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
-                           REAL_FZ(:,i,j),             & ! [IN]
+                           REAL_FZ(1:KA,i,j),          & ! [IN]
                            FDZ(:), RCDZ(:),            & ! [IN]
                            MP_DTSEC_SEDIMENTATION,     & ! [IN]
                            i, j,                       & ! [IN]
