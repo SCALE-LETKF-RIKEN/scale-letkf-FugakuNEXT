@@ -847,9 +847,48 @@ contains
     real(RP) :: CPtot1(KA,IA,JA)
     real(RP) :: CVtot1(KA,IA,JA)
     real(RP) :: CCN   (KA,IA,JA)
-    real(RP) :: vterm (KA,QS_MP+1:QE_MP)
     real(RP), target :: QTRC1(KA,IA,JA,QS_MP:QE_MP)
 
+#ifdef _OPENACC
+    real(RP) :: vterm (KA,QS_MP+1:QE_MP,IA,JA)
+    real(RP) :: FLX_hydro(KA,IA,JA)
+    real(RP) :: DENS2    (KA,IA,JA)
+    real(RP) :: TEMP2    (KA,IA,JA)
+    real(RP) :: PRES2    (KA,IA,JA)
+    real(RP) :: CPtot2   (KA,IA,JA)
+    real(RP) :: CVtot2   (KA,IA,JA)
+    real(RP) :: RHOE     (KA,IA,JA)
+    real(RP) :: RHOE2    (KA,IA,JA)
+    real(RP) :: RHOQ     (KA,QS_MP+1:QE_MP,IA,JA)
+    real(RP) :: RHOQ2    (KA,QS_MP+1:QE_MP,IA,JA)
+    real(RP) :: mflux    (KA,IA,JA)
+    real(RP) :: sflux    (2,IA,JA)  !> 1: rain, 2: snow
+    real(RP) :: eflux_2d (IA,JA)
+
+    real(RP) :: FDZ (KA,IA,JA)
+    real(RP) :: RFDZ(KA,IA,JA)
+    real(RP) :: RCDZ(KA,IA,JA)
+
+#define vterm(k,iq) vterm(k,iq,i,j)
+#define FLX_hydro(k) FLX_hydro(k,i,j)
+#define DENS2(k)     DENS2(k,i,j)
+#define TEMP2(k)     TEMP2(k,i,j)
+#define PRES2(k)     PRES2(k,i,j)
+#define CPtot2(k)    CPtot2(k,i,j)
+#define CVtot2(k)    CVtot2(k,i,j)
+#define RHOE(k)      RHOE(k,i,j)
+#define RHOE2(k)     RHOE2(k,i,j)
+#define RHOQ(k,iq)   RHOQ(k,iq,i,j)
+#define RHOQ2(k,iq)  RHOQ2(k,iq,i,j)
+#define mflux(k)     mflux(k,i,j)
+#define sflux(n)     sflux(n,i,j)
+#define eflux        eflux_2d(i,j)
+
+#define FDZ(k)       FDZ(k,i,j)
+#define RFDZ(k)      RFDZ(k,i,j)
+#define RCDZ(k)      RCDZ(k,i,j)
+#else
+    real(RP) :: vterm (KA,QS_MP+1:QE_MP)
     real(RP) :: FLX_hydro(KA)
     real(RP) :: DENS2    (KA)
     real(RP) :: TEMP2    (KA)
@@ -864,10 +903,10 @@ contains
     real(RP) :: sflux    (2)  !> 1: rain, 2: snow
     real(RP) :: eflux
 
-    real(RP) :: FZ  (KA)
     real(RP) :: FDZ (KA)
     real(RP) :: RFDZ(KA)
     real(RP) :: RCDZ(KA)
+#endif
 
     real(RP) :: CPtot_t(KA,IA,JA), CVtot_t(KA,IA,JA)
     real(RP) :: CP_t, CV_t
@@ -889,8 +928,17 @@ contains
     integer :: step
 
     real(RP) :: QTRC1_crg(KA,IA,JA,QS_LT:QE_LT)
+#ifdef _OPENACC
+    real(RP) :: RHOQ2_crg(KA,QS_LT:QE_LT,IA,JA)
+    real(RP) :: mflux_crg(KA,IA,JA), sflux_crg(2,IA,JA), eflux_crg_2d(IA,JA)
+#define RHOQ2_crg(k,iq) RHOQ2_crg(k,iq,i,j)
+#define mflux_crg(k) mflux_crg(k,i,j)
+#define sflux_crg(n) sflux_crg(n,i,j)
+#define eflux_crg eflux_crg_2d(i,j)
+#else
     real(RP) :: RHOQ2_crg(KA,QS_LT:QE_LT)
     real(RP) :: mflux_crg(KA), sflux_crg(2), eflux_crg
+#endif
     real(RP) :: QSPLT_in(KA,IA,JA,3)
     real(RP) :: dqcrg(KA,IA,JA), beta_crg(KA,IA,JA)
 
@@ -909,7 +957,8 @@ contains
     !$acc      create(RHOE_t, TEMP1, CPtot1, CVtot1, CCN, QTRC1, CPtot_t, CVtot_t, precip, &
     !$acc             QTRC1_crg, QSPLT_in, dqcrg, beta_crg, &
     !$acc             logPRES, &
-    !$acc             hist_vterm_idx)
+    !$acc             hist_vterm_idx, &
+    !$acc             vterm, FLX_hydro, DENS2, TEMP2, PRES2, CPtot2, CVtot2, RHOE, RHOE2, RHOQ, RHOQ2, mflux, sflux, eflux_2d, FDZ, RFDZ, RCDZ, RHOQ2_crg, mflux_crg, sflux_crg, eflux_crg_2d)
     !$acc data copy(RHOC_t_MP) if (flg_lt)
 
 
@@ -1294,18 +1343,14 @@ contains
           !$omp         MP_DTSEC_SEDIMENTATION, &
           !$omp         vterm_hist,hist_vterm_idx) &
           !$omp private(i,j,k,iq,step, &
-          !$omp         FZ,FDZ,RFDZ,RCDZ, &
+          !$omp         FDZ,RFDZ,RCDZ, &
           !$omp         DENS2,TEMP2,PRES2,CPtot2,CVtot2,RHOE,RHOE2,RHOQ,RHOQ2, &
           !$omp         RHOQ2_crg,mflux_crg,sflux_crg,eflux_crg, &
           !$omp         vterm,mflux,sflux,eflux,FLX_hydro,CP_t,CV_t)
           !$acc parallel
-          !$acc loop collapse(2) gang &
-          !$acc private(vterm,FLX_hydro,DENS2,TEMP2,PRES2,CPtot2,CVtot2,RHOE,RHOE2,RHOQ,RHOQ2,mflux,sflux,eflux,FZ,FDZ,RFDZ,RCDZ, &
-          !$acc         RHOQ2_crg,mflux_crg,sflux_crg,eflux_crg)
+          !$acc loop collapse(2) gang
           do j = JS, JE
           do i = IS, IE
-
-             FZ(1:KA) = REAL_FZ(1:KA,i,j)
 
              FDZ(KS-1) = REAL_CZ(KS,i,j) - REAL_FZ(KS-1,i,j)
              RFDZ(KS-1) = 1.0_RP / FDZ(KS-1)
@@ -1314,6 +1359,15 @@ contains
                 RFDZ(k) = 1.0_RP / FDZ(k)
                 RCDZ(k) = 1.0_RP / ( REAL_FZ(k  ,i,j) - REAL_FZ(k-1,i,j) )
              enddo
+#ifdef _OPENACC
+          end do
+          end do
+          !$acc end parallel
+
+          !$acc parallel loop collapse(3)
+          do j = JS, JE
+          do i = IS, IE
+#endif
 
              do k = KS, KE
                 DENS2(k)  = DENS(k,i,j)
@@ -1321,67 +1375,157 @@ contains
                 PRES2(k)  = PRES(k,i,j)
                 CPtot2(k) = CPtot(k,i,j)
                 CVtot2(k) = CVtot(k,i,j)
-                RHOE(k)   = TEMP(k,i,j) * CVtot(k,i,j) * DENS2(k)
+                RHOE(k)   = TEMP(k,i,j) * CVtot(k,i,j) * DENS(k,i,j)
                 RHOE2(k)  = RHOE(k)
              end do
-             !$acc loop collapse(2)
+#ifdef _OPENACC
+          end do
+          end do
+          !$acc end parallel
+
+          !$acc parallel loop collapse(4)
+          do j = JS, JE
+          do i = IS, IE
+#endif
              do iq = QS_MP+1, QE_MP
              do k = KS, KE
-                RHOQ (k,iq) = DENS2(k) * QTRC(k,i,j,iq) + RHOQ_t_MP(k,i,j,iq) * dt_MP
+                RHOQ (k,iq) = DENS(k,i,j) * QTRC(k,i,j,iq) + RHOQ_t_MP(k,i,j,iq) * dt_MP
                 RHOQ2(k,iq) = RHOQ(k,iq)
              end do
              end do
-
+#ifdef _OPENACC
+          end do
+          end do
+          !$acc end parallel
+#endif
              if( flg_lt ) then
-                !$acc loop collapse(2)
+#ifdef _OPENACC
+                !$acc parallel loop collapse(4)
+                do j = JS, JE
+                do i = IS, IE
+#endif
                 do iq = QS_LT, QE_LT
                 do k = KS, KE
                    RHOQ2_crg(k,iq) = DENS2(k) * QTRC(k,i,j,iq)
                 end do
                 end do
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
+#endif
              endif
-
+#ifdef _OPENACC
+          !$acc parallel loop collapse(2)
+          do j = JS, JE
+          do i = IS, IE
+#endif
              SFLX_rain(i,j) = 0.0_RP
              SFLX_snow(i,j) = 0.0_RP
              SFLX_ENGI(i,j) = 0.0_RP
+#ifdef _OPENACC
+          end do
+          end do
+          !$acc kernels loop collapse(2)
+          do j = JS, JE
+          do i = IS, IE
+#endif
              FLX_hydro(:) = 0.0_RP
+#ifdef _OPENACC
+          end do
+          end do
+          !$acc end kernels
+#endif
 
-             !$acc loop seq
              do step = 1, MP_NSTEP_SEDIMENTATION
 
                 select case ( MP_model_id )
                 case ( I_KESSLER )
+#ifdef _OPENACC
+                   !$acc parallel loop collapse(2)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
                    call ATMOS_PHY_MP_kessler_terminal_velocity( &
                         KA, KS, KE, &
                         DENS2(:), RHOQ2(:,:), & ! [IN]
                         REFSTATE_dens(:,i,j), & ! [IN]
                         vterm(:,:)            ) ! [OUT]
+#ifdef _OPENACC
+                   end do
+                   end do
+                   !$acc end parallel
+#endif
                 case ( I_TOMITA08 )
+                   #ifdef _OPENACC
+                   !$acc parallel loop collapse(2)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
                    call ATMOS_PHY_MP_tomita08_terminal_velocity( &
                         KA, KS, KE, &
                         DENS2(:), TEMP2(:), RHOQ2(:,:), & ! [IN]
                         vterm(:,:)                      ) ! [OUT]
-                case ( I_SN14 )
+#ifdef _OPENACC
+                   end do
+                   end do
+                   !$acc end parallel
+#endif
+                  case ( I_SN14 )
+#ifdef _OPENACC
+                   !$acc parallel loop collapse(2)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
                    call ATMOS_PHY_MP_sn14_terminal_velocity( &
                         KA, KS, KE, &
                         DENS2(:), TEMP2(:), RHOQ2(:,:), PRES2(:), & ! [IN]
                         vterm(:,:)                                ) ! [OUT]
-                case ( I_SUZUKI10 )
-                   call ATMOS_PHY_MP_suzuki10_terminal_velocity( &
+                        #ifdef _OPENACC
+                   end do
+                   end do
+                   !$acc end parallel
+#endif
+                  case ( I_SUZUKI10 )
+#ifdef _OPENACC
+                   !$acc parallel loop collapse(2)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
+                  call ATMOS_PHY_MP_suzuki10_terminal_velocity( &
                         KA,        & ! [IN]
                         vterm(:,:) ) ! [OUT]
-                case ( I_AMPS )
+ #ifdef _OPENACC
+                   end do
+                   end do
+                   !$acc end parallel
+#endif
+               case ( I_AMPS )
                    ! do nothing
                 case default
-                   !$acc loop seq
+#ifdef _OPENACC
+                   !$acc parallel loop collapse(4)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
                    do iq = QS_MP+1, QE_MP
                       do k = KS, KE
                          vterm(k,iq) = 0.0_RP ! tentative
                       end do
                    end do
+#ifdef _OPENACC
+                  end do
+                  end do
+                  !$acc end parallel
+#endif
                 end select
 
                 ! store to history output
+#ifdef _OPENACC
+                !$acc parallel loop collapse(2)
+                do j = JS, JE
+                do i = IS, IE
+#endif
                 !$acc loop seq
                 do iq = QS_MP+1, QE_MP
                    if ( hist_vterm_idx(iq) > 0 ) then
@@ -1392,9 +1536,19 @@ contains
                       end do
                    end if
                 end do
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
+#endif
 
                 select case ( MP_upwind_scheme_id )
                 case ( I_UPWIND )
+#ifdef _OPENACC
+                   !$acc parallel loop collapse(2)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
                    call ATMOS_PHY_MP_precipitation_upwind( &
                         KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
                         TEMP2(:), vterm(:,:),   & ! [IN]
@@ -1406,11 +1560,22 @@ contains
                         RHOE2(:),               & ! [INOUT]
                         mflux(:), sflux(:),     & ! [OUT]
                         eflux                   ) ! [OUT]
+#ifdef _OPENACC
+                   end do
+                   end do
+                   !$acc end parallel
+#endif
                 case ( I_SEMILAG )
+#ifdef _OPENACC
+                   !$acc parallel loop collapse(2)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
                    call ATMOS_PHY_MP_precipitation_semilag( &
                         KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
                         TEMP2(:), vterm(:,:),   & ! [IN]
-                        FZ(:), FDZ(:), RCDZ(:), & ! [IN]
+                        REAL_FZ(:,i,j),         & ! [IN]
+                        FDZ(:), RCDZ(:),        & ! [IN]
                         MP_DTSEC_SEDIMENTATION, & ! [IN]
                         i, j,                   & ! [IN]
                         DENS2(:), RHOQ2(:,:),   & ! [INOUT]
@@ -1418,16 +1583,44 @@ contains
                         RHOE2(:),               & ! [INOUT]
                         mflux(:), sflux(:),     & ! [OUT]
                         eflux                   ) ! [OUT]
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
+#endif
                 case default
+#ifdef _OPENACC
+                !$acc parallel loop collapse(2)
+                do j = JS, JE
+                do i = IS, IE
+#endif
                    mflux(:) = 0.0_RP
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
+                !$acc parallel loop collapse(2)
+                do j = JS, JE
+                do i = IS, IE
+#endif
                    sflux(:) = 0.0_RP
                    eflux    = 0.0_RP
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
+#endif
                 end select
 
                 if( flg_lt ) then
 
                    select case ( MP_upwind_scheme_id )
                    case ( I_UPWIND )
+#ifdef _OPENACC
+                   !$acc parallel loop collapse(2)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
                       call ATMOS_PHY_MP_precipitation_upwind( &
                            KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
                            TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
@@ -1439,11 +1632,22 @@ contains
                            RHOE2(:),                   & ! [INOUT]
                            mflux_crg(:), sflux_crg(:), & ! [OUT] dummy
                            eflux_crg                   ) ! [OUT] dummy
+#ifdef _OPENACC
+                   end do
+                   end do
+                   !$acc end parallel
+#endif
                    case ( I_SEMILAG )
+#ifdef _OPENACC
+                   !$acc parallel loop collapse(2)
+                   do j = JS, JE
+                   do i = IS, IE
+#endif
                       call ATMOS_PHY_MP_precipitation_semilag( &
                            KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
                            TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
-                           FZ(:), FDZ(:), RCDZ(:),     & ! [IN]
+                           REAL_FZ(:,i,j),             & ! [IN]
+                           FDZ(:), RCDZ(:),            & ! [IN]
                            MP_DTSEC_SEDIMENTATION,     & ! [IN]
                            i, j,                       & ! [IN]
                            DENS2(:), RHOQ2_crg(:,:),   & ! [INOUT]
@@ -1451,37 +1655,108 @@ contains
                            RHOE2(:),                   & ! [INOUT]
                            mflux_crg(:), sflux_crg(:), & ! [OUT] dummy
                            eflux_crg                   ) ! [OUT] dummy
+#ifdef _OPENACC
+                   end do
+                   end do
+                   !$acc end parallel
+#endif
                    case default
-                      mflux_crg(:) = 0.0_RP
+#ifdef _OPENACC
+                  !$acc parallel loop collapse(2)
+                  do j = JS, JE
+                  do i = IS, IE
+#endif
+                     mflux_crg(:) = 0.0_RP
+#ifdef _OPENACC
+                  end do
+                  end do
+                  !$acc end parallel
+
+                  !$acc parallel loop collapse(2)
+                  do j = JS, JE
+                  do i = IS, IE
+#endif
                       sflux_crg(:) = 0.0_RP
                       eflux_crg    = 0.0_RP
+#ifdef _OPENACC
+                   end do
+                   end do
+                   !$acc end parallel
+#endif
                    end select
 
                 endif
 
-                !$acc loop independent
+#ifdef _OPENACC
+                !$acc parallel loop collapse(3)
+                do j = JS, JE
+                do i = IS, IE
+#endif
                 do k = KS, KE
                    TEMP2(k) = RHOE2(k) / ( DENS2(k) * CVtot2(k) )
                 end do
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
 
-                !$acc loop independent
+                !$acc parallel loop collapse(3)
+                do j = JS, JE
+                do i = IS, IE
+#endif
                 do k = KS-1, KE-1
                    FLX_hydro(k) = FLX_hydro(k) + mflux(k) * MP_RNSTEP_SEDIMENTATION
                 enddo
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
+
+                !$acc parallel loop collapse(2)
+                do j = JS, JE
+                do i = IS, IE
+#endif
 
                 SFLX_rain(i,j) = SFLX_rain(i,j) - sflux(1) * MP_RNSTEP_SEDIMENTATION
                 SFLX_snow(i,j) = SFLX_snow(i,j) - sflux(2) * MP_RNSTEP_SEDIMENTATION
                 SFLX_ENGI(i,j) = SFLX_ENGI(i,j) - eflux    * MP_RNSTEP_SEDIMENTATION
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
+#endif
 
-             enddo
+             enddo ! step
 
+#ifdef _OPENACC
+             !$acc parallel loop collapse(2)
+             do j = JS, JE
+             do i = IS, IE
+#endif
              SFLX_ENGI(i,j) = SFLX_ENGI(i,j) - SFLX_snow(i,j) * LHF ! moist internal energy
 
+#ifdef _OPENACC
+             end do
+             end do
+             !$acc end parallel
+
+             !$acc parallel loop collapse(3)
+             do j = JS, JE
+             do i = IS, IE
+#endif
 !OCL XFILL
              do k = KS, KE
                 DENS_t_MP(k,i,j) = ( DENS2(k) - DENS(k,i,j) ) / dt_MP
              end do
+#ifdef _OPENACC
+             end do
+             end do
+             !$acc end parallel
 
+             !$acc parallel loop collapse(3)
+             do j = JS, JE
+             do i = IS, IE
+#endif
              do k = KS, KE
                 CP_t = ( CPtot2(k) - CPtot(k,i,j) ) / dt_MP
                 CV_t = ( CVtot2(k) - CVtot(k,i,j) ) / dt_MP
@@ -1501,25 +1776,51 @@ contains
 !                     - RHOT(k,i,j) * CVtot(k,i,j) / ( CPtot(k,i,j) - CVtot(k,i,j) ) &
 !                     * log( EXNER(k,i,j) ) * ( CP_t / CPtot(k,i,j) - CV_t / CVtot(k,i,j) )
              end do
+             #ifdef _OPENACC
+            end do
+            end do
+            !$acc end parallel
 
-             !$acc loop collapse(2)
+            !$acc parallel loop collapse(4)
+            do j = JS, JE
+            do i = IS, IE
+#endif
              do iq = QS_MP+1, QE_MP
              do k  = KS, KE
                 RHOQ_t_MP(k,i,j,iq) = RHOQ_t_MP(k,i,j,iq) &
                      + ( RHOQ2(k,iq) - RHOQ(k,iq) ) / dt_MP
              enddo
              enddo
+#ifdef _OPENACC
+             end do
+             end do
+             !$acc end parallel
+#endif
 
              if( flg_lt ) then
-                !$acc loop collapse(2)
+#ifdef _OPENACC
+             !$acc parallel loop collapse(4)
+             do j = JS, JE
+             do i = IS, IE
+#endif
                 do iq = QS_LT, QE_LT
                 do k  = KS, KE
                    RHOC_t_MP(k,i,j,iq) = RHOC_t_MP(k,i,j,iq) &
                         + ( RHOQ2_crg(k,iq) - DENS(k,i,j) * QTRC(k,i,j,iq) ) / dt_MP
                 enddo
                 enddo
+#ifdef _OPENACC
+                end do
+                end do
+                !$acc end parallel
+#endif
              endif
 
+#ifdef _OPENACC
+          !$acc parallel loop collapse(2)
+          do j = JS, JE
+          do i = IS, IE
+#endif
              call ATMOS_PHY_MP_precipitation_momentum( &
                      KA, KS, KE, &
                      DENS(:,i,j), MOMZ(:,i,j), U(:,i,j), V(:,i,j),        & ! [IN]
@@ -1665,6 +1966,30 @@ contains
 
     !$acc end data
     !$acc end data
+
+#ifdef _OPENACC
+#undef vterm
+#undef FLX_hydro
+#undef DENS2
+#undef TEMP2
+#undef PRES2
+#undef CPtot2
+#undef CVtot2
+#undef RHOE
+#undef RHOE2
+#undef RHOQ
+#undef RHOQ2
+#undef mflux
+#undef sflux
+#undef eflux
+#undef FDZ
+#undef RFDZ
+#undef RCDZ
+#undef RHOQ2_crg
+#undef mflux_crg
+#undef sflux_crg
+#undef eflux_crg
+#endif
 
     return
   end subroutine ATMOS_PHY_MP_driver_calc_tendency
