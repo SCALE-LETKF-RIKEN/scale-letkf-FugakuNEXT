@@ -27,6 +27,7 @@ module scale_interp
   public :: INTERP_setup
   public :: INTERP_domain_compatibility
   public :: INTERP_factor1d
+  public :: INTERP_factor1d_batch
   public :: INTERP_factor2d
   public :: INTERP_factor3d
   public :: INTERP_factor2d_linear_latlon
@@ -344,6 +345,128 @@ contains
     return
   end subroutine INTERP_factor1d
 
+  !-----------------------------------------------------------------------------
+  ! vertical search of interpolation points for two-points (batch version with i,j loops)
+  subroutine INTERP_factor1d_batch( &
+       IA, IS, IE, JA, JS, JE, &
+       KA_ref, KS_ref, KE_ref, &
+       KA, KS, KE,           &
+       hgt_ref,              &
+       hgt,                  &
+       idx_k,                &
+       vfact,                &
+       flag_extrap           )
+    use scale_prc, only: &
+       PRC_abort
+    use scale_const, only: &
+       UNDEF => CONST_UNDEF, &
+       EPS   => CONST_EPS
+    implicit none
+    integer,  intent(in)  :: IA, IS, IE
+    integer,  intent(in)  :: JA, JS, JE
+    integer,  intent(in)  :: KA_ref, KS_ref, KE_ref        ! number of z-direction    (reference)
+    integer,  intent(in)  :: KA, KS, KE                    ! number of z-direction    (target)
+    real(RP), intent(in)  :: hgt_ref(KA_ref,IA,JA)         ! height [m]               (reference)
+    real(RP), intent(in)  :: hgt(KA)                       ! height [m]               (target)
+    integer,  intent(out) :: idx_k(KA,2,IA,JA)             ! k-index in reference     (target)
+    real(RP), intent(out) :: vfact(KA,  IA,JA)             ! horizontal interp factor (target)
+    logical,  intent(in), optional :: flag_extrap          ! when true, extrapolation will be executed (just copy)
+
+    integer :: idx(KA_ref,IA,JA), kmax(IA,JA), kmax_
+    logical :: flag_extrap_
+
+    integer  :: k, kk, i, j
+
+    if ( present(flag_extrap) ) then
+       flag_extrap_ = flag_extrap
+    else
+       flag_extrap_ = .true.
+    end if
+
+    !$acc data create(idx, kmax)
+
+    ! search valid levels (per i,j since hgt_ref is 3D)
+    !$omp parallel do collapse(2) private(kmax_)
+    !$acc parallel
+    !$acc loop gang vector collapse(2) private(kmax_)
+    do j = JS, JE
+    do i = IS, IE
+       kmax_ = 0
+       !$acc loop seq
+       do k = KS_ref, KE_ref
+          if ( hgt_ref(k,i,j) > UNDEF ) then
+             kmax_ = kmax_ + 1
+             idx(kmax_,i,j) = k
+          end if
+       end do
+       kmax(i,j) = kmax_
+    end do
+    end do
+    !$acc end parallel loop
+
+    !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
+    !$omp shared(UNDEF,EPS,IS,IE,JS,JE,KA,KS,KE,KA_ref,KS_ref,KE_ref,kmax,idx,hgt_ref,hgt,idx_k,vfact,flag_extrap_) &
+    !$omp private(kmax_)
+    !$acc parallel
+    !$acc loop gang vector collapse(3) private(kmax_)
+    do j = JS, JE
+    do i = IS, IE
+       do k = KS, KE
+          kmax_ = kmax(i,j)
+          idx_k(k,1,i,j) = -1
+          idx_k(k,2,i,j) = -1
+
+          if    ( hgt(k) <  hgt_ref(idx(1,i,j),i,j) - EPS ) then
+             if ( flag_extrap_ ) then
+                idx_k(k,1,i,j) = idx(1,i,j)
+                idx_k(k,2,i,j) = -1
+                vfact(k,i,j) = 1.0_RP
+             else
+                idx_k(k,1,i,j) = -1
+                idx_k(k,2,i,j) = -1
+                vfact(k,i,j) = UNDEF
+             end if
+          elseif( hgt(k) < hgt_ref(idx(1,i,j),i,j) ) then
+             idx_k(k,1,i,j) = idx(1,i,j)
+             idx_k(k,2,i,j) = -1
+             vfact(k,i,j) = 1.0_RP
+          elseif( hgt(k) > hgt_ref(idx(kmax_,i,j),i,j) + EPS ) then
+             if ( flag_extrap_ ) then
+                idx_k(k,1,i,j) = idx(kmax_,i,j)
+                idx_k(k,2,i,j) = -1
+                vfact(k,i,j) = 1.0_RP
+             else
+                idx_k(k,1,i,j) = -1
+                idx_k(k,2,i,j) = -1
+                vfact(k,i,j) = UNDEF
+             end if
+          elseif( hgt(k) >= hgt_ref(idx(kmax_,i,j),i,j) ) then
+             idx_k(k,1,i,j) = idx(kmax_,i,j)
+             idx_k(k,2,i,j) = -1
+             vfact(k,i,j) = 1.0_RP
+          else
+             !$acc loop seq
+             do kk = 1, kmax_-1
+                if (       hgt(k) >= hgt_ref(idx(kk,i,j),i,j) &
+                     .AND. hgt(k) <  hgt_ref(idx(kk+1,i,j),i,j) ) then
+                   idx_k(k,1,i,j) = idx(kk,i,j)
+                   idx_k(k,2,i,j) = idx(kk+1,i,j)
+                   vfact(k,i,j) = ( hgt_ref(idx(kk+1,i,j),i,j) - hgt    (k)       ) &
+                                / ( hgt_ref(idx(kk+1,i,j),i,j) - hgt_ref(idx(kk,i,j),i,j) )
+                   exit
+                end if
+             end do
+          end if
+
+       end do ! k-loop
+    end do
+    end do
+    !$acc end parallel loop
+
+    !$acc end data
+
+    return
+  end subroutine INTERP_factor1d_batch
 
   !-----------------------------------------------------------------------------
   ! make interpolation factor using bi-linear method on the latlon coordinate
