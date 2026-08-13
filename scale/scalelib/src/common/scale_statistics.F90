@@ -893,10 +893,11 @@ contains
     do_globalcomm = STATISTICS_use_globalcomm
     if ( present(local) ) do_globalcomm = ( .not. local )
 
-    !$acc update host(var) if ( acc_is_present(var) )
-
     LOG_NEWLINE
     LOG_INFO("STATISTICS_detail_3D",*) 'Variable Statistics '
+
+    !$acc update host(var) if ( acc_is_present(var) )
+
     do v = 1, VA
        statval_l(  v,:) = var(KS,IS,JS,v)
        statidx_l(1,v,:) = KS

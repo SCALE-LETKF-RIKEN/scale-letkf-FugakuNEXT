@@ -248,17 +248,79 @@ contains
 
     logical, intent(in), optional :: mask(IA,JA)
 
-    logical :: invalid_value
+    integer :: invalid_value
+    integer :: invalid_k, invalid_i, invalid_j
     integer :: k, i, j
     !---------------------------------------------------------------------------
 
     call PROF_rapstart('Debug', 1)
 
-    !$acc update host(var) if(acc_is_present(var))
+    invalid_k = -1
+    invalid_i = -1
+    invalid_j = -1
 
-    invalid_value = .false.
+#ifdef _OPENACC
+    if ( acc_is_present(var) ) then ! only if var is present on device
+       !$acc data present(var) create(zero:invalid_value)
+       !$acc data present(mask) if(present(mask))
+
+       ! First pass: count invalid values using reduction
+       invalid_value = 0
+       if ( present(mask) ) then
+          !$acc parallel
+          !$acc loop gang vector collapse(3) reduction(+:invalid_value)
+          do j = JS, JE
+          do i = IS, IE
+          do k = KS, KE
+             if ( mask(i,j) ) then
+                if (      var(k,i,j)*0.0_RP /= 0.0_RP &
+                     .OR. var(k,i,j)        <  valmin &
+                     .OR. var(k,i,j)        >  valmax ) then
+                   invalid_value = invalid_value + 1
+                endif
+             endif
+          enddo
+          enddo
+          enddo
+          !$acc end parallel
+       else
+          !$acc parallel
+          !$acc loop gang vector collapse(3) reduction(+:invalid_value)
+          do j = JS, JE
+          do i = IS, IE
+          do k = KS, KE
+             if (      var(k,i,j)*0.0_RP /= 0.0_RP &
+                  .OR. var(k,i,j)        <  valmin &
+                  .OR. var(k,i,j)        >  valmax ) then
+                invalid_value = invalid_value + 1
+             endif
+          enddo
+          enddo
+          enddo
+          !$acc end parallel
+       endif
+
+       ! Update host to check if we need to find the location
+       !$acc update host(invalid_value)
+
+       if ( invalid_value > 0 ) then
+         ! Update host data for CPU execution
+         !$acc update host(var)
+         if ( present(mask) ) then
+            !$acc update host(mask)
+         endif
+       endif
+       !$acc end data ! mask
+       !$acc end data ! var
+    else
+       invalid_value = 1 ! dummy value
+    endif
+
+    ! Second pass: find an invalid location if any invalid values found (CPU only)
+    if ( invalid_value > 0 ) then
+#endif
+
     if ( present(mask) ) then
-       !$acc update host(mask) if(acc_is_present(mask))
        outer1:do j = JS, JE
               do i = IS, IE
                  if ( .not. mask(i,j) ) cycle
@@ -266,7 +328,9 @@ contains
                     if (      var(k,i,j)*0.0_RP /= 0.0_RP &
                          .OR. var(k,i,j)        <  valmin &
                          .OR. var(k,i,j)        >  valmax ) then
-                       invalid_value = .true.
+                       invalid_k = k
+                       invalid_i = i
+                       invalid_j = j
                        exit outer1
                     endif
                  enddo
@@ -279,17 +343,22 @@ contains
                  if (      var(k,i,j)*0.0_RP /= 0.0_RP &
                       .OR. var(k,i,j)        <  valmin &
                       .OR. var(k,i,j)        >  valmax ) then
-                    invalid_value = .true.
+                    invalid_k = k
+                    invalid_i = i
+                    invalid_j = j
                     exit outer2
                  endif
               enddo
               enddo
               enddo outer2
     end if
+#ifdef _OPENACC
+    end if
+#endif
 
-    if ( invalid_value ) then
+    if ( invalid_k > -1 ) then
        LOG_ERROR("VALCHECK_3D",*) 'Invalid value:', trim(varname), &
-                  '(', k, ',', i, ',', j, ')=', var(k,i,j)
+                  '(', invalid_k, ',', invalid_i, ',', invalid_j, ')=', var(invalid_k,invalid_i,invalid_j)
        LOG_ERROR_CONT(*) 'in file   : ', trim(current_file), ', at line : ', current_line
        call PRC_abort
     endif

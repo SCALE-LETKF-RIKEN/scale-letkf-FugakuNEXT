@@ -504,7 +504,8 @@ contains
        SFC_PRES,   &
        Paxis       )
     use scale_interp, only: &
-       INTERP_factor1d
+       INTERP_factor1d, &
+       INTERP_factor1d_batch
     implicit none
 
     integer,  intent(in)  :: Kpres
@@ -534,43 +535,66 @@ contains
     !$omp shared(KA,KS,KE,Kpres,IS,IE,JS,JE) &
     !$omp shared(PRES,LnPRES,LnPaxis) &
     !$omp shared(INTERP_xi2p_idx,INTERP_xi2p_coef)
-    !$acc kernels
-    !$acc loop independent
+    !$acc parallel
+    !$acc loop gang vector collapse(3)
     do j = JS, JE
-    !$acc loop independent
     do i = IS, IE
        do k = KS, KE
           LnPRES(k,i,j) = - log( PRES(k,i,j) )
        end do
+#ifndef _OPENACC
+
        call INTERP_factor1d( KA, KS, KE, Kpres, 1, Kpres, &
                              LnPRES(:,i,j), LnPaxis(:), & ! (in)
                              INTERP_xi2p_idx (:,:,i,j), & ! (out)
                              INTERP_xi2p_coef(:,  i,j), & ! (out)
                              flag_extrap = .false.      ) ! (in)
+#endif
     enddo
     enddo
-    !$acc end kernels
+    !$acc end parallel
+
+#ifdef _OPENACC
+    call INTERP_factor1d_batch( IA,IS, IE, JA, JS, JE, &
+                                KA, KS, KE,           & ! KA_ref, KS_ref, KE_ref (reference = model levels)
+                                Kpres, 1, Kpres,      & ! KA, KS, KE (target = pressure levels)
+                                LnPRES, LnPaxis,      & ! (in)
+                                INTERP_xi2p_idx,      & ! (out)
+                                INTERP_xi2p_coef,     & ! (out)
+                                flag_extrap = .false. ) ! (in)
+#endif
 
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(KA,KS,KE,Kpres,IS,IE,JS,JE) &
     !$omp shared(PRESh,LnPRESh,LnPaxis) &
     !$omp shared(INTERP_xih2p_idx,INTERP_xih2p_coef)
-    !$acc kernels
-    !$acc loop independent
+    !$acc parallel
+    !$acc loop gang vector collapse(3)
     do j = JS, JE
-    !$acc loop independent
     do i = IS, IE
        do k = KS-1, KE
           LnPRESh(k,i,j) = - log( PRESh(k,i,j) )
        end do
+#ifndef _OPENACC
        call INTERP_factor1d( KA, KS-1, KE, Kpres, 1, Kpres, &
                              LnPRESh(:,i,j), LnPaxis(:), & ! (in)
                              INTERP_xih2p_idx (:,:,i,j), & ! (out)
                              INTERP_xih2p_coef(:,  i,j), & ! (out)
                              flag_extrap = .false.       ) ! (in)
+#endif
     enddo
     enddo
-    !$acc end kernels
+    !$acc end parallel
+
+#ifdef _OPENACC
+    call INTERP_factor1d_batch( IA,IS, IE, JA, JS, JE, &
+                                KA, KS-1, KE,         & ! KA_ref, KS_ref, KE_ref (reference = model levels)
+                                Kpres, 1, Kpres,      & ! KA, KS, KE (target = pressure levels)
+                                LnPRESh, LnPaxis,     & ! (in)
+                                INTERP_xih2p_idx,     & ! (out)
+                                INTERP_xih2p_coef,    & ! (out)
+                                flag_extrap = .false. ) ! (in)
+#endif
 
     !$acc end data
 
