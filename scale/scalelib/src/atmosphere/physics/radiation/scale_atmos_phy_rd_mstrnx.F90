@@ -1773,7 +1773,7 @@ contains
     !$acc copyout(rflux, rflux_sfc_dn, tauCLD_067u, emisCLD_105u) &
     !$acc create(dz_std, indexP, factP, factT32, factT21, indexR, factR, cosSZA, optparam, tauGAS, tauPR, omgPR, g, bbar, bbarh, b_sfc, fsol_rgn, &
     !$acc        Tdir0, R0, T0, Em_s, Ep_s, tau_bar_sol, R, T, Em, Ep, R12mns, R12pls, E12mns, E12pls)
-    !$acc data copyin(cldfrac) if (present(cldfrac))
+    !$acc data copyin(cldfrac) if (ncloud_in > 1)
 
     !$acc kernels async(0)
     LOOP_INNER
