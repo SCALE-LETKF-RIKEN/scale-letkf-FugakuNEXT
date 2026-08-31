@@ -1457,7 +1457,7 @@ contains
                    !$acc end parallel
 #endif
                 case ( I_TOMITA08 )
-                   #ifdef _OPENACC
+#ifdef _OPENACC
                    !$acc parallel loop collapse(2)
                    do j = JS, JE
                    do i = IS, IE
@@ -1481,7 +1481,7 @@ contains
                         KA, KS, KE, &
                         DENS2(:), TEMP2(:), RHOQ2(:,:), PRES2(:), & ! [IN]
                         vterm(:,:)                                ) ! [OUT]
-                        #ifdef _OPENACC
+#ifdef _OPENACC
                    end do
                    end do
                    !$acc end parallel
@@ -1495,7 +1495,7 @@ contains
                   call ATMOS_PHY_MP_suzuki10_terminal_velocity( &
                         KA,        & ! [IN]
                         vterm(:,:) ) ! [OUT]
- #ifdef _OPENACC
+#ifdef _OPENACC
                    end do
                    end do
                    !$acc end parallel
@@ -1776,7 +1776,7 @@ contains
 !                     - RHOT(k,i,j) * CVtot(k,i,j) / ( CPtot(k,i,j) - CVtot(k,i,j) ) &
 !                     * log( EXNER(k,i,j) ) * ( CP_t / CPtot(k,i,j) - CV_t / CVtot(k,i,j) )
              end do
-             #ifdef _OPENACC
+#ifdef _OPENACC
             end do
             end do
             !$acc end parallel
