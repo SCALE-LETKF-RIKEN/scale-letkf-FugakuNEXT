@@ -23,7 +23,7 @@ MODULE common_nml
 
   integer, parameter :: nobsfilemax = 10
   integer, parameter :: obsformatlenmax = 10
-  integer, parameter :: filelenmax = 256
+  integer, parameter :: filelenmax = 1024
 
   integer, parameter :: memflen = 4                           ! Length of formatted member strings
   character(len=8), parameter :: memf_notation = '<member>'   ! Notation of the member string
