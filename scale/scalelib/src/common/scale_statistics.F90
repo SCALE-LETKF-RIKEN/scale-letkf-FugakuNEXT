@@ -494,33 +494,52 @@ contains
     integer :: ierr
     integer :: k, i, j
 #ifdef _OPENACC
+    real(DP) :: part(KS:KE,JS:JE,2)
     real(DP) :: s1, s2
 #endif
     !---------------------------------------------------------------------------
 
+#ifdef _OPENACC
+    !$acc data copyin(var, area) copyout(varmean) create(statval, allstatval, part) if(acc_is_present(var))
+#else
     !$acc data copyin(var, area) copyout(varmean) create(statval, allstatval) if(acc_is_present(var))
+#endif
 
     !$acc kernels if(acc_is_present(var))
     statval(:,:) = 0.0_DP
     !$acc end kernels
 
 #ifdef _OPENACC
-    ! Reduce over (i,j) for each k instead of accumulating with atomics, so that
-    ! the summation order, and thus the result, is the same in every run.
-    ! The atomic version made the reference state differ in the last bits from
-    ! run to run, which the dynamics then amplified.
-    !$acc parallel loop gang private(s1,s2) if(acc_is_present(var))
+    ! Sum in a fixed order instead of accumulating with atomics, so that the
+    ! result is the same in every run. The atomic version made the reference
+    ! state differ in the last bits from run to run, which the dynamics then
+    ! amplified. k runs along the vector lanes so that the loads of var are
+    ! contiguous: first sum over i for each (k,j), then over j for each k.
+    !$acc parallel loop gang vector collapse(2) private(s1,s2) if(acc_is_present(var))
+    do j = JS, JE
     do k = KS, KE
        s1 = 0.0_DP
        s2 = 0.0_DP
-       !$acc loop vector collapse(2) reduction(+:s1,s2)
-       do j = JS, JE
+       !$acc loop seq
        do i = IS, IE
           if ( var(k,i,j) /= UNDEF ) then
              s1 = s1 + area(i,j) * var(k,i,j)
              s2 = s2 + area(i,j)
           endif
        enddo
+       part(k,j,1) = s1
+       part(k,j,2) = s2
+    enddo
+    enddo
+
+    !$acc parallel loop gang vector private(s1,s2) if(acc_is_present(var))
+    do k = KS, KE
+       s1 = 0.0_DP
+       s2 = 0.0_DP
+       !$acc loop seq
+       do j = JS, JE
+          s1 = s1 + part(k,j,1)
+          s2 = s2 + part(k,j,2)
        enddo
        statval(k,1) = s1
        statval(k,2) = s2
