@@ -25,6 +25,10 @@ module scale_atmos_dyn_tstep_short_fvm_hivi
   use scale_atmos_grid_cartesC_index
   use scale_index
   use scale_tracer
+  use scale_atmos_dyn_fvm_metric, only: &
+     RMAPF, &
+     F2H_UYZ, &
+     F2H_XVZ
 #if defined DEBUG || defined QUICKDEBUG
   use scale_debug, only: &
      CHECK
@@ -41,7 +45,6 @@ module scale_atmos_dyn_tstep_short_fvm_hivi
   !
   public :: ATMOS_DYN_Tstep_short_fvm_hivi_regist
   public :: ATMOS_DYN_Tstep_short_fvm_hivi_setup
-  public :: ATMOS_DYN_Tstep_short_fvm_hivi_finalize
   public :: ATMOS_DYN_Tstep_short_fvm_hivi
 
   !-----------------------------------------------------------------------------
@@ -62,10 +65,6 @@ module scale_atmos_dyn_tstep_short_fvm_hivi
   real(RP), private            :: epsilon
 
   integer,  private            :: mtype ! MPI DATATYPE
-
-  real(RP), private, allocatable :: RMAPF(:,:,:,:) ! (IA,JA,2,I_XY_MAX) 1 / MAPF, set in setup
-  real(RP), private, allocatable :: F2H_UYZ(:,:,:)  ! (KA,IA,JA) weight of the full level k+1 at (u,y,z), set in setup
-  real(RP), private, allocatable :: F2H_XVZ(:,:,:)  ! (KA,IA,JA) weight of the full level k+1 at (x,v,z), set in setup
 
   ! tentative
   real(RP), private, parameter :: FACT_N =  7.0_RP / 12.0_RP
@@ -113,51 +112,20 @@ contains
 
   !-----------------------------------------------------------------------------
   !> Setup
-  subroutine ATMOS_DYN_Tstep_short_fvm_hivi_setup( &
-       CORIOLI,               &
-       MAPF, GSQRT,           &
-       CDZ,                   &
-       RCDX, RCDY, RFDX, RFDY )
+  subroutine ATMOS_DYN_Tstep_short_fvm_hivi_setup
     use scale_prc, only: &
        PRC_abort
     implicit none
-
-    real(RP), intent(in) :: CORIOLI(IA,JA)
-    real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
-    real(RP), intent(in) :: GSQRT  (KA,IA,JA,I_XYZ_MAX)
-    real(RP), intent(in) :: CDZ (KA)
-    real(RP), intent(in) :: RCDX(IA)
-    real(RP), intent(in) :: RCDY(JA)
-    real(RP), intent(in) :: RFDX(IA-1)
-    real(RP), intent(in) :: RFDY(JA-1)
 
     namelist / PARAM_ATMOS_DYN_TSTEP_FVM_HIVI / &
          ITMAX, &
          EPSILON
 
     integer :: ierr
-    integer :: k, i, j
     !---------------------------------------------------------------------------
 
     LOG_INFO("ATMOS_DYN_Tstep_short_fvm_hivi_setup",*) 'HIVI Setup'
 
-    allocate( RMAPF(IA,JA,2,I_XY_MAX) )
-    RMAPF(:,:,:,:) = 1.0_RP / MAPF(:,:,:,:)
-
-    allocate( F2H_UYZ(KA,IA,JA) )
-    allocate( F2H_XVZ(KA,IA,JA) )
-    do j = 1, JA
-    do i = 1, IA
-       do k = 1, KA-1
-          F2H_UYZ(k,i,j) = CDZ(k) * GSQRT(k,i,j,I_UYZ) &
-                         / ( CDZ(k) * GSQRT(k,i,j,I_UYZ) + CDZ(k+1) * GSQRT(k+1,i,j,I_UYZ) )
-          F2H_XVZ(k,i,j) = CDZ(k) * GSQRT(k,i,j,I_XVZ) &
-                         / ( CDZ(k) * GSQRT(k,i,j,I_XVZ) + CDZ(k+1) * GSQRT(k+1,i,j,I_XVZ) )
-       enddo
-       F2H_UYZ(KA,i,j) = 0.0_RP
-       F2H_XVZ(KA,i,j) = 0.0_RP
-    enddo
-    enddo
 #ifdef HIVI_BICGSTAB
     LOG_INFO("ATMOS_DYN_Tstep_short_fvm_hivi_setup",*) 'USING Bi-CGSTAB'
 #else
@@ -193,19 +161,6 @@ contains
 
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_hivi_setup
-
-  !-----------------------------------------------------------------------------
-  !> Finalize
-  subroutine ATMOS_DYN_Tstep_short_fvm_hivi_finalize
-    implicit none
-    !---------------------------------------------------------------------------
-
-    deallocate( RMAPF )
-    deallocate( F2H_UYZ )
-    deallocate( F2H_XVZ )
-
-    return
-  end subroutine ATMOS_DYN_Tstep_short_fvm_hivi_finalize
 
   !-----------------------------------------------------------------------------
   subroutine ATMOS_DYN_Tstep_short_fvm_hivi( &
