@@ -262,7 +262,9 @@ contains
 #ifdef _OPENACC
     if ( acc_is_present(var) ) then ! only if var is present on device
        !$acc data present(var) create(zero:invalid_value)
-       !$acc data present(mask) if(present(mask))
+       ! copyin uses the device copy if mask is present on the device, and
+       ! copies it from the host otherwise
+       !$acc data copyin(mask) if(present(mask))
 
        ! First pass: count invalid values using reduction
        invalid_value = 0
