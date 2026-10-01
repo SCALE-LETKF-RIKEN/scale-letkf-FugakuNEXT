@@ -1129,18 +1129,13 @@ contains
                 A1 = RCDZ(k+1) * RT2P(k+1,i,j) * RGSQRT_XYZ(k+1,i,j) * tmp
 #ifdef USE_CUDALIB
                 ! cuSPARSE (gtsv2StridedBatch) requires the first element of the
-                ! lower diagonal and the last element of the upper diagonal to be zero
-                if ( k < KE-1 ) then
-                   F1(k,l) =     - ( PT(k+1,l) *   A1      + B )
-                else
-                   F1(k,l) = 0.0_RP
-                end if
+                ! lower diagonal and the last element of the upper diagonal to be zero.
+                ! Select the value instead of branching, so that each array is stored
+                ! once and the loads are not split by divergent branches.
+                ! The indices of PT are clamped, since PT(KS-1) and PT(KE) are not set.
+                F1(k,l) = merge( - ( PT(min(k+1,KE-1),l) *   A1      + B ), 0.0_RP, k < KE-1 )
                 F2(k,l) = 1.0_RP + ( PT(k  ,l) * ( A1+A0 )     )
-                if ( k > KS ) then
-                   F3(k,l) =     - ( PT(k-1,l) *      A0   - B )
-                else
-                   F3(k,l) = 0.0_RP
-                end if
+                F3(k,l) = merge( - ( PT(max(k-1,KS  ),l) *      A0   - B ), 0.0_RP, k > KS   )
 #else
                 if ( k < KE-1 ) &
                 F1(k,l) =        - ( PT(k+1,l) *   A1      + B )
