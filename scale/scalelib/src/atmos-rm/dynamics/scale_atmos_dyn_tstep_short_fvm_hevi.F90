@@ -98,8 +98,8 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   real(RP), private, allocatable :: RGSQRT_XYW(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (x,y,w)
   real(RP), private, allocatable :: RGSQRT_UYZ(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (u,y,z)
   real(RP), private, allocatable :: RGSQRT_XVZ(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (x,v,z)
-  real(RP), private, allocatable :: F2H_UYZ   (:,:,:) ! (KA,IA,JA) F2H(k,I_UYZ)
-  real(RP), private, allocatable :: F2H_XVZ   (:,:,:) ! (KA,IA,JA) F2H(k,I_XVZ)
+  real(RP), private, allocatable :: F2H_UYZ   (:,:,:) ! (KA,IA,JA) F2H weight at (u,y,z)
+  real(RP), private, allocatable :: F2H_XVZ   (:,:,:) ! (KA,IA,JA) F2H weight at (x,v,z)
 
   !-----------------------------------------------------------------------------
 contains
