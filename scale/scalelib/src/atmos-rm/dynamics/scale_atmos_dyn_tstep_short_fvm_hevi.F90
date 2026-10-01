@@ -1742,7 +1742,7 @@ contains
           do i = IIS, iee
           do k = KS, KE
 #endif
-             div = divdmp_coef / dtrk * ( DDIV(k,i+1,j)*RMAPF(i+1,j,2,I_XY) - DDIV(k,i,j)*RMAPF(i,j,1,I_XY) ) &
+             div = divdmp_coef / dtrk * ( DDIV(k,i+1,j)*RMAPF(i+1,j,2,I_XY) - DDIV(k,i,j)*RMAPF(i,j,2,I_XY) ) &
                  * MAPF_M12(i,j,I_UY) * FDX(i) ! divergence damping
 #ifdef HEVI_FISSION
              div_work(k,i,j) = div

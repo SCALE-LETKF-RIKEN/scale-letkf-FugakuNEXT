@@ -1237,14 +1237,13 @@ contains
                             + dtrk * ( ( advcv + advch         & ! advection
                                        ) * RGSQRT_UYZ(k,IS,j) &
                                        + cor(k,IS,j)           & ! coriolis force
-                                       + div                   & ! divergence damping
                                        + MOMX_t(k,IS,j)        ) ! physics tendency
 #ifdef HIST_TEND
              if ( lhist ) then
                 advcv_t(k,IS,j,I_MOMX) = advcv * RGSQRT_UYZ(k,IS,j)
                 advch_t(k,IS,j,I_MOMX) = advch * RGSQRT_UYZ(k,IS,j)
                 pg_t(k,IS,j,2) = 0.0_RP
-                cf_t(k,IS,j,1) = cor(k,i,j)
+                cf_t(k,IS,j,1) = cor(k,IS,j)
                 ddiv_t(k,IS,j,2) = 0.0_RP
              endif
 #endif
