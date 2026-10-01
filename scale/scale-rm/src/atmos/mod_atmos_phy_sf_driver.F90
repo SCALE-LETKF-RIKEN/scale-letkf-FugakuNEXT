@@ -285,7 +285,7 @@ contains
 
        if ( CPL_sw ) then
 
-          !$acc data create(SFLX_SH2)
+          !$acc data create(SFLX_SH2,SFC_POTV)
 
           !$omp parallel do
           !$acc kernels
@@ -363,7 +363,7 @@ contains
 
           case ( 'CONST' )
 
-             !$acc update host(ATM_W,ATM_U,ATM_V,ATM_TEMP,SFC_DENS)
+             !$acc update host(ATM_W,ATM_U,ATM_V,ATM_TEMP,ATM_QV,SFC_DENS)
              call ATMOS_PHY_SF_const_flux( IA, IS, IE, JA, JS, JE,                            & ! [IN]
                                            ATM_W(:,:), ATM_U(:,:), ATM_V(:,:), SFC_TEMP(:,:), & ! [IN]
                                            Z1(:,:), SFC_DENS(:,:),                            & ! [IN]
