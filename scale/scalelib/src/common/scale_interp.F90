@@ -376,6 +376,9 @@ contains
     logical :: flag_extrap_
 
     integer  :: k, kk, i, j
+#ifdef _OPENACC
+    logical  :: exit_flag
+#endif
 
     if ( present(flag_extrap) ) then
        flag_extrap_ = flag_extrap
@@ -402,13 +405,13 @@ contains
        kmax(i,j) = kmax_
     end do
     end do
-    !$acc end parallel loop
+    !$acc end parallel
 
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(UNDEF,EPS,IS,IE,JS,JE,KA,KS,KE,KA_ref,KS_ref,KE_ref,kmax,idx,hgt_ref,hgt,idx_k,vfact,flag_extrap_) &
     !$omp private(kmax_)
     !$acc parallel
-    !$acc loop gang vector collapse(3) private(kmax_)
+    !$acc loop gang vector collapse(3) private(kmax_,exit_flag)
     do j = JS, JE
     do i = IS, IE
        do k = KS, KE
@@ -445,15 +448,26 @@ contains
              idx_k(k,2,i,j) = -1
              vfact(k,i,j) = 1.0_RP
           else
+#ifdef _OPENACC
+             exit_flag = .false.
+#endif
              !$acc loop seq
              do kk = 1, kmax_-1
+#ifdef _OPENACC
+                if( exit_flag ) cycle
+#endif
                 if (       hgt(k) >= hgt_ref(idx(kk,i,j),i,j) &
                      .AND. hgt(k) <  hgt_ref(idx(kk+1,i,j),i,j) ) then
                    idx_k(k,1,i,j) = idx(kk,i,j)
                    idx_k(k,2,i,j) = idx(kk+1,i,j)
                    vfact(k,i,j) = ( hgt_ref(idx(kk+1,i,j),i,j) - hgt    (k)       ) &
                                 / ( hgt_ref(idx(kk+1,i,j),i,j) - hgt_ref(idx(kk,i,j),i,j) )
+#ifdef _OPENACC
+                   exit_flag = .true.
+                   cycle
+#else
                    exit
+#endif
                 end if
              end do
           end if
@@ -461,7 +475,7 @@ contains
        end do ! k-loop
     end do
     end do
-    !$acc end parallel loop
+    !$acc end parallel
 
     !$acc end data
 
