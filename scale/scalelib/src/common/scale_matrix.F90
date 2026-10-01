@@ -197,6 +197,8 @@ contains
     ! the sub-diagonal of the leftmost surviving row, which the final 2x2 (or
     ! 3x3) solve never reads, and ud(KE) is treated likewise. Verified for all
     ! system sizes from 8 to 200.
+    ! This does not hold for the cuSPARSE (USE_CUDALIB) branches of the 2D/3D
+    ! solvers, which require ld(KS) = ud(KE) = 0 (see the cuSPARSE manual).
     real(RP), intent(in)  :: ud(KA) ! upper  diagonal
     real(RP), intent(in)  :: md(KA) ! middle diagonal
     real(RP), intent(in)  :: ld(KA) ! lower  diagonal
@@ -666,6 +668,8 @@ contains
     integer,  intent(in)  :: JA, JS, JE   ! array size
     ! ld(KS,:,:) and ud(KE,:,:) lie outside the tridiagonal system and need not
     ! be set by the caller; see the note in MATRIX_SOLVER_tridiagonal_1D_CR.
+    ! EXCEPTION: the USE_CUDALIB (cuSPARSE gtsv2StridedBatch) branch requires
+    !            them to be zero, as stated in the cuSPARSE manual.
     real(RP), intent(in)  :: ud(KA,IA,JA) ! upper  diagonal
     real(RP), intent(in)  :: md(KA,IA,JA) ! middle diagonal
     real(RP), intent(in)  :: ld(KA,IA,JA) ! lower  diagonal

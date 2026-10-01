@@ -1250,11 +1250,27 @@ contains
                 tmp = tmp * RFDZ(k) * J33G
                 A0 = RCDZ(k  ) * RT2P(k  ,i,j) * RGSQRT_XYZ(k  ,i,j) * tmp
                 A1 = RCDZ(k+1) * RT2P(k+1,i,j) * RGSQRT_XYZ(k+1,i,j) * tmp
+#ifdef USE_CUDALIB
+                ! cuSPARSE (gtsv2StridedBatch) requires the first element of the
+                ! lower diagonal and the last element of the upper diagonal to be zero
+                if ( k < KE-1 ) then
+                   F1(k,l) =     - ( PT(k+1,l) *   A1      + B )
+                else
+                   F1(k,l) = 0.0_RP
+                end if
+                F2(k,l) = 1.0_RP + ( PT(k  ,l) * ( A1+A0 )     )
+                if ( k > KS ) then
+                   F3(k,l) =     - ( PT(k-1,l) *      A0   - B )
+                else
+                   F3(k,l) = 0.0_RP
+                end if
+#else
                 if ( k < KE-1 ) &
                 F1(k,l) =        - ( PT(k+1,l) *   A1      + B )
                 F2(k,l) = 1.0_RP + ( PT(k  ,l) * ( A1+A0 )     )
                 if ( k > KS ) &
                 F3(k,l) =        - ( PT(k-1,l) *      A0   - B )
+#endif
              end do
 #else
              do k = KS, KE
@@ -1269,6 +1285,8 @@ contains
              !       Zeroing them costs a measurable amount of time, so it is
              !       not done. If the solver implementation is changed, check
              !       whether the new one requires them to be zero.
+             !       The cuSPARSE solver (USE_CUDALIB) does require them to be
+             !       zero, and they are zeroed in the _OPENACC branch above.
              tmp = fact * RGSQRT_XYW(KS,i,j)
              B = GRAV / ( CDZ(KS+1) + CDZ(KS) )
              F1(KS,l) =        - ( PT(KS+1,l) * RFDZ(KS) *   A(KS+1)         + B ) * tmp
