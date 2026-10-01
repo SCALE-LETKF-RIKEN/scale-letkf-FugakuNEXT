@@ -55,6 +55,7 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   !
   public :: ATMOS_DYN_Tstep_short_fvm_hevi_regist
   public :: ATMOS_DYN_Tstep_short_fvm_hevi_setup
+  public :: ATMOS_DYN_Tstep_short_fvm_hevi_finalize
   public :: ATMOS_DYN_Tstep_short_fvm_hevi
 
   !-----------------------------------------------------------------------------
@@ -80,6 +81,12 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   integer,  private, parameter :: VA_FVM_HEVI = 0
   integer                      :: IFS_OFF
   integer                      :: JFS_OFF
+
+  ! time-invariant coefficients of the Coriolis and metric terms, set in setup
+  ! COEF_CF_U at (u,y): 0.5*(f(i+1)+f(i)), m1*m2, d(1/m2)/dx, d(1/m1)/dy
+  ! COEF_CF_V at (x,v): 0.5*(f(j+1)+f(j)), m1*m2, d(1/m2)/dx, d(1/m1)/dy
+  real(RP), private, allocatable :: COEF_CF_U(:,:,:) ! (4,IA,JA)
+  real(RP), private, allocatable :: COEF_CF_V(:,:,:) ! (4,IA,JA)
 
   !-----------------------------------------------------------------------------
 contains
@@ -123,14 +130,67 @@ contains
 
   !-----------------------------------------------------------------------------
   !> Setup
-  subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup
+  subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup( &
+       CORIOLI,               &
+       MAPF,                  &
+       RCDX, RCDY, RFDX, RFDY )
     implicit none
+
+    real(RP), intent(in) :: CORIOLI(IA,JA)
+    real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
+    real(RP), intent(in) :: RCDX(IA)
+    real(RP), intent(in) :: RCDY(JA)
+    real(RP), intent(in) :: RFDX(IA-1)
+    real(RP), intent(in) :: RFDY(JA-1)
+
+    integer :: i, j
     !---------------------------------------------------------------------------
 
     LOG_INFO("ATMOS_DYN_Tstep_short_fvm_hevi_setup",*) 'HEVI Setup'
 
+    ! time-invariant coefficients of the Coriolis and metric terms
+    allocate( COEF_CF_U(4,IA,JA) )
+    allocate( COEF_CF_V(4,IA,JA) )
+
+    ! at (u, y, z)
+    COEF_CF_U(:,:,:) = 0.0_RP
+    do j = 2, JA
+    do i = 1, IA-1
+       COEF_CF_U(1,i,j) = 0.5_RP * ( CORIOLI(i+1,j) + CORIOLI(i,j) )
+       COEF_CF_U(2,i,j) = MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY)
+       COEF_CF_U(3,i,j) = ( 1.0_RP/MAPF(i+1,j,2,I_XY) - 1.0_RP/MAPF(i,j  ,2,I_XY) ) * RFDX(i)
+       COEF_CF_U(4,i,j) = ( 1.0_RP/MAPF(i  ,j,1,I_UV) - 1.0_RP/MAPF(i,j-1,1,I_UV) ) * RCDY(j)
+    enddo
+    enddo
+
+    ! at (x, v, z)
+    COEF_CF_V(:,:,:) = 0.0_RP
+    do j = 1, JA-1
+    do i = 2, IA
+       COEF_CF_V(1,i,j) = 0.5_RP * ( CORIOLI(i,j+1) + CORIOLI(i,j) )
+       COEF_CF_V(2,i,j) = MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV)
+       COEF_CF_V(3,i,j) = ( 1.0_RP/MAPF(i,j  ,2,I_UV) - 1.0_RP/MAPF(i-1,j,2,I_UV) ) * RCDX(i)
+       COEF_CF_V(4,i,j) = ( 1.0_RP/MAPF(i,j+1,1,I_XY) - 1.0_RP/MAPF(i  ,j,1,I_XY) ) * RFDY(j)
+    enddo
+    enddo
+
+    !$acc enter data copyin(COEF_CF_U, COEF_CF_V)
+
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup
+
+  !-----------------------------------------------------------------------------
+  !> Finalize
+  subroutine ATMOS_DYN_Tstep_short_fvm_hevi_finalize
+    implicit none
+    !---------------------------------------------------------------------------
+
+    !$acc exit data delete(COEF_CF_U, COEF_CF_V)
+    deallocate( COEF_CF_U )
+    deallocate( COEF_CF_V )
+
+    return
+  end subroutine ATMOS_DYN_Tstep_short_fvm_hevi_finalize
 
   !-----------------------------------------------------------------------------
   subroutine ATMOS_DYN_Tstep_short_fvm_hevi( &
@@ -439,6 +499,7 @@ contains
     !$acc        CDZ,FDZ,FDX,FDY,RCDZ,RCDX,RCDY,RFDZ,RFDX,RFDY, &
     !$acc        PHI,GSQRT,J13G,J23G,J33G,MAPF,REF_dens,REF_rhot, &
     !$acc        BND_W,BND_E,BND_S,BND_N,TwoD,dtrk,last) &
+    !$acc present(COEF_CF_U,COEF_CF_V) &
     !$acc create(POTT,DPRES, &
     !$acc        qflx_hi,qflx_J13,qflx_J23, &
 #ifdef HEVI_FISSION
@@ -1488,7 +1549,7 @@ contains
           !$omp shared(qflx_hi,qflx_J13,qflx_J23) &
           !$omp shared(RCDZ,RCDY,RFDX,CDZ,FDX) &
           !$omp shared(MAPF,GSQRT,J13G,I_UY,I_UV,I_UYW,I_UYZ) &
-          !$omp shared(dtrk,CORIOLI,divdmp_coef)
+          !$omp shared(dtrk,CORIOLI,COEF_CF_U,divdmp_coef)
 #ifdef HEVI_FISSION
           !$acc kernels async(0)
 #else
@@ -1548,10 +1609,10 @@ contains
           do k = KS, KE
 #endif
              momy_u = ( MOMY(k,i,j) + MOMY(k,i,j-1) + MOMY(k,i+1,j) + MOMY(k,i+1,j-1) ) * 0.25_RP
-             cf = 0.5_RP * ( CORIOLI(i+1,j  )+CORIOLI(i,j  ) ) * momy_u &
-                + MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) &
-                * ( momy_u      * ( 1.0_RP/MAPF(i+1,j,2,I_XY) - 1.0_RP/MAPF(i,j  ,2,I_XY) ) * RFDX(i) &
-                  - MOMX(k,i,j) * ( 1.0_RP/MAPF(i  ,j,1,I_UV) - 1.0_RP/MAPF(i,j-1,1,I_UV) ) * RCDY(j) ) &
+             cf = COEF_CF_U(1,i,j) * momy_u &
+                + COEF_CF_U(2,i,j) &
+                * ( momy_u      * COEF_CF_U(3,i,j) &
+                  - MOMX(k,i,j) * COEF_CF_U(4,i,j) ) &
                 * 2.0_RP * momy_u / ( DENS(k,i+1,j) + DENS(k,i,j) ) ! metric term
 #ifdef HEVI_FISSION
              cf_work(k,i,j) = cf
@@ -1767,7 +1828,7 @@ contains
           !$omp shared(qflx_hi,qflx_J13,qflx_J23) &
           !$omp shared(RCDZ,RCDX,RFDY,CDZ,FDY) &
           !$omp shared(MAPF,GSQRT,J23G,I_UV) &
-          !$omp shared(dtrk,CORIOLI,divdmp_coef)
+          !$omp shared(dtrk,CORIOLI,COEF_CF_V,divdmp_coef)
 #ifdef HEVI_FISSION
           !$acc kernels async(0)
 #else
@@ -1828,10 +1889,10 @@ contains
           do k = KS, KE
 #endif
              momx_v = ( MOMX(k,i,j) + MOMX(k,i-1,j) + MOMX(k,i,j+1) + MOMX(k,i-1,j+1) ) * 0.25_RP
-             cf = - 0.5_RP * ( CORIOLI(i  ,j+1)+CORIOLI(i  ,j) ) * momx_v &
-                  - MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) &
-                  * ( MOMY(k,i,j) * ( 1.0_RP/MAPF(i,j  ,2,I_UV) - 1.0_RP/MAPF(i-1,j,2,I_UV) ) * RCDX(i) &
-                    - momx_v      * ( 1.0_RP/MAPF(i,j+1,1,I_XY) - 1.0_RP/MAPF(i  ,j,1,I_XY) ) * RFDY(j) ) &
+             cf = - COEF_CF_V(1,i,j) * momx_v &
+                  - COEF_CF_V(2,i,j) &
+                  * ( MOMY(k,i,j) * COEF_CF_V(3,i,j) &
+                    - momx_v      * COEF_CF_V(4,i,j) ) &
                   * 2.0_RP * momx_v/ ( DENS(k,i,j+1) + DENS(k,i,j) ) ! metoric term
 #ifdef HEVI_FISSION
              cf_work(k,i,j) = cf

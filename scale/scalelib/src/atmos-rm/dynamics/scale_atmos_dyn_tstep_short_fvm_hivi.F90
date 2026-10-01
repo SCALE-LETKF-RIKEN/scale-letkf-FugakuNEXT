@@ -41,6 +41,7 @@ module scale_atmos_dyn_tstep_short_fvm_hivi
   !
   public :: ATMOS_DYN_Tstep_short_fvm_hivi_regist
   public :: ATMOS_DYN_Tstep_short_fvm_hivi_setup
+  public :: ATMOS_DYN_Tstep_short_fvm_hivi_finalize
   public :: ATMOS_DYN_Tstep_short_fvm_hivi
 
   !-----------------------------------------------------------------------------
@@ -108,10 +109,20 @@ contains
 
   !-----------------------------------------------------------------------------
   !> Setup
-  subroutine ATMOS_DYN_Tstep_short_fvm_hivi_setup
+  subroutine ATMOS_DYN_Tstep_short_fvm_hivi_setup( &
+       CORIOLI,               &
+       MAPF,                  &
+       RCDX, RCDY, RFDX, RFDY )
     use scale_prc, only: &
        PRC_abort
     implicit none
+
+    real(RP), intent(in) :: CORIOLI(IA,JA)
+    real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
+    real(RP), intent(in) :: RCDX(IA)
+    real(RP), intent(in) :: RCDY(JA)
+    real(RP), intent(in) :: RFDX(IA-1)
+    real(RP), intent(in) :: RFDY(JA-1)
 
     namelist / PARAM_ATMOS_DYN_TSTEP_FVM_HIVI / &
          ITMAX, &
@@ -156,6 +167,15 @@ contains
 
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_hivi_setup
+
+  !-----------------------------------------------------------------------------
+  !> Finalize
+  subroutine ATMOS_DYN_Tstep_short_fvm_hivi_finalize
+    implicit none
+    !---------------------------------------------------------------------------
+
+    return
+  end subroutine ATMOS_DYN_Tstep_short_fvm_hivi_finalize
 
   !-----------------------------------------------------------------------------
   subroutine ATMOS_DYN_Tstep_short_fvm_hivi( &

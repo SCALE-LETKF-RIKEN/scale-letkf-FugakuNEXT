@@ -88,6 +88,8 @@ contains
        QTRC, PROG,                   &
        CDZ, CDX, CDY,                &
        FDZ, FDX, FDY,                &
+       RCDX, RCDY, RFDX, RFDY,       &
+       CORIOLIS, MAPF,               &
        wdamp_tau,                    &
        wdamp_height,                 &
        FZ,                           &
@@ -150,6 +152,12 @@ contains
     real(RP),          intent(in)    :: FDZ(KA-1)
     real(RP),          intent(in)    :: FDX(IA-1)
     real(RP),          intent(in)    :: FDY(JA-1)
+    real(RP),          intent(in)    :: RCDX(IA)
+    real(RP),          intent(in)    :: RCDY(JA)
+    real(RP),          intent(in)    :: RFDX(IA-1)
+    real(RP),          intent(in)    :: RFDY(JA-1)
+    real(RP),          intent(in)    :: CORIOLIS(IA,JA)
+    real(RP),          intent(in)    :: MAPF(IA,JA,2,I_XY_MAX)
     real(RP),          intent(in)    :: wdamp_tau
     real(RP),          intent(in)    :: wdamp_height
     real(RP),          intent(in)    :: FZ(0:KA)
@@ -213,7 +221,8 @@ contains
        call ATMOS_DYN_FVM_flux_setup     ( DYN_FVM_FLUX_TYPE,            & ! [IN]
                                            DYN_FVM_FLUX_TYPE_TRACER      ) ! [IN]
 
-       call ATMOS_DYN_tstep_short_setup
+       call ATMOS_DYN_tstep_short_setup  ( CORIOLIS, MAPF,               & ! [IN]
+                                           RCDX, RCDY, RFDX, RFDY        ) ! [IN]
 
        call ATMOS_DYN_tstep_tracer_setup ( DYN_Tstep_Tracer_TYPE         ) ! [IN]
 
@@ -266,6 +275,8 @@ contains
   !-----------------------------------------------------------------------------
   !> finalize
   subroutine ATMOS_DYN_finalize
+    use scale_atmos_dyn_tstep_short, only: &
+       ATMOS_DYN_Tstep_short_finalize
     use scale_atmos_dyn_tstep_large, only: &
        ATMOS_DYN_Tstep_large_finalize
     use scale_atmos_dyn_tinteg_short, only: &
@@ -281,6 +292,8 @@ contains
     deallocate( I_COMM_QTRC )
 
     if ( .NOT. DYN_NONE ) then
+
+       call ATMOS_DYN_Tstep_short_finalize
 
        call ATMOS_DYN_Tstep_large_finalize
 

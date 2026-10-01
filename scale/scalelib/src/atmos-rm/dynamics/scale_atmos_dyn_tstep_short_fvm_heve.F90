@@ -37,6 +37,7 @@ module scale_atmos_dyn_tstep_short_fvm_heve
   !
   public :: ATMOS_DYN_Tstep_short_fvm_heve_regist
   public :: ATMOS_DYN_Tstep_short_fvm_heve_setup
+  public :: ATMOS_DYN_Tstep_short_fvm_heve_finalize
   public :: ATMOS_DYN_Tstep_short_fvm_heve
 
   !-----------------------------------------------------------------------------
@@ -59,6 +60,12 @@ module scale_atmos_dyn_tstep_short_fvm_heve
   !++ Private parameters & variables
   !
   integer, parameter :: VA_FVM_HEVE = 0
+
+  ! time-invariant coefficients of the Coriolis and metric terms, set in setup
+  ! COEF_CF_U at (u,y): 0.5*(f(i+1)+f(i)), m1*m2, d(1/m2)/dx, d(1/m1)/dy
+  ! COEF_CF_V at (x,v): 0.5*(f(j+1)+f(j)), m1*m2, d(1/m2)/dx, d(1/m1)/dy
+  real(RP), private, allocatable :: COEF_CF_U(:,:,:) ! (4,IA,JA)
+  real(RP), private, allocatable :: COEF_CF_V(:,:,:) ! (4,IA,JA)
 
   !-----------------------------------------------------------------------------
 contains
@@ -102,9 +109,67 @@ contains
 
   !-----------------------------------------------------------------------------
   !> Setup
-  subroutine ATMOS_DYN_Tstep_short_fvm_heve_setup
+  subroutine ATMOS_DYN_Tstep_short_fvm_heve_setup( &
+       CORIOLI,               &
+       MAPF,                  &
+       RCDX, RCDY, RFDX, RFDY )
+    implicit none
+
+    real(RP), intent(in) :: CORIOLI(IA,JA)
+    real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
+    real(RP), intent(in) :: RCDX(IA)
+    real(RP), intent(in) :: RCDY(JA)
+    real(RP), intent(in) :: RFDX(IA-1)
+    real(RP), intent(in) :: RFDY(JA-1)
+
+    integer :: i, j
+    !---------------------------------------------------------------------------
+
+    LOG_INFO("ATMOS_DYN_Tstep_short_fvm_heve_setup",*) 'HEVE Setup'
+
+    ! time-invariant coefficients of the Coriolis and metric terms
+    allocate( COEF_CF_U(4,IA,JA) )
+    allocate( COEF_CF_V(4,IA,JA) )
+
+    ! at (u, y, z)
+    COEF_CF_U(:,:,:) = 0.0_RP
+    do j = 2, JA
+    do i = 1, IA-1
+       COEF_CF_U(1,i,j) = 0.5_RP * ( CORIOLI(i+1,j) + CORIOLI(i,j) )
+       COEF_CF_U(2,i,j) = MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY)
+       COEF_CF_U(3,i,j) = ( 1.0_RP/MAPF(i+1,j,2,I_XY) - 1.0_RP/MAPF(i,j  ,2,I_XY) ) * RFDX(i)
+       COEF_CF_U(4,i,j) = ( 1.0_RP/MAPF(i  ,j,1,I_UV) - 1.0_RP/MAPF(i,j-1,1,I_UV) ) * RCDY(j)
+    enddo
+    enddo
+
+    ! at (x, v, z)
+    COEF_CF_V(:,:,:) = 0.0_RP
+    do j = 1, JA-1
+    do i = 2, IA
+       COEF_CF_V(1,i,j) = 0.5_RP * ( CORIOLI(i,j+1) + CORIOLI(i,j) )
+       COEF_CF_V(2,i,j) = MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV)
+       COEF_CF_V(3,i,j) = ( 1.0_RP/MAPF(i,j  ,2,I_UV) - 1.0_RP/MAPF(i-1,j,2,I_UV) ) * RCDX(i)
+       COEF_CF_V(4,i,j) = ( 1.0_RP/MAPF(i,j+1,1,I_XY) - 1.0_RP/MAPF(i  ,j,1,I_XY) ) * RFDY(j)
+    enddo
+    enddo
+
+    !$acc enter data copyin(COEF_CF_U, COEF_CF_V)
+
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_heve_setup
+
+  !-----------------------------------------------------------------------------
+  !> Finalize
+  subroutine ATMOS_DYN_Tstep_short_fvm_heve_finalize
+    implicit none
+    !---------------------------------------------------------------------------
+
+    !$acc exit data delete(COEF_CF_U, COEF_CF_V)
+    deallocate( COEF_CF_U )
+    deallocate( COEF_CF_V )
+
+    return
+  end subroutine ATMOS_DYN_Tstep_short_fvm_heve_finalize
 
   !-----------------------------------------------------------------------------
   subroutine ATMOS_DYN_Tstep_short_fvm_heve( &
@@ -273,6 +338,7 @@ contains
     real(RP) :: div   ! divergence damping
     real(RP) :: f2h1, f2h2, f2h1m, f2h2m
     real(RP) :: dpresm, dpresk, dpresp
+    real(RP) :: momy_u, momx_v ! momentum interpolated for the Coriolis and metric terms
 #ifdef HIST_TEND
     real(RP) :: advch_t(KA,IA,JA,5)
     real(RP) :: advcv_t(KA,IA,JA,5)
@@ -1013,7 +1079,7 @@ contains
             IIS, IIE, JJS, JJE ) ! (in)
 
 
-       !$omp parallel private(i,j,k,advcv,advch,div,f2h1,f2h2,f2h1m,f2h2m,dpresm,dpresk,dpresp)
+       !$omp parallel private(i,j,k,advcv,advch,div,f2h1,f2h2,f2h1m,f2h2m,dpresm,dpresk,dpresp,momy_u)
 
        ! pressure gradient force at (u, y, z)
 
@@ -1069,16 +1135,12 @@ contains
              call CHECK( __LINE__, MOMY(k,i  ,j-1) )
              call CHECK( __LINE__, MOMY(k,i+1,j-1) )
 #endif
-             cor(k,i,j) = 0.125_RP * ( CORIOLI(  i+1,j  )+CORIOLI(  i,j  ) ) & ! [x,y,z->u,y,z]
-                                   * ( MOMY   (k,i+1,j  )+MOMY   (k,i,j  ) &
-                                     + MOMY   (k,i+1,j-1)+MOMY   (k,i,j-1) ) &  ! [x,v,z->u,y,z]
-                         + 0.25_RP * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) &
-                         * ( MOMY(k,i,j) + MOMY(k,i,j-1) + MOMY(k,i+1,j) + MOMY(k,i+1,j-1) ) &
-                         * ( ( MOMY(k,i,j) + MOMY(k,i,j-1) + MOMY(k,i+1,j) + MOMY(k,i+1,j-1) ) * 0.25_RP &
-                           * ( 1.0_RP/MAPF(i+1,j,2,I_XY) - 1.0_RP/MAPF(i,j,2,I_XY) ) * RFDX(i) &
-                           - MOMX(k,i,j) &
-                           * ( 1.0_RP/MAPF(i,j,1,I_UV) - 1.0_RP/MAPF(i,j-1,1,I_UV) ) * RCDY(j) ) &
-                         * 2.0_RP / ( DENS(k,i+1,j) + DENS(k,i,j) ) ! metric term
+             momy_u = ( MOMY(k,i,j) + MOMY(k,i,j-1) + MOMY(k,i+1,j) + MOMY(k,i+1,j-1) ) * 0.25_RP ! [x,v,z->u,y,z]
+             cor(k,i,j) = COEF_CF_U(1,i,j) * momy_u &
+                        + COEF_CF_U(2,i,j) &
+                        * ( momy_u      * COEF_CF_U(3,i,j) &
+                          - MOMX(k,i,j) * COEF_CF_U(4,i,j) ) &
+                        * 2.0_RP * momy_u / ( DENS(k,i+1,j) + DENS(k,i,j) ) ! metric term
           enddo
           enddo
           enddo
@@ -1362,7 +1424,7 @@ contains
             IIS, IIE, JJS, JJE ) ! (in)
 
 
-       !$omp parallel private(i,j,k,advcv,advch,div,f2h1,f2h2,f2h1m,f2h2m,dpresm,dpresk,dpresp)
+       !$omp parallel private(i,j,k,advcv,advch,div,f2h1,f2h2,f2h1m,f2h2m,dpresm,dpresk,dpresp,momx_v)
 
        ! pressure gradient force at (x, v, z)
 
@@ -1417,16 +1479,12 @@ contains
              call CHECK( __LINE__, MOMX(k,i-1,j  ) )
              call CHECK( __LINE__, MOMX(k,i-1,j+1) )
 #endif
-             cor(k,i,j) = - 0.125_RP * ( CORIOLI(  i  ,j+1)+CORIOLI(  i  ,j) ) & ! [x,y,z->x,v,z]
-                                     * ( MOMX   (k,i  ,j+1)+MOMX   (k,i  ,j) &
-                                       + MOMX   (k,i-1,j+1)+MOMX   (k,i-1,j) ) & ! [u,y,z->x,v,z]
-                        - 0.25_RP * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) &
-                        * ( MOMX(k,i,j) + MOMX(k,i-1,j) + MOMX(k,i,j+1) + MOMX(k,i-1,j+1) )&
-                        * ( MOMY(k,i,j) &
-                          * ( 1.0_RP/MAPF(i,j,2,I_UV) - 1.0_RP/MAPF(i-1,j,2,I_UV) ) * RCDX(i) &
-                          - 0.25_RP * ( MOMX(k,i,j)+MOMX(k,i-1,j)+MOMX(k,i,j+1)+MOMX(k,i-1,j+1) ) &
-                          * ( 1.0_RP/MAPF(i,j+1,1,I_XY) - 1.0_RP/MAPF(i,j,1,I_XY) ) * RFDY(j) ) &
-                        * 2.0_RP / ( DENS(k,i,j) + DENS(k,i,j+1) ) ! metoric term
+             momx_v = ( MOMX(k,i,j) + MOMX(k,i-1,j) + MOMX(k,i,j+1) + MOMX(k,i-1,j+1) ) * 0.25_RP ! [u,y,z->x,v,z]
+             cor(k,i,j) = - COEF_CF_V(1,i,j) * momx_v &
+                          - COEF_CF_V(2,i,j) &
+                          * ( MOMY(k,i,j) * COEF_CF_V(3,i,j) &
+                            - momx_v      * COEF_CF_V(4,i,j) ) &
+                          * 2.0_RP * momx_v / ( DENS(k,i,j) + DENS(k,i,j+1) ) ! metric term
           enddo
           enddo
           enddo
