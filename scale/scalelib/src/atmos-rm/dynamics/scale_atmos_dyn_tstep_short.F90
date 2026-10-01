@@ -31,8 +31,27 @@ module scale_atmos_dyn_tstep_short
 
   abstract interface
      !> setup
-     subroutine short_setup
+     subroutine short_setup( &
+          CORIOLI,                &
+          MAPF, GSQRT,            &
+          CDZ,                    &
+          RCDX, RCDY, RFDX, RFDY  )
+       use scale_precision
+       use scale_atmos_grid_cartesC_index
+       use scale_index
+       real(RP), intent(in) :: CORIOLI(IA,JA)
+       real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
+       real(RP), intent(in) :: GSQRT  (KA,IA,JA,I_XYZ_MAX)
+       real(RP), intent(in) :: CDZ (KA)
+       real(RP), intent(in) :: RCDX(IA)
+       real(RP), intent(in) :: RCDY(JA)
+       real(RP), intent(in) :: RFDX(IA-1)
+       real(RP), intent(in) :: RFDY(JA-1)
      end subroutine short_setup
+
+     !> finalize
+     subroutine short_finalize
+     end subroutine short_finalize
 
      !> calculation values at next temporal step
      subroutine short( DENS_new, MOMZ_new, MOMX_new, MOMY_new, RHOT_new, & ! (out)
@@ -132,6 +151,8 @@ module scale_atmos_dyn_tstep_short
 
   procedure(short_setup), pointer :: ATMOS_DYN_Tstep_short_setup => NULL()
   public :: ATMOS_DYN_Tstep_short_setup
+  procedure(short_finalize), pointer :: ATMOS_DYN_Tstep_short_finalize => NULL()
+  public :: ATMOS_DYN_Tstep_short_finalize
   procedure(short), pointer :: ATMOS_DYN_Tstep_short => NULL()
   public :: ATMOS_DYN_Tstep_short
 
@@ -163,14 +184,17 @@ contains
     use scale_atmos_dyn_tstep_short_fvm_heve, only: &
        ATMOS_DYN_Tstep_short_fvm_heve_regist, &
        ATMOS_DYN_Tstep_short_fvm_heve_setup, &
+       ATMOS_DYN_Tstep_short_fvm_heve_finalize, &
        ATMOS_DYN_Tstep_short_fvm_heve
     use scale_atmos_dyn_tstep_short_fvm_hevi, only: &
        ATMOS_DYN_Tstep_short_fvm_hevi_regist, &
        ATMOS_DYN_Tstep_short_fvm_hevi_setup, &
+       ATMOS_DYN_Tstep_short_fvm_hevi_finalize, &
        ATMOS_DYN_Tstep_short_fvm_hevi
     use scale_atmos_dyn_tstep_short_fvm_hivi, only: &
        ATMOS_DYN_Tstep_short_fvm_hivi_regist, &
        ATMOS_DYN_Tstep_short_fvm_hivi_setup, &
+       ATMOS_DYN_Tstep_short_fvm_hivi_finalize, &
        ATMOS_DYN_Tstep_short_fvm_hivi
     implicit none
 
@@ -189,6 +213,7 @@ contains
                                                    VAR_NAME, VAR_DESC, VAR_UNIT ) ! [OUT]
 
        ATMOS_DYN_Tstep_short_setup => ATMOS_DYN_Tstep_short_fvm_heve_setup
+       ATMOS_DYN_Tstep_short_finalize => ATMOS_DYN_Tstep_short_fvm_heve_finalize
        ATMOS_DYN_Tstep_short       => ATMOS_DYN_Tstep_short_fvm_heve
 
     case( 'FVM-HEVI', 'HEVI' )
@@ -198,6 +223,7 @@ contains
                                                    VAR_NAME, VAR_DESC, VAR_UNIT ) ! [OUT]
 
        ATMOS_DYN_Tstep_short_setup => ATMOS_DYN_Tstep_short_fvm_hevi_setup
+       ATMOS_DYN_Tstep_short_finalize => ATMOS_DYN_Tstep_short_fvm_hevi_finalize
        ATMOS_DYN_Tstep_short       => ATMOS_DYN_Tstep_short_fvm_hevi
 
     case( 'FVM-HIVI', 'HIVI' )
@@ -210,6 +236,7 @@ contains
                                                    VAR_NAME, VAR_DESC, VAR_UNIT ) ! [OUT]
 
        ATMOS_DYN_Tstep_short_setup => ATMOS_DYN_Tstep_short_fvm_hivi_setup
+       ATMOS_DYN_Tstep_short_finalize => ATMOS_DYN_Tstep_short_fvm_hivi_finalize
        ATMOS_DYN_Tstep_short       => ATMOS_DYN_Tstep_short_fvm_hivi
 
     case( 'OFF', 'NONE' )

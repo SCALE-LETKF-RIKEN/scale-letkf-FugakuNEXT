@@ -72,7 +72,7 @@ module scale_atmos_dyn_fvm_flux
      subroutine flux_mom( &
           flux, &
           mom, val, DENS, &
-          GSQRT, MAPF, &
+          GSQRT, RMAPF, &
           num_diff, &
           CDZ, TwoD, &
           IIS, IIE, JJS, JJE )
@@ -84,7 +84,7 @@ module scale_atmos_dyn_fvm_flux
        real(RP), intent(in)  :: val     (KA,IA,JA)
        real(RP), intent(in)  :: DENS    (KA,IA,JA)
        real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
-       real(RP), intent(in)  :: MAPF    (   IA,JA,2)
+       real(RP), intent(in)  :: RMAPF   (   IA,JA,2) !< 1 / map factor
        real(RP), intent(in)  :: num_diff(KA,IA,JA)
        real(RP), intent(in)  :: CDZ(KA)
        logical,  intent(in)  :: TwoD
@@ -137,7 +137,7 @@ module scale_atmos_dyn_fvm_flux
      subroutine flux_j( &
           flux, &
           mom, val, DENS, &
-          GSQRT, JG, MAPF, &
+          GSQRT, JG, RMAPF, &
           CDZ, TwoD, &
           IIS, IIE, JJS, JJE )
        use scale_precision
@@ -149,7 +149,7 @@ module scale_atmos_dyn_fvm_flux
        real(RP), intent(in)  :: DENS    (KA,IA,JA)
        real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
        real(RP), intent(in)  :: JG      (KA,IA,JA)
-       real(RP), intent(in)  :: MAPF    (   IA,JA,2)
+       real(RP), intent(in)  :: RMAPF   (   IA,JA,2) !< 1 / map factor
        real(RP), intent(in)  :: CDZ(KA)
        logical,  intent(in)  :: TwoD
        integer,  intent(in)  :: IIS, IIE, JJS, JJE

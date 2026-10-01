@@ -493,6 +493,9 @@ contains
 
     integer :: ierr
     integer :: k, i, j
+#ifdef _OPENACC
+    real(DP) :: s1, s2
+#endif
     !---------------------------------------------------------------------------
 
     !$acc data copyin(var, area) copyout(varmean) create(statval, allstatval) if(acc_is_present(var))
@@ -501,25 +504,40 @@ contains
     statval(:,:) = 0.0_DP
     !$acc end kernels
 
+#ifdef _OPENACC
+    ! Reduce over (i,j) for each k instead of accumulating with atomics, so that
+    ! the summation order, and thus the result, is the same in every run.
+    ! The atomic version made the reference state differ in the last bits from
+    ! run to run, which the dynamics then amplified.
+    !$acc parallel loop gang private(s1,s2) if(acc_is_present(var))
+    do k = KS, KE
+       s1 = 0.0_DP
+       s2 = 0.0_DP
+       !$acc loop vector collapse(2) reduction(+:s1,s2)
+       do j = JS, JE
+       do i = IS, IE
+          if ( var(k,i,j) /= UNDEF ) then
+             s1 = s1 + area(i,j) * var(k,i,j)
+             s2 = s2 + area(i,j)
+          endif
+       enddo
+       enddo
+       statval(k,1) = s1
+       statval(k,2) = s2
+    enddo
+#else
 !    !$omp parallel do reduction(+:statval)
-    !$acc kernels if(acc_is_present(var))
-    !$acc loop independent
     do j = JS, JE
-    !$acc loop independent
     do i = IS, IE
     do k = KS, KE
        if ( var(k,i,j) /= UNDEF ) then
-          !$acc atomic update
           statval(k,1) = statval(k,1) + area(i,j) * var(k,i,j)
-          !$acc end atomic
-          !$acc atomic update
           statval(k,2) = statval(k,2) + area(i,j)
-          !$acc end atomic
        endif
     enddo
     enddo
     enddo
-    !$acc end kernels
+#endif
 
     call PROF_rapstart('COMM_Allreduce', 2)
     ! All reduce

@@ -99,9 +99,18 @@ contains
        CDY => ATMOS_GRID_CARTESC_CDY, &
        FDZ => ATMOS_GRID_CARTESC_FDZ, &
        FDX => ATMOS_GRID_CARTESC_FDX, &
-       FDY => ATMOS_GRID_CARTESC_FDY
+       FDY => ATMOS_GRID_CARTESC_FDY, &
+       RCDX => ATMOS_GRID_CARTESC_RCDX, &
+       RCDY => ATMOS_GRID_CARTESC_RCDY, &
+       RFDX => ATMOS_GRID_CARTESC_RFDX, &
+       RFDY => ATMOS_GRID_CARTESC_RFDY
     use scale_atmos_grid_cartesC_real, only: &
        REAL_LAT => ATMOS_GRID_CARTESC_REAL_LAT
+    use scale_atmos_grid_cartesC_metric, only: &
+       MAPF  => ATMOS_GRID_CARTESC_METRIC_MAPF, &
+       GSQRT => ATMOS_GRID_CARTESC_METRIC_GSQRT
+    use scale_coriolis, only: &
+       CORIOLIS_f
     use scale_time, only: &
        TIME_DTSEC_ATMOS_DYN
     use mod_atmos_admin, only: &
@@ -213,6 +222,8 @@ contains
                              DENS, MOMZ, MOMX, MOMY, RHOT, QTRC, & ! [IN]
                              PROG,                               & ! [IN]
                              CDZ, CDX, CDY, FDZ, FDX, FDY,       & ! [IN]
+                             RCDX, RCDY, RFDX, RFDY,             & ! [IN]
+                             CORIOLIS_f, MAPF, GSQRT,            & ! [IN]
                              ATMOS_DYN_wdamp_tau,                & ! [IN]
                              ATMOS_DYN_wdamp_height,             & ! [IN]
                              FZ,                                 & ! [IN]
