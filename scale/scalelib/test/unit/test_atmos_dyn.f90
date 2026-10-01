@@ -229,6 +229,7 @@ contains
 
   CORIOLIS(:,:) = 0.0_RP
   MAPF(:,:,:,:) = 1.0_RP
+  GSQRT(:,:,:,:) = 1.0_RP
 
   nd_order = 2
   nd_coef = 0.01_RP
@@ -265,7 +266,7 @@ contains
        PROG,                               & ! (in)
        CDZ, CDX, CDY, FDZ, FDX, FDY,       & ! (in)
        RCDX, RCDY, RFDX, RFDY,             & ! (in)
-       CORIOLIS, MAPF,                     & ! (in)
+       CORIOLIS, MAPF, GSQRT,              & ! (in)
        wdamp_tau, wdamp_height, FZ         ) ! (in)
 
   do k = KS+1, KE
@@ -287,7 +288,6 @@ contains
      PHI(:,i,j) = CZ(:) * GRAV
   end do
   end do
-  GSQRT(:,:,:,:) = 1.0_RP
   J13G(:,:,:,:) = 0.0_RP
   J23G(:,:,:,:) = 0.0_RP
   J33G          = 1.0_RP

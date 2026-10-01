@@ -89,7 +89,7 @@ contains
        CDZ, CDX, CDY,                &
        FDZ, FDX, FDY,                &
        RCDX, RCDY, RFDX, RFDY,       &
-       CORIOLIS, MAPF,               &
+       CORIOLIS, MAPF, GSQRT,        &
        wdamp_tau,                    &
        wdamp_height,                 &
        FZ,                           &
@@ -158,6 +158,7 @@ contains
     real(RP),          intent(in)    :: RFDY(JA-1)
     real(RP),          intent(in)    :: CORIOLIS(IA,JA)
     real(RP),          intent(in)    :: MAPF(IA,JA,2,I_XY_MAX)
+    real(RP),          intent(in)    :: GSQRT(KA,IA,JA,I_XYZ_MAX)
     real(RP),          intent(in)    :: wdamp_tau
     real(RP),          intent(in)    :: wdamp_height
     real(RP),          intent(in)    :: FZ(0:KA)
@@ -221,7 +222,8 @@ contains
        call ATMOS_DYN_FVM_flux_setup     ( DYN_FVM_FLUX_TYPE,            & ! [IN]
                                            DYN_FVM_FLUX_TYPE_TRACER      ) ! [IN]
 
-       call ATMOS_DYN_tstep_short_setup  ( CORIOLIS, MAPF,               & ! [IN]
+       call ATMOS_DYN_tstep_short_setup  ( CORIOLIS, MAPF, GSQRT,        & ! [IN]
+                                           CDZ,                          & ! [IN]
                                            RCDX, RCDY, RFDX, RFDY        ) ! [IN]
 
        call ATMOS_DYN_tstep_tracer_setup ( DYN_Tstep_Tracer_TYPE         ) ! [IN]

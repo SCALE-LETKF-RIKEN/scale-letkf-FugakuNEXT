@@ -63,6 +63,10 @@ module scale_atmos_dyn_tstep_short_fvm_hivi
 
   integer,  private            :: mtype ! MPI DATATYPE
 
+  real(RP), private, allocatable :: RMAPF(:,:,:,:) ! (IA,JA,2,I_XY_MAX) 1 / MAPF, set in setup
+  real(RP), private, allocatable :: F2H_UYZ(:,:,:)  ! (KA,IA,JA) weight of the full level k+1 at (u,y,z), set in setup
+  real(RP), private, allocatable :: F2H_XVZ(:,:,:)  ! (KA,IA,JA) weight of the full level k+1 at (x,v,z), set in setup
+
   ! tentative
   real(RP), private, parameter :: FACT_N =  7.0_RP / 12.0_RP
   real(RP), private, parameter :: FACT_F = -1.0_RP / 12.0_RP
@@ -111,7 +115,8 @@ contains
   !> Setup
   subroutine ATMOS_DYN_Tstep_short_fvm_hivi_setup( &
        CORIOLI,               &
-       MAPF,                  &
+       MAPF, GSQRT,           &
+       CDZ,                   &
        RCDX, RCDY, RFDX, RFDY )
     use scale_prc, only: &
        PRC_abort
@@ -119,6 +124,8 @@ contains
 
     real(RP), intent(in) :: CORIOLI(IA,JA)
     real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
+    real(RP), intent(in) :: GSQRT  (KA,IA,JA,I_XYZ_MAX)
+    real(RP), intent(in) :: CDZ (KA)
     real(RP), intent(in) :: RCDX(IA)
     real(RP), intent(in) :: RCDY(JA)
     real(RP), intent(in) :: RFDX(IA-1)
@@ -129,9 +136,28 @@ contains
          EPSILON
 
     integer :: ierr
+    integer :: k, i, j
     !---------------------------------------------------------------------------
 
     LOG_INFO("ATMOS_DYN_Tstep_short_fvm_hivi_setup",*) 'HIVI Setup'
+
+    allocate( RMAPF(IA,JA,2,I_XY_MAX) )
+    RMAPF(:,:,:,:) = 1.0_RP / MAPF(:,:,:,:)
+
+    allocate( F2H_UYZ(KA,IA,JA) )
+    allocate( F2H_XVZ(KA,IA,JA) )
+    do j = 1, JA
+    do i = 1, IA
+       do k = 1, KA-1
+          F2H_UYZ(k,i,j) = CDZ(k) * GSQRT(k,i,j,I_UYZ) &
+                         / ( CDZ(k) * GSQRT(k,i,j,I_UYZ) + CDZ(k+1) * GSQRT(k+1,i,j,I_UYZ) )
+          F2H_XVZ(k,i,j) = CDZ(k) * GSQRT(k,i,j,I_XVZ) &
+                         / ( CDZ(k) * GSQRT(k,i,j,I_XVZ) + CDZ(k+1) * GSQRT(k+1,i,j,I_XVZ) )
+       enddo
+       F2H_UYZ(KA,i,j) = 0.0_RP
+       F2H_XVZ(KA,i,j) = 0.0_RP
+    enddo
+    enddo
 #ifdef HIVI_BICGSTAB
     LOG_INFO("ATMOS_DYN_Tstep_short_fvm_hivi_setup",*) 'USING Bi-CGSTAB'
 #else
@@ -173,6 +199,10 @@ contains
   subroutine ATMOS_DYN_Tstep_short_fvm_hivi_finalize
     implicit none
     !---------------------------------------------------------------------------
+
+    deallocate( RMAPF )
+    deallocate( F2H_UYZ )
+    deallocate( F2H_XVZ )
 
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_hivi_finalize
@@ -547,19 +577,19 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxJ13_XYW( qflx_J13, & ! (out)
             MOMX, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), J13G(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
+            GSQRT(:,:,:,I_XYZ), J13G(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
             CDZ, TwoD, &
             IIS, IIE, JJS, JJE ) ! (in)
        call ATMOS_DYN_FVM_fluxJ23_XYW( qflx_J23, & ! (out)
             MOMY, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), J23G(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
+            GSQRT(:,:,:,I_XYZ), J23G(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
             CDZ, TwoD, &
             IIS, IIE, JJS, JJE ) ! (in)
 
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxX_XYW( qflx_hi(:,:,:,XDIR), & ! (out)
             MOMX, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_UYW), MAPF(:,:,:,I_UY), & ! (in)
+            GSQRT(:,:,:,I_UYW), RMAPF(:,:,:,I_UY), & ! (in)
             num_diff(:,:,:,I_MOMZ,XDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -567,7 +597,7 @@ contains
        ! at (x, v, w)
        call ATMOS_DYN_FVM_fluxY_XYW( qflx_hi(:,:,:,YDIR), & ! (out)
             MOMY, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XVW), MAPF(:,:,:,I_XV), & ! (in)
+            GSQRT(:,:,:,I_XVW), RMAPF(:,:,:,I_XV), & ! (in)
             num_diff(:,:,:,I_MOMZ,YDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -661,12 +691,12 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxJ13_UYZ( qflx_J13, & ! (out)
             MOMX, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_UYZ), J13G(:,:,:,I_UYW), MAPF(:,:,:,I_UY), & ! (in)
+            F2H_UYZ, J13G(:,:,:,I_UYW), RMAPF(:,:,:,I_UY), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
        call ATMOS_DYN_FVM_fluxJ23_UYZ( qflx_J23, & ! (out)
             MOMY, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_UYZ), J23G(:,:,:,I_UYW), MAPF(:,:,:,I_UY), & ! (in)
+            F2H_UYZ, J23G(:,:,:,I_UYW), RMAPF(:,:,:,I_UY), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
@@ -675,7 +705,7 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxX_UYZ( qflx_hi(:,:,:,XDIR), & ! (out)
             MOMX, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
+            GSQRT(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
             num_diff(:,:,:,I_MOMX,XDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -683,7 +713,7 @@ contains
        ! at (u, v, z)
        call ATMOS_DYN_FVM_fluxY_UYZ( qflx_hi(:,:,:,YDIR), & ! (out)
             MOMY, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_UVZ), MAPF(:,:,:,I_UV), & ! (in)
+            GSQRT(:,:,:,I_UVZ), RMAPF(:,:,:,I_UV), & ! (in)
             num_diff(:,:,:,I_MOMX,YDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -772,12 +802,12 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxJ13_XVZ( qflx_J13, & ! (out)
             MOMX, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_XVZ), J13G(:,:,:,I_XVW), MAPF(:,:,:,I_XV), & ! (in)
+            F2H_XVZ, J13G(:,:,:,I_XVW), RMAPF(:,:,:,I_XV), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
        call ATMOS_DYN_FVM_fluxJ23_XVZ( qflx_J23, & ! (out)
             MOMY, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_XVZ), J23G(:,:,:,I_XVW), MAPF(:,:,:,I_XV), & ! (in)
+            F2H_XVZ, J23G(:,:,:,I_XVW), RMAPF(:,:,:,I_XV), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
@@ -785,7 +815,7 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxX_XVZ( qflx_hi(:,:,:,XDIR), & ! (out)
             MOMX, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_UVZ), MAPF(:,:,:,I_UV), & ! (in)
+            GSQRT(:,:,:,I_UVZ), RMAPF(:,:,:,I_UV), & ! (in)
             num_diff(:,:,:,I_MOMY,XDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -794,7 +824,7 @@ contains
        ! note that y-index is added by -1
        call ATMOS_DYN_FVM_fluxY_XVZ( qflx_hi(:,:,:,YDIR), & ! (out)
             MOMY, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
+            GSQRT(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
             num_diff(:,:,:,I_MOMY,YDIR), & ! (in
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)

@@ -88,6 +88,19 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   real(RP), private, allocatable :: COEF_CF_U(:,:,:) ! (4,IA,JA)
   real(RP), private, allocatable :: COEF_CF_V(:,:,:) ! (4,IA,JA)
 
+  ! time-invariant map-factor coefficients, set in setup
+  real(RP), private, allocatable :: RMAPF   (:,:,:,:) ! (IA,JA,2,I_XY_MAX) 1 / MAPF
+  real(RP), private, allocatable :: MAPF_M12(:,:,:)   ! (IA,JA,I_XY_MAX)   MAPF(1) * MAPF(2)
+  real(RP), private, allocatable :: MAPF_R12(:,:,:)   ! (IA,JA,I_XY_MAX)   1 / ( MAPF(1) * MAPF(2) )
+
+  ! time-invariant 3D metric coefficients, set in setup
+  real(RP), private, allocatable :: RGSQRT_XYZ(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (x,y,z)
+  real(RP), private, allocatable :: RGSQRT_XYW(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (x,y,w)
+  real(RP), private, allocatable :: RGSQRT_UYZ(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (u,y,z)
+  real(RP), private, allocatable :: RGSQRT_XVZ(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (x,v,z)
+  real(RP), private, allocatable :: F2H_UYZ   (:,:,:) ! (KA,IA,JA) F2H(k,I_UYZ)
+  real(RP), private, allocatable :: F2H_XVZ   (:,:,:) ! (KA,IA,JA) F2H(k,I_XVZ)
+
   !-----------------------------------------------------------------------------
 contains
   !-----------------------------------------------------------------------------
@@ -132,23 +145,65 @@ contains
   !> Setup
   subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup( &
        CORIOLI,               &
-       MAPF,                  &
+       MAPF, GSQRT,           &
+       CDZ,                   &
        RCDX, RCDY, RFDX, RFDY )
     implicit none
 
     real(RP), intent(in) :: CORIOLI(IA,JA)
     real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
+    real(RP), intent(in) :: GSQRT  (KA,IA,JA,I_XYZ_MAX)
+    real(RP), intent(in) :: CDZ (KA)
     real(RP), intent(in) :: RCDX(IA)
     real(RP), intent(in) :: RCDY(JA)
     real(RP), intent(in) :: RFDX(IA-1)
     real(RP), intent(in) :: RFDY(JA-1)
 
-    integer :: i, j
+    integer :: k, i, j, n
     !---------------------------------------------------------------------------
 
     LOG_INFO("ATMOS_DYN_Tstep_short_fvm_hevi_setup",*) 'HEVI Setup'
 
-    ! time-invariant coefficients of the Coriolis and metric terms
+    ! time-invariant map-factor coefficients
+    allocate( RMAPF   (IA,JA,2,I_XY_MAX) )
+    allocate( MAPF_M12(IA,JA,  I_XY_MAX) )
+    allocate( MAPF_R12(IA,JA,  I_XY_MAX) )
+    do n = 1, I_XY_MAX
+    do j = 1, JA
+    do i = 1, IA
+       RMAPF   (i,j,1,n) = 1.0_RP / MAPF(i,j,1,n)
+       RMAPF   (i,j,2,n) = 1.0_RP / MAPF(i,j,2,n)
+       MAPF_M12(i,j,n)   = MAPF(i,j,1,n) * MAPF(i,j,2,n)
+       MAPF_R12(i,j,n)   = 1.0_RP / MAPF_M12(i,j,n)
+    enddo
+    enddo
+    enddo
+    !$acc enter data copyin(RMAPF, MAPF_M12, MAPF_R12)
+
+    ! time-invariant 3D metric coefficients
+    allocate( RGSQRT_XYZ(KA,IA,JA) )
+    allocate( RGSQRT_XYW(KA,IA,JA) )
+    allocate( RGSQRT_UYZ(KA,IA,JA) )
+    allocate( RGSQRT_XVZ(KA,IA,JA) )
+    allocate( F2H_UYZ   (KA,IA,JA) )
+    allocate( F2H_XVZ   (KA,IA,JA) )
+    do j = 1, JA
+    do i = 1, IA
+       do k = 1, KA
+          RGSQRT_XYZ(k,i,j) = 1.0_RP / GSQRT(k,i,j,I_XYZ)
+          RGSQRT_XYW(k,i,j) = 1.0_RP / GSQRT(k,i,j,I_XYW)
+          RGSQRT_UYZ(k,i,j) = 1.0_RP / GSQRT(k,i,j,I_UYZ)
+          RGSQRT_XVZ(k,i,j) = 1.0_RP / GSQRT(k,i,j,I_XVZ)
+       enddo
+       do k = 1, KA-1
+          F2H_UYZ(k,i,j) = F2H(k,I_UYZ)
+          F2H_XVZ(k,i,j) = F2H(k,I_XVZ)
+       enddo
+       F2H_UYZ(KA,i,j) = 0.0_RP
+       F2H_XVZ(KA,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc enter data copyin(RGSQRT_XYZ, RGSQRT_XYW, RGSQRT_UYZ, RGSQRT_XVZ, F2H_UYZ, F2H_XVZ)    ! time-invariant coefficients of the Coriolis and metric terms
     allocate( COEF_CF_U(4,IA,JA) )
     allocate( COEF_CF_V(4,IA,JA) )
 
@@ -188,6 +243,19 @@ contains
     !$acc exit data delete(COEF_CF_U, COEF_CF_V)
     deallocate( COEF_CF_U )
     deallocate( COEF_CF_V )
+
+    !$acc exit data delete(RMAPF, MAPF_M12, MAPF_R12)
+    deallocate( RMAPF    )
+    deallocate( MAPF_M12 )
+    deallocate( MAPF_R12 )
+
+    !$acc exit data delete(RGSQRT_XYZ, RGSQRT_XYW, RGSQRT_UYZ, RGSQRT_XVZ, F2H_UYZ, F2H_XVZ)
+    deallocate( RGSQRT_XYZ )
+    deallocate( RGSQRT_XYW )
+    deallocate( RGSQRT_UYZ )
+    deallocate( RGSQRT_XVZ )
+    deallocate( F2H_UYZ    )
+    deallocate( F2H_XVZ    )
 
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_hevi_finalize
@@ -499,7 +567,8 @@ contains
     !$acc        CDZ,FDZ,FDX,FDY,RCDZ,RCDX,RCDY,RFDZ,RFDX,RFDY, &
     !$acc        PHI,GSQRT,J13G,J23G,J33G,MAPF,REF_dens,REF_rhot, &
     !$acc        BND_W,BND_E,BND_S,BND_N,TwoD,dtrk,last) &
-    !$acc present(COEF_CF_U,COEF_CF_V) &
+    !$acc present(COEF_CF_U,COEF_CF_V,RMAPF,MAPF_M12,MAPF_R12) &
+    !$acc present(RGSQRT_XYZ,RGSQRT_XYW,RGSQRT_UYZ,RGSQRT_XVZ,F2H_UYZ,F2H_XVZ) &
     !$acc create(POTT,DPRES, &
     !$acc        qflx_hi,qflx_J13,qflx_J23, &
 #ifdef HEVI_FISSION
@@ -567,7 +636,8 @@ contains
        ! at (x, y, w)
        if ( TwoD ) then
           !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ &
-          !$omp shared(JJS,JJE,IS,KS,KE,GSQRT,MOMY,J23G,mflx_hi,MAPF,num_diff)
+          !$omp shared(JJS,JJE,IS,KS,KE,GSQRT,MOMY,J23G,mflx_hi,MAPF,num_diff) &
+          !$omp shared(RMAPF)
           !$acc kernels
           do j = JJS, JJE
              mflx_hi(KS-1,IS,j,ZDIR) = 0.0_RP
@@ -581,14 +651,15 @@ contains
                 mflx_hi(k,IS,j,ZDIR) = J23G(k,IS,j,I_XYW) * 0.25_RP &
                                      * ( MOMY(k+1,IS,j)+MOMY(k+1,IS,j-1) &
                                        + MOMY(k  ,IS,j)+MOMY(k  ,IS,j-1) ) &
-                                      + GSQRT(k,IS,j,I_XYW) / MAPF(IS,j,2,I_XY) * num_diff(k,IS,j,I_DENS,ZDIR)
+                                      + GSQRT(k,IS,j,I_XYW) * RMAPF(IS,j,2,I_XY) * num_diff(k,IS,j,I_DENS,ZDIR)
              enddo
              mflx_hi(KE,IS,j,ZDIR) = 0.0_RP
           enddo
           !$acc end kernels
        else
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
-          !$omp shared(JJS,JJE,IIS,IIE,KS,KE,GSQRT,MOMX,MOMY,J13G,J23G,mflx_hi,MAPF,num_diff)
+          !$omp shared(JJS,JJE,IIS,IIE,KS,KE,GSQRT,MOMX,MOMY,J13G,J23G,mflx_hi,MAPF,num_diff) &
+          !$omp shared(RMAPF,MAPF_R12)
 #ifdef HEVI_FISSION
           !$acc kernels async(0)
 #else
@@ -607,13 +678,13 @@ contains
                 call CHECK( __LINE__, MOMY(k  ,i,j) )
                 call CHECK( __LINE__, MOMY(k  ,i,j-1) )
 #endif
-                mflx_hi(k,i,j,ZDIR) = J13G(k,i,j,I_XYW) * 0.25_RP / MAPF(i,j,2,I_XY) &
+                mflx_hi(k,i,j,ZDIR) = J13G(k,i,j,I_XYW) * 0.25_RP * RMAPF(i,j,2,I_XY) &
                                     * ( MOMX(k+1,i,j)+MOMX(k+1,i-1,j) &
                                       + MOMX(k  ,i,j)+MOMX(k  ,i-1,j) ) &
-                                    + J23G(k,i,j,I_XYW) * 0.25_RP / MAPF(i,j,1,I_XY) &
+                                    + J23G(k,i,j,I_XYW) * 0.25_RP * RMAPF(i,j,1,I_XY) &
                                     * ( MOMY(k+1,i,j)+MOMY(k+1,i,j-1) &
                                       + MOMY(k  ,i,j)+MOMY(k  ,i,j-1) ) &
-                                     + GSQRT(k,i,j,I_XYW) / ( MAPF(i,j,1,I_XY)*MAPF(i,j,2,I_XY) ) * num_diff(k,i,j,I_DENS,ZDIR)
+                                     + GSQRT(k,i,j,I_XYW) * MAPF_R12(i,j,I_XY) * num_diff(k,i,j,I_DENS,ZDIR)
              enddo
 #ifdef HEVI_FISSION
           enddo
@@ -643,7 +714,8 @@ contains
           iee = min(IIE,IEH)
           ! at (u, y, z)
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
-          !$omp shared(JJS,JJE,iss,iee,KS,KE,GSQRT,I_UYZ,MOMX,num_diff,mflx_hi,MAPF,I_UY)
+          !$omp shared(JJS,JJE,iss,iee,KS,KE,GSQRT,I_UYZ,MOMX,num_diff,mflx_hi,MAPF,I_UY) &
+          !$omp shared(RMAPF)
           !$acc kernels
           do j = JJS, JJE
           do i = iss, iee
@@ -653,7 +725,7 @@ contains
              call CHECK( __LINE__, MOMX(k,i,j) )
              call CHECK( __LINE__, num_diff(k,i,j,I_DENS,XDIR) )
 #endif
-             mflx_hi(k,i,j,XDIR) = GSQRT(k,i,j,I_UYZ) / MAPF(i,j,2,I_UY) &
+             mflx_hi(k,i,j,XDIR) = GSQRT(k,i,j,I_UYZ) * RMAPF(i,j,2,I_UY) &
                   * ( MOMX(k,i,j) + num_diff(k,i,j,I_DENS,XDIR) )
           enddo
           enddo
@@ -667,7 +739,8 @@ contains
 
        ! at (x, v, z)
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
-       !$omp shared(JJS,JS,JFS_OFF,JJE,JEH,IIS,IIE,KS,KE,GSQRT,MOMY,num_diff,mflx_hi,MAPF)
+       !$omp shared(JJS,JS,JFS_OFF,JJE,JEH,IIS,IIE,KS,KE,GSQRT,MOMY,num_diff,mflx_hi,MAPF) &
+       !$omp shared(RMAPF)
        !$acc kernels
        do j = max(JJS-1,JS-JFS_OFF), min(JJE,JEH)
        do i = IIS, IIE
@@ -677,7 +750,7 @@ contains
           call CHECK( __LINE__, MOMY(k,i,j) )
           call CHECK( __LINE__, num_diff(k,i,j,I_DENS,YDIR) )
 #endif
-          mflx_hi(k,i,j,YDIR) = GSQRT(k,i,j,I_XVZ) / MAPF(i,j,1,I_XV) &
+          mflx_hi(k,i,j,YDIR) = GSQRT(k,i,j,I_XVZ) * RMAPF(i,j,1,I_XV) &
                * ( MOMY(k,i,j) + num_diff(k,i,j,I_DENS,YDIR) )
        enddo
        enddo
@@ -701,7 +774,8 @@ contains
 #endif
           !$omp shared(JJS,JJE,IS,KS,KE) &
           !$omp shared(DENS0,Sr,mflx_hi,DENS_t) &
-          !$omp shared(RCDZ,RCDY,MAPF,GSQRT)
+          !$omp shared(RCDZ,RCDY,MAPF,GSQRT) &
+          !$omp shared(RGSQRT_XYZ)
           !$acc kernels
           do j = JJS, JJE
           do k = KS, KE
@@ -713,7 +787,7 @@ contains
 #endif
              advcv = - ( mflx_hi(k,IS,j,ZDIR)-mflx_hi(k-1,IS,j,  ZDIR) ) * RCDZ(k)
              advch = - ( mflx_hi(k,IS,j,YDIR)-mflx_hi(k  ,IS,j-1,YDIR) ) * RCDY(j)
-             tmp = ( advcv + advch ) * MAPF(IS,j,2,I_XY) / GSQRT(k,IS,j,I_XYZ)
+             tmp = ( advcv + advch ) * MAPF(IS,j,2,I_XY) * RGSQRT_XYZ(k,IS,j)
              Sr(k,IS,j) = tmp + DENS_t(k,IS,j)
 #ifdef HIST_TEND
              if ( lhist ) then
@@ -731,7 +805,8 @@ contains
 #endif
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE) &
           !$omp shared(DENS0,Sr,mflx_hi,DENS_t) &
-          !$omp shared(RCDZ,RCDX,RCDY,MAPF,GSQRT)
+          !$omp shared(RCDZ,RCDX,RCDY,MAPF,GSQRT) &
+          !$omp shared(MAPF_M12,RGSQRT_XYZ)
           !$acc kernels
           do j = JJS, JJE
           do i = IIS, IIE
@@ -747,7 +822,7 @@ contains
              advcv = -   ( mflx_hi(k,i,j,ZDIR)-mflx_hi(k-1,i  ,j,  ZDIR) ) * RCDZ(k)
              advch = - ( ( mflx_hi(k,i,j,XDIR)-mflx_hi(k  ,i-1,j,  XDIR) ) * RCDX(i) &
                        + ( mflx_hi(k,i,j,YDIR)-mflx_hi(k  ,i,  j-1,YDIR) ) * RCDY(j) )
-             tmp = ( advcv + advch ) * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) / GSQRT(k,i,j,I_XYZ)
+             tmp = ( advcv + advch ) * MAPF_M12(i,j,I_XY) * RGSQRT_XYZ(k,i,j)
              Sr(k,i,j) = tmp + DENS_t(k,i,j)
 #ifdef HIST_TEND
              if ( lhist ) then
@@ -781,12 +856,12 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxJ13_XYW( qflx_J13, & ! (out)
             MOMX, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), J13G(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
+            GSQRT(:,:,:,I_XYZ), J13G(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
             CDZ, TwoD, &
             IIS, IIE, JJS, JJE ) ! (in)
        call ATMOS_DYN_FVM_fluxJ23_XYW( qflx_J23, & ! (out)
             MOMY, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), J23G(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
+            GSQRT(:,:,:,I_XYZ), J23G(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
             CDZ, TwoD, &
             IIS, IIE, JJS, JJE ) ! (in)
        PROFILE_STOP("hevi_momz_qflxj")
@@ -796,7 +871,7 @@ contains
        PROFILE_START("hevi_momz_qflxhi_x")
        call ATMOS_DYN_FVM_fluxX_XYW( qflx_hi(:,:,:,XDIR), & ! (out)
             MOMX, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_UYW), MAPF(:,:,:,I_UY), & ! (in)
+            GSQRT(:,:,:,I_UYW), RMAPF(:,:,:,I_UY), & ! (in)
             num_diff(:,:,:,I_MOMZ,XDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -807,7 +882,7 @@ contains
        PROFILE_START("hevi_momz_qflxhi_y")
        call ATMOS_DYN_FVM_fluxY_XYW( qflx_hi(:,:,:,YDIR), & ! (out)
             MOMY, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XVW), MAPF(:,:,:,I_XV), & ! (in)
+            GSQRT(:,:,:,I_XVW), RMAPF(:,:,:,I_XV), & ! (in)
             num_diff(:,:,:,I_MOMZ,YDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -824,7 +899,8 @@ contains
           !$omp shared(JJS,JJE,IS,KS,KE) &
           !$omp shared(qflx_hi,qflx_J23,DDIV,MOMZ0,MOMZ_t,Sw) &
           !$omp shared(RFDZ,RCDY,FDZ,dtrk,wdamp_coef,divdmp_coef) &
-          !$omp shared(MAPF,GSQRT)
+          !$omp shared(MAPF,GSQRT) &
+          !$omp shared(RGSQRT_XYW)
           !$acc kernels
           do j = JJS, JJE
 !OCL NORECURRENCE
@@ -847,11 +923,11 @@ contains
                    * MAPF(IS,j,2,I_XY)
              wdmp = - wdamp_coef(k) * MOMZ0(k,IS,j)
              div = divdmp_coef / dtrk * ( DDIV(k+1,IS,j)-DDIV(k,IS,j) ) * FDZ(k) ! divergence damping
-             Sw(k,IS,j) = ( advcv + advch ) / GSQRT(k,IS,j,I_XYW) &
+             Sw(k,IS,j) = ( advcv + advch ) * RGSQRT_XYW(k,IS,j) &
                         + wdmp + div + MOMZ_t(k,IS,j)
 #ifdef HIST_TEND
              if ( lhist ) then
-                tmp = 1.0_RP / GSQRT(k,IS,j,I_XYW)
+                tmp = RGSQRT_XYW(k,IS,j)
                 advcv_t(k,IS,j,I_MOMZ) = advcv * tmp
                 advch_t(k,IS,j,I_MOMZ) = advch * tmp
                 wdmp_t(k,IS,j) = wdmp
@@ -925,6 +1001,8 @@ contains
              advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k,i-1,j  ,XDIR) ) * RCDX(i) &
                        + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k,i  ,j-1,YDIR) ) * RCDY(j) ) &
                    * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY)
+             ! MAPF_M12 and RGSQRT_XYW are not used in this kernel: with them the register
+             ! count goes up from 72 to 76-78 and the lower occupancy makes it slower (ncu)
              wdmp = - wdamp_coef(k) * MOMZ0(k,i,j)
 #ifdef HEVI_FISSION
              div = div_work(k,i,j)
@@ -1010,7 +1088,8 @@ contains
 #endif
           !$omp shared(JJS,JJE,IS,KS,KE) &
           !$omp shared(tflx_hi,RHOT_t,St,RCDZ,RCDY) &
-          !$omp shared(MAPF,GSQRT)
+          !$omp shared(MAPF,GSQRT) &
+          !$omp shared(RGSQRT_XYZ)
           !$acc kernels
           do j = JJS, JJE
           do k = KS, KE
@@ -1023,7 +1102,7 @@ contains
 #endif
              advcv = - ( tflx_hi(k,IS,j,ZDIR) - tflx_hi(k-1,IS,j  ,ZDIR) ) * RCDZ(k)
              advch = - ( tflx_hi(k,IS,j,YDIR) - tflx_hi(k  ,IS,j-1,YDIR) ) * RCDY(j)
-             tmp = ( advcv + advch ) * MAPF(IS,j,2,I_XY) / GSQRT(k,IS,j,I_XYZ)
+             tmp = ( advcv + advch ) * MAPF(IS,j,2,I_XY) * RGSQRT_XYZ(k,IS,j)
              St(k,IS,j) = tmp + RHOT_t(k,IS,j)
 #ifdef HIST_TEND
              if ( lhist ) then
@@ -1041,7 +1120,8 @@ contains
 #endif
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE) &
           !$omp shared(tflx_hi,RHOT_t,St,RCDZ,RCDX,RCDY) &
-          !$omp shared(MAPF,GSQRT)
+          !$omp shared(MAPF,GSQRT) &
+          !$omp shared(MAPF_M12,RGSQRT_XYZ)
           !$acc kernels
           do j = JJS, JJE
           do i = IIS, IIE
@@ -1058,7 +1138,7 @@ contains
              advcv = -   ( tflx_hi(k,i,j,ZDIR) - tflx_hi(k-1,i  ,j  ,ZDIR) ) * RCDZ(k)
              advch = - ( ( tflx_hi(k,i,j,XDIR) - tflx_hi(k  ,i-1,j  ,XDIR) ) * RCDX(i) &
                        + ( tflx_hi(k,i,j,YDIR) - tflx_hi(k  ,i  ,j-1,YDIR) ) * RCDY(j) )
-             tmp = ( advcv + advch ) * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) / GSQRT(k,i,j,I_XYZ)
+             tmp = ( advcv + advch ) * MAPF_M12(i,j,I_XY) * RGSQRT_XYZ(k,i,j)
              St(k,i,j) = tmp + RHOT_t(k,i,j)
 #ifdef HIST_TEND
              if ( lhist ) then
@@ -1113,7 +1193,8 @@ contains
        !$omp shared(DENS_RK,RHOT_RK,DENS0,RHOT0,DENS,MOMZ,POTT,DPRES) &
        !$omp shared(GRAV,dtrk,fact,REF_dens,Sr,Sw,St,RT2P) &
        !$omp shared(ATMOS_DYN_FVM_flux_valueW_Z) &
-       !$omp shared(MAPF,GSQRT,J33G,CDZ,RCDZ,RFDZ)
+       !$omp shared(MAPF,GSQRT,J33G,CDZ,RCDZ,RFDZ) &
+       !$omp shared(MAPF_R12,RGSQRT_XYZ,RGSQRT_XYW)
 #else
        !$omp parallel do default(shared) private(i,j,k,ii,l) OMP_SCHEDULE_ &
        !$omp private(PT,Ci,Co,F1,F2,F3) &
@@ -1164,11 +1245,11 @@ contains
 #endif
 #ifdef _OPENACC
              do k = KS, KE-1
-                tmp = fact / GSQRT(k,i,j,I_XYW)
+                tmp = fact * RGSQRT_XYW(k,i,j)
                 B = GRAV * tmp / ( CDZ(k+1) + CDZ(k) )
                 tmp = tmp * RFDZ(k) * J33G
-                A0 = RCDZ(k  ) * RT2P(k  ,i,j) / GSQRT(k  ,i,j,I_XYZ) * tmp
-                A1 = RCDZ(k+1) * RT2P(k+1,i,j) / GSQRT(k+1,i,j,I_XYZ) * tmp
+                A0 = RCDZ(k  ) * RT2P(k  ,i,j) * RGSQRT_XYZ(k  ,i,j) * tmp
+                A1 = RCDZ(k+1) * RT2P(k+1,i,j) * RGSQRT_XYZ(k+1,i,j) * tmp
                 if ( k < KE-1 ) &
                 F1(k,l) =        - ( PT(k+1,l) *   A1      + B )
                 F2(k,l) = 1.0_RP + ( PT(k  ,l) * ( A1+A0 )     )
@@ -1177,7 +1258,7 @@ contains
              end do
 #else
              do k = KS, KE
-                A(k) = RCDZ(k) * RT2P(k,i,j) * J33G / GSQRT(k,i,j,I_XYZ)
+                A(k) = RCDZ(k) * RT2P(k,i,j) * J33G * RGSQRT_XYZ(k,i,j)
              enddo
 
              ! Note: F3(KS,l) (the sub-diagonal of the first row) and F1(KE-1,l)
@@ -1188,18 +1269,18 @@ contains
              !       Zeroing them costs a measurable amount of time, so it is
              !       not done. If the solver implementation is changed, check
              !       whether the new one requires them to be zero.
-             tmp = fact / GSQRT(KS,i,j,I_XYW)
+             tmp = fact * RGSQRT_XYW(KS,i,j)
              B = GRAV / ( CDZ(KS+1) + CDZ(KS) )
              F1(KS,l) =        - ( PT(KS+1,l) * RFDZ(KS) *   A(KS+1)         + B ) * tmp
              F2(KS,l) = 1.0_RP + ( PT(KS  ,l) * RFDZ(KS) * ( A(KS+1)+A(KS) )     ) * tmp
              do k = KS+1, KE-2
-                tmp = fact / GSQRT(k,i,j,I_XYW)
+                tmp = fact * RGSQRT_XYW(k,i,j)
                 B = GRAV / ( CDZ(k+1) + CDZ(k) )
                 F1(k,l) =        - ( PT(k+1,l) * RFDZ(k) *   A(k+1)        + B ) * tmp
                 F2(k,l) = 1.0_RP + ( PT(k  ,l) * RFDZ(k) * ( A(k+1)+A(k) )     ) * tmp
                 F3(k,l) =        - ( PT(k-1,l) * RFDZ(k) *          A(k)   - B ) * tmp
              enddo
-             tmp = fact / GSQRT(KE-1,i,j,I_XYW)
+             tmp = fact * RGSQRT_XYW(KE-1,i,j)
              B = GRAV / ( CDZ(KE) + CDZ(KE-1) )
              F2(KE-1,l) = 1.0_RP + ( PT(KE-1,l) * RFDZ(KE-1) * ( A(KE)+A(KE-1) )    ) * tmp
              F3(KE-1,l) =        - ( PT(KE-2,l) * RFDZ(KE-1) *         A(KE-1)  - B ) * tmp
@@ -1220,7 +1301,7 @@ contains
                 ! use not density at the half level but mean density between CZ(k) and CZ(k+1)
                 pg = - ( DPRES(k+1,i,j) + RT2P(k+1,i,j)*dtrk*St(k+1,i,j) &
                        - DPRES(k  ,i,j) - RT2P(k  ,i,j)*dtrk*St(k  ,i,j) ) &
-                       * RFDZ(k) * J33G / GSQRT(k,i,j,I_XYW) &
+                       * RFDZ(k) * J33G * RGSQRT_XYW(k,i,j) &
                      - GRAV * 0.5_RP &
                        * ( ( DENS(k+1,i,j) - REF_dens(k+1,i,j) + Sr(k+1,i,j) * dtrk ) &
                          + ( DENS(k  ,i,j) - REF_dens(k  ,i,j) + Sr(k  ,i,j) * dtrk ) )
@@ -1290,18 +1371,18 @@ contains
 #ifdef DEBUG_HEVI2HEVE
                 ! for debug (change to explicit integration)
                 Co(k,l) = MOMZ(k,i,j)
-                tmp = J33G * MOMZ(k,i,j) / ( MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) )
+                tmp = J33G * MOMZ(k,i,j) * MAPF_R12(i,j,I_XY)
                 mflx_hi(k,i,j,ZDIR) = mflx_hi(k,i,j,ZDIR) + tmp
                 tflx_hi(k,i,j,ZDIR) = tflx_hi(k,i,j,ZDIR) + tmp * PT(k,l)
                 ! use not density at the half level but mean density between CZ(k) and CZ(k+1)
                 MOMZ_RK(k,i,j) = MOMZ0(k,i,j) &
                      + dtrk*( &
-                     - J33G * ( DPRES(k+1,i,j)-DPRES(k,i,j) ) * RFDZ(k) / GSQRT(k,i,j,i_XYW) &
+                     - J33G * ( DPRES(k+1,i,j)-DPRES(k,i,j) ) * RFDZ(k) * RGSQRT_XYW(k,i,j) &
                      - GRAV * 0.5_RP * ( (DENS(k,i,j)-REF_dens(k,i,j)) + (DENS(k+1,i,j)-REF_dens(k+1,i,j)) ) &
                      + Sw(k,i,j) )
 #else
                 ! z-flux
-                tmp = J33G * Co(k,l) / ( MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) )
+                tmp = J33G * Co(k,l) * MAPF_R12(i,j,I_XY)
                 mflx_hi(k,i,j,ZDIR) = mflx_hi(k,i,j,ZDIR) + tmp
                 tflx_hi(k,i,j,ZDIR) = tflx_hi(k,i,j,ZDIR) + tmp * PT(k,l)
                 ! z-momentum
@@ -1343,7 +1424,7 @@ contains
 !OCL NORECURRENCE
              do k = KS+1, KE-1
                 advcv = - ( Co(k,l)         - Co(k-1,l) ) &
-                      * J33G * RCDZ(k) / GSQRT(k,i,j,I_XYZ)
+                      * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
                 DENS_RK(k,i,j) = DENS0(k,i,j) + dtrk * ( advcv + Sr(k,i,j) )
 #ifdef HIST_TEND
                 if ( lhist ) advcv_t(k,i,j,I_DENS) = advcv
@@ -1364,7 +1445,7 @@ contains
              do k = KS+1, KE-1
 #endif
                 advcv = - ( Co(k,l) * PT(k,l) - Co(k-1,l) * PT(k-1,l) ) &
-                      * J33G * RCDZ(k) / GSQRT(k,i,j,I_XYZ)
+                      * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
                 RHOT_RK(k,i,j) = RHOT0(k,i,j) + dtrk * ( advcv + St(k,i,j) )
 #ifdef HIST_TEND
                 if ( lhist ) advcv_t(k,i,j,I_RHOT) = advcv
@@ -1382,12 +1463,12 @@ contains
           do j = JJS, JJE
           do i = IIS, IIE
 #endif
-             advcv = - Co(KS,l)          * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co at KS-1 is 0
+             advcv = - Co(KS,l)          * J33G * RCDZ(KS) * RGSQRT_XYZ(KS,i,j) ! Co at KS-1 is 0
              DENS_RK(KS,i,j) = DENS0(KS,i,j) + dtrk * ( advcv + Sr(KS,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KS,i,j,I_DENS) = advcv
 #endif
-             advcv = Co(KE-1,l)            * J33G * RCDZ(KE) / GSQRT(KE,i,j,I_XYZ) ! Co at KE is 0
+             advcv = Co(KE-1,l)            * J33G * RCDZ(KE) * RGSQRT_XYZ(KE,i,j) ! Co at KE is 0
              DENS_RK(KE,i,j) = DENS0(KE,i,j) + dtrk * ( advcv + Sr(KE,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KE,i,j,I_DENS) = advcv
@@ -1404,12 +1485,12 @@ contains
           do j = JJS, JJE
           do i = IIS, IIE
 #endif
-             advcv = - Co(KS,l) * PT(KS,l) * J33G * RCDZ(KS) / GSQRT(KS,i,j,I_XYZ) ! Co at KS-1 is 0
+             advcv = - Co(KS,l) * PT(KS,l) * J33G * RCDZ(KS) * RGSQRT_XYZ(KS,i,j) ! Co at KS-1 is 0
              RHOT_RK(KS,i,j) = RHOT0(KS,i,j) + dtrk * ( advcv + St(KS,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KS,i,j,I_RHOT) = advcv
 #endif
-             advcv = Co(KE-1,l) * PT(KE-1,l) * J33G * RCDZ(KE) / GSQRT(KE,i,j,I_XYZ) ! Co at KE is 0
+             advcv = Co(KE-1,l) * PT(KE-1,l) * J33G * RCDZ(KE) * RGSQRT_XYZ(KE,i,j) ! Co at KE is 0
              RHOT_RK(KE,i,j) = RHOT0(KE,i,j) + dtrk * ( advcv + St(KE,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KE,i,j,I_RHOT) = advcv
@@ -1460,12 +1541,12 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxJ13_UYZ( qflx_J13, & ! (out)
             MOMX, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_UYZ), J13G(:,:,:,I_UYW), MAPF(:,:,:,I_UY), & ! (in)
+            F2H_UYZ, J13G(:,:,:,I_UYW), RMAPF(:,:,:,I_UY), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
        call ATMOS_DYN_FVM_fluxJ23_UYZ( qflx_J23, & ! (out)
             MOMY, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_UYZ), J23G(:,:,:,I_UYW), MAPF(:,:,:,I_UY), & ! (in)
+            F2H_UYZ, J23G(:,:,:,I_UYW), RMAPF(:,:,:,I_UY), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
@@ -1474,7 +1555,7 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxX_UYZ( qflx_hi(:,:,:,XDIR), & ! (out)
             MOMX, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
+            GSQRT(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
             num_diff(:,:,:,I_MOMX,XDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -1482,7 +1563,7 @@ contains
        ! at (u, v, z)
        call ATMOS_DYN_FVM_fluxY_UYZ( qflx_hi(:,:,:,YDIR), & ! (out)
             MOMY, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_UVZ), MAPF(:,:,1,I_UV), & ! (in)
+            GSQRT(:,:,:,I_UVZ), RMAPF(:,:,:,I_UV), & ! (in)
             num_diff(:,:,:,I_MOMX,YDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -1499,7 +1580,8 @@ contains
           !$omp shared(qflx_hi,qflx_J23) &
           !$omp shared(RCDZ,RCDY,CDZ) &
           !$omp shared(MAPF,GSQRT,I_UY,I_UYZ) &
-          !$omp shared(dtrk,CORIOLI)
+          !$omp shared(dtrk,CORIOLI) &
+          !$omp shared(RGSQRT_UYZ)
           !$acc kernels
           do j = JJS, JJE
 !OCL NORECURRENCE
@@ -1520,10 +1602,10 @@ contains
                    * MAPF(IS,j,2,I_UY)
              cf = 0.5_RP * CORIOLI(IS,j) * ( MOMY(k,IS,j) + MOMY(k,IS,j-1) )
              MOMX_RK(k,IS,j) = MOMX0(k,IS,j) &
-                  + dtrk * ( ( advcv + advch ) / GSQRT(k,IS,j,I_UYZ) + cf + MOMX_t(k,IS,j) )
+                  + dtrk * ( ( advcv + advch ) * RGSQRT_UYZ(k,IS,j) + cf + MOMX_t(k,IS,j) )
 #ifdef HIST_TEND
              if ( lhist ) then
-                tmp = 1.0_RP / GSQRT(k,IS,j,I_UYZ)
+                tmp = RGSQRT_UYZ(k,IS,j)
                 advcv_t(k,IS,j,I_MOMX) = advcv * tmp
                 advch_t(k,IS,j,I_MOMX) = advch * tmp
                 pg_t(k,IS,j,2) = 0.0_RP
@@ -1549,7 +1631,8 @@ contains
           !$omp shared(qflx_hi,qflx_J13,qflx_J23) &
           !$omp shared(RCDZ,RCDY,RFDX,CDZ,FDX) &
           !$omp shared(MAPF,GSQRT,J13G,I_UY,I_UV,I_UYW,I_UYZ) &
-          !$omp shared(dtrk,CORIOLI,COEF_CF_U,divdmp_coef)
+          !$omp shared(dtrk,CORIOLI,COEF_CF_U,RMAPF,MAPF_M12,divdmp_coef) &
+          !$omp shared(RGSQRT_UYZ,F2H_UYZ)
 #ifdef HEVI_FISSION
           !$acc kernels async(0)
 #else
@@ -1578,9 +1661,9 @@ contains
              call CHECK( __LINE__, DDIV(k,i  ,j) )
              call CHECK( __LINE__, MOMX0(k,i,j) )
 #endif
-             f2h1 = F2H(k,I_UYZ)
+             f2h1 = F2H_UYZ(k,i,j)
              f2h2 = 1.0_RP - f2h1
-             f2h1m = F2H(k-1,I_UYZ)
+             f2h1m = F2H_UYZ(k-1,i,j)
              f2h2m = 1.0_RP - f2h1m
              dpresm = 0.5_RP * ( DPRES(k-1,i+1,j) + DPRES(k-1,i,j) ) ! [x,y,z->u,y,w]
              dpresk = 0.5_RP * ( DPRES(k  ,i+1,j) + DPRES(k  ,i,j) ) ! [x,y,z->u,y,w]
@@ -1633,11 +1716,11 @@ contains
                          + qflx_J23(k,i,j)      - qflx_J23(k-1,i  ,j       ) ) * RCDZ(k)
              advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k  ,i-1,j  ,XDIR) ) * RFDX(i) &
                        + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k  ,i  ,j-1,YDIR) ) * RCDY(j) ) &
-                   * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY)
+                   * MAPF_M12(i,j,I_UY)
              advc = advcv + advch
 #ifdef HIST_TEND
              if ( lhist ) then
-                tmp = 1.0_RP / GSQRT(k,i,j,I_UYZ)
+                tmp = RGSQRT_UYZ(k,i,j)
                 advcv_t(k,i,j,I_MOMX) = advcv * tmp
                 advch_t(k,i,j,I_MOMX) = advch * tmp
              end if
@@ -1659,8 +1742,8 @@ contains
           do i = IIS, iee
           do k = KS, KE
 #endif
-             div = divdmp_coef / dtrk * ( DDIV(k,i+1,j)/MAPF(i+1,j,2,I_XY) - DDIV(k,i,j)/MAPF(i,j,1,I_XY) ) &
-                 * MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY) * FDX(i) ! divergence damping
+             div = divdmp_coef / dtrk * ( DDIV(k,i+1,j)*RMAPF(i+1,j,2,I_XY) - DDIV(k,i,j)*RMAPF(i,j,1,I_XY) ) &
+                 * MAPF_M12(i,j,I_UY) * FDX(i) ! divergence damping
 #ifdef HEVI_FISSION
              div_work(k,i,j) = div
           enddo
@@ -1684,10 +1767,10 @@ contains
              div = div_work(k,i,j)
 #endif
              MOMX_RK(k,i,j) = MOMX0(k,i,j) &
-                  + dtrk * ( ( advc - pg ) / GSQRT(k,i,j,I_UYZ) + cf + div + MOMX_t(k,i,j) )
+                  + dtrk * ( ( advc - pg ) * RGSQRT_UYZ(k,i,j) + cf + div + MOMX_t(k,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) then
-                pg_t(k,i,j,2) = - pg / GSQRT(k,i,j,I_UYZ)
+                pg_t(k,i,j,2) = - pg * RGSQRT_UYZ(k,i,j)
                 cf_t(k,i,j,1) = cf
                 ddiv_t(k,i,j,2) = div
              endif
@@ -1714,12 +1797,12 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxJ13_XVZ( qflx_J13, & ! (out)
             MOMX, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_XVZ), J13G(:,:,:,I_XVW), MAPF(:,:,:,I_XV), & ! (in)
+            F2H_XVZ, J13G(:,:,:,I_XVW), RMAPF(:,:,:,I_XV), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
        call ATMOS_DYN_FVM_fluxJ23_XVZ( qflx_J23, & ! (out)
             MOMY, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_XVZ), J23G(:,:,:,I_XVW), MAPF(:,:,:,I_XV), & ! (in)
+            F2H_XVZ, J23G(:,:,:,I_XVW), RMAPF(:,:,:,I_XV), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
@@ -1727,7 +1810,7 @@ contains
        if ( .not. TwoD ) &
        call ATMOS_DYN_FVM_fluxX_XVZ( qflx_hi(:,:,:,XDIR), & ! (out)
             MOMX, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_UVZ), MAPF(:,:,:,I_UV), & ! (in)
+            GSQRT(:,:,:,I_UVZ), RMAPF(:,:,:,I_UV), & ! (in)
             num_diff(:,:,:,I_MOMY,XDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -1736,7 +1819,7 @@ contains
        ! note that y-index is added by -1
        call ATMOS_DYN_FVM_fluxY_XVZ( qflx_hi(:,:,:,YDIR), & ! (out)
             MOMY, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
+            GSQRT(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
             num_diff(:,:,:,I_MOMY,YDIR), & ! (in
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
@@ -1754,7 +1837,8 @@ contains
           !$omp shared(qflx_hi,qflx_J23) &
           !$omp shared(RCDZ,RFDY,CDZ,FDY) &
           !$omp shared(MAPF,GSQRT,J23G) &
-          !$omp shared(dtrk,CORIOLI,divdmp_coef)
+          !$omp shared(dtrk,CORIOLI,divdmp_coef) &
+          !$omp shared(RGSQRT_XVZ,F2H_XVZ)
           !$acc kernels
           do j = JJS, min(JJE,JEH)
 !OCL NORECURRENCE
@@ -1779,9 +1863,9 @@ contains
                        + qflx_J23(k,IS,j)      - qflx_J23(k-1,IS,j  )      ) * RCDZ(k)
              advch = - ( qflx_hi (k,IS,j,YDIR) - qflx_hi (k  ,IS,j-1,YDIR) ) * RFDY(j) &
                      * MAPF(IS,j,2,I_XV)
-             f2h1  = F2H(k  ,I_XVZ)
+             f2h1  = F2H_XVZ(k,i,j)
              f2h2  = 1.0_RP - f2h1
-             f2h1m = F2H(k-1,I_XVZ)
+             f2h1m = F2H_XVZ(k-1,i,j)
              f2h2m = 1.0_RP - f2h1m
              dpresm = 0.5_RP * ( DPRES(k-1,IS,j+1) + DPRES(k-1,IS,j) ) ! [x,y,z->x,v,w]
              dpresk = 0.5_RP * ( DPRES(k  ,IS,j+1) + DPRES(k  ,IS,j) ) ! [x,y,z->x,v,w]
@@ -1800,10 +1884,10 @@ contains
              div = divdmp_coef / dtrk * ( DDIV(k,IS,j+1) - DDIV(k,IS,j) ) &
                  * MAPF(IS,j,2,I_XV) * FDY(j) ! divergence damping
              MOMY_RK(k,IS,j) = MOMY0(k,IS,j) &
-                            + dtrk * ( ( advcv + advch - pg ) / GSQRT(k,IS,j,I_XVZ) + cf + div + MOMY_t(k,IS,j) )
+                            + dtrk * ( ( advcv + advch - pg ) * RGSQRT_XVZ(k,IS,j) + cf + div + MOMY_t(k,IS,j) )
 #ifdef HIST_TEND
              if ( lhist ) then
-                tmp = 1.0_RP / GSQRT(k,IS,j,I_XVZ)
+                tmp = RGSQRT_XVZ(k,IS,j)
                 advcv_t(k,IS,j,I_MOMY) = advcv * tmp
                 advch_t(k,IS,j,I_MOMY) = advch * tmp
                 pg_t(k,IS,j,3) = - pg * tmp
@@ -1828,7 +1912,8 @@ contains
           !$omp shared(qflx_hi,qflx_J13,qflx_J23) &
           !$omp shared(RCDZ,RCDX,RFDY,CDZ,FDY) &
           !$omp shared(MAPF,GSQRT,J23G,I_UV) &
-          !$omp shared(dtrk,CORIOLI,COEF_CF_V,divdmp_coef)
+          !$omp shared(dtrk,CORIOLI,COEF_CF_V,RMAPF,MAPF_M12,divdmp_coef) &
+          !$omp shared(RGSQRT_XVZ,F2H_XVZ)
 #ifdef HEVI_FISSION
           !$acc kernels async(0)
 #else
@@ -1858,9 +1943,9 @@ contains
              call CHECK( __LINE__, MOMY_t(k,i,j) )
              call CHECK( __LINE__, MOMY0(k,i,j) )
 #endif
-             f2h1  = F2H(k  ,I_XVZ)
+             f2h1  = F2H_XVZ(k,i,j)
              f2h2  = 1.0_RP - f2h1
-             f2h1m = F2H(k-1,I_XVZ)
+             f2h1m = F2H_XVZ(k-1,i,j)
              f2h2m = 1.0_RP - f2h1m
              dpresm = 0.5_RP * ( DPRES(k-1,i,j+1) + DPRES(k-1,i,j) ) ! [x,y,z->x,v,w]
              dpresk = 0.5_RP * ( DPRES(k  ,i,j+1) + DPRES(k  ,i,j) ) ! [x,y,z->x,v,w]
@@ -1913,11 +1998,11 @@ contains
                          + qflx_J23(k,i,j)      - qflx_J23(k-1,i  ,j  )      ) * RCDZ(k)
              advch = - ( ( qflx_hi (k,i,j,XDIR) - qflx_hi (k  ,i-1,j  ,XDIR) ) * RCDX(i) &
                        + ( qflx_hi (k,i,j,YDIR) - qflx_hi (k  ,i  ,j-1,YDIR) ) * RFDY(j) ) &
-                     * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV)
+                     * MAPF_M12(i,j,I_XV)
              advc = advcv + advch
 #ifdef HIST_TEND
              if ( lhist ) then
-                tmp = 1.0_RP / GSQRT(k,i,j,I_XVZ)
+                tmp = RGSQRT_XVZ(k,i,j)
                 advcv_t(k,i,j,I_MOMY) = advcv * tmp
                 advch_t(k,i,j,I_MOMY) = advch * tmp
              end if
@@ -1937,8 +2022,8 @@ contains
           do i = IIS, IIE
           do k = KS, KE
 #endif
-             div = divdmp_coef / dtrk * ( DDIV(k,i,j+1)/MAPF(i,j+1,1,I_XY) - DDIV(k,i,j)/MAPF(i,j,1,I_XY) ) &
-                 * MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV) * FDY(j) ! divergence damping
+             div = divdmp_coef / dtrk * ( DDIV(k,i,j+1)*RMAPF(i,j+1,1,I_XY) - DDIV(k,i,j)*RMAPF(i,j,1,I_XY) ) &
+                 * MAPF_M12(i,j,I_XV) * FDY(j) ! divergence damping
 #ifdef HEVI_FISSION
              div_work(k,i,j) = div
           enddo
@@ -1962,10 +2047,10 @@ contains
              div = div_work(k,i,j)
 #endif
              MOMY_RK(k,i,j) = MOMY0(k,i,j) &
-                            + dtrk * ( ( advc - pg ) / GSQRT(k,i,j,I_XVZ) + cf + div + MOMY_t(k,i,j) )
+                            + dtrk * ( ( advc - pg ) * RGSQRT_XVZ(k,i,j) + cf + div + MOMY_t(k,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) then
-                pg_t(k,i,j,3) = - pg / GSQRT(k,i,j,I_XVZ)
+                pg_t(k,i,j,3) = - pg * RGSQRT_XVZ(k,i,j)
                 cf_t(k,i,j,2) = cf
                 ddiv_t(k,i,j,3) = div
              endif

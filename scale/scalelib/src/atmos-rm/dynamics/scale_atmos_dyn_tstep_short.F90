@@ -33,13 +33,16 @@ module scale_atmos_dyn_tstep_short
      !> setup
      subroutine short_setup( &
           CORIOLI,                &
-          MAPF,                   &
+          MAPF, GSQRT,            &
+          CDZ,                    &
           RCDX, RCDY, RFDX, RFDY  )
        use scale_precision
        use scale_atmos_grid_cartesC_index
        use scale_index
        real(RP), intent(in) :: CORIOLI(IA,JA)
        real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
+       real(RP), intent(in) :: GSQRT  (KA,IA,JA,I_XYZ_MAX)
+       real(RP), intent(in) :: CDZ (KA)
        real(RP), intent(in) :: RCDX(IA)
        real(RP), intent(in) :: RCDY(JA)
        real(RP), intent(in) :: RFDX(IA-1)
