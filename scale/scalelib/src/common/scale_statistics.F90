@@ -329,12 +329,12 @@ contains
        !$omp parallel do OMP_SCHEDULE_ reduction(+:statval) &
        !$omp private(work)
        !$acc kernels copyin(var, vol)  if(acc_is_present(var))
-       !$acc loop reduction(statval)
+       !$acc loop reduction(+:statval)
        do j = JE, JS, -1
-       !$acc loop reduction(statval)
+       !$acc loop reduction(+:statval)
        do i = IE, IS, -1
 #ifdef _OPENACC
-          !$acc loop reduction(statval)
+          !$acc loop reduction(+:statval)
           do k = KE, KS, -1
              statval = statval + var(k,i,j) * vol(k,i,j)
           enddo
