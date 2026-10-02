@@ -7,6 +7,11 @@ if /((?:ud|cd)(\d+)(?:[^\d]\w*)?)\.F90/ =~ fname
   order = $2.to_i
   modname = "scale_atmos_dyn_fvm_flux_#{@scheme}"
   nh = (order+1)/2 - 1
+  # With OpenACC, the fluxes at the boundary levels are selected with merge() in
+  # the kernel for the inner levels, instead of being computed in a separate kernel.
+  # The stencils of all the candidates are evaluated at every level, so this is
+  # done only for nh == 1, for which the stencils stay inside the halo (KHALO = 2).
+  fuse = ( nh == 1 )
   if order >= 2
     def num_diff(k="k",i="i",j="j")
                   "&
@@ -54,6 +59,13 @@ class Integer
   def to_s
     0==self ? "" : self>0 ? "+"+_to_s : _to_s
   end
+end
+# orders of the flux at the kk-th level from the bottom (KS+kk) and from the top (KE-1-kk)
+def order_lo(order, nh, kk=0)
+  [[order-(nh-kk)*2,[order,2].min].max,[order-(nh-kk-1)*2,[order,2].min].max]
+end
+def order_up(order, nh, kk=0)
+  [[order-(nh-kk-1)*2,[order,2].min].max,[order-(nh-kk)*2,[order,2].min].max]
 end
 def flux1(idx0)
   "val(#{idx0})"
@@ -341,6 +353,18 @@ def interpH(val, src, dst, k="k", i="i", j="j")
     "0.25_RP * ( #{val}(#{k},#{i},#{j})+#{val}(#{k},#{i+io},#{j})+#{val}(#{k},#{i},#{j+jo})+#{val}(#{k},#{i+io},#{j+jo}) )"
   end
 end
+# The boundary candidates are evaluated at every level in the fused kernel. A division
+# in them is an IEEE division for all the threads, which increases the instructions
+# and registers so much that the fused kernel is slower than the two kernels
+# (UD3 fluxZ_XYZ: 418 -> 598 ms per 2400 calls on GB200).
+# In the fused kernel, the division by 6 is therefore replaced by the multiplication
+# by F6 = 1/6, which changes the boundary fluxes in the last bit, and the fusion is
+# done only if no division remains in the boundary candidates (e.g. phi() of ud3Koren1993).
+def flux_bnd(*args)
+  flux(*args).gsub("/ 6.0_RP", "* F6")
+end
+fuse_lu = fuse && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", order_up(order, nh), 0) ) !~ %r{/|phi\(}
+use_f6  = fuse_lu && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", order_up(order, nh), 0) ).include?("F6")
 %>
 !-------------------------------------------------------------------------------
 !> module <%= modname %>
@@ -428,6 +452,11 @@ module <%= modname %>
   real(RP), parameter :: F1  =  0.5_RP
 <% end %>
   real(RP), parameter :: F2  =  0.5_RP          ! F2 is always used to calculate flux near boundary.
+<%- if use_f6 -%>
+#ifdef _OPENACC
+  real(RP), parameter :: F6  =  1.0_RP/6.0_RP   ! used instead of the division by 6 in the fused kernels
+#endif
+<%- end -%>
 <% if order%2 == 0 %>
 <%   if order >= 4 %>
   real(RP), parameter :: F41 =  7.0_RP/12.0_RP
@@ -486,8 +515,25 @@ contains
     real(RP), intent(in)  :: CDZ  (KA)
 
     integer  :: k
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    real(RP) :: vlo, vup, vin
+#endif
+<%- end -%>
     !---------------------------------------------------------------------------
 
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    ! The values at KS and KE-1 are selected with merge() in the loop for the inner levels.
+    ! val(KS-1) and val(KE+1) are read but not used.
+    do k = KS, KE-1
+       vlo = <%= flux_bnd("mflx(k)", order_lo(order, nh), 0, "k", nil, nil, 1) %>
+       vup = <%= flux_bnd("mflx(k)", order_up(order, nh), 0, "k", nil, nil, 1) %>
+       vin = <%= flux("mflx(k)", order, 0, "k", nil, nil, 1) %>
+       valW(k) = merge( vlo, merge( vup, vin, k == KE-1 ), k == KS )
+    enddo
+#else
+<%- end -%>
     do k = KS<%=nh%>, KE<%=-(nh+1)%>
 #ifdef DEBUG
        call CHECK( __LINE__, mflx(k) )
@@ -516,6 +562,9 @@ contains
        valW(KS<%=k%>) = <%= flux("mflx(KS#{k})", [[order-(nh-k)*2,[order,2].min].max,[order-(nh-k-1)*2,[order,2].min].max], 0, "KS"+k, nil, nil, 1) %>
        valW(KE<%=-k-1%>) = <%= flux("mflx(KE#{-(k+1)})", [[order-(nh-k-1)*2,[order,2].min].max,[order-(nh-k)*2,[order,2].min].max], 0, "KE"-(k+1), nil, nil, 1) %>
 <% end %>
+<%- if fuse_lu -%>
+#endif
+<%- end -%>
 
     return
   end subroutine ATMOS_DYN_FVM_flux_ValueW_Z_<%=@scheme%>
@@ -541,6 +590,11 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
+<%- end -%>
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
@@ -549,6 +603,29 @@ contains
 
     !$acc data copy(flux) copyin(mflx, val, GSQRT, num_diff, CDZ)
 
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels. In a separate kernel over (i,j), the accesses to these
+    ! k-contiguous arrays are strided.
+    ! The values in the halo, val(KS-2:KS-1) and val(KE+1:KE+2), are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+       vel = mflx(k,i,j)
+       flo = <%= flux_bnd("vel", order_lo(order, nh), 0) %>
+       fup = <%= flux_bnd("vel", order_up(order, nh), 0) %>
+       fin = <%= flux("vel", order, 0) %>
+       flux(k,i,j) = merge( vel &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) <%= num_diff() %>, &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
+<%- end -%>
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -601,6 +678,9 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+<%- if fuse_lu -%>
+#endif
+<%- end -%>
 
     !$acc end data
 
@@ -913,6 +993,26 @@ contains
 
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
+<%- if fuse -%>
+#ifdef _OPENACC
+    ! The flux at KE is selected with merge() in the kernel for the inner levels
+    ! (see fluxZ_XYZ). The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS<%=-j%>, JJE
+    do i = IIS<%=-i%>, IIE
+    do k = KS, KE
+<%= f2h_assigns(scalars_xyw, mom_xyw, dens_xyw) %>
+       vel = <%= mom_xyw %> &
+           / <%= dens_xyw %>
+       flux(k,i,j) = merge( GSQRT(k,i,j) * RMAPF(i,j,<%=i*2+j%>) * vel &
+                   * ( <%= flux("vel", order, i+2*j) %> ) <%= num_diff() %>, &
+                            0.0_RP, k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
+<%- end -%>
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS<%=-j%>, JJE
@@ -949,6 +1049,9 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+<%- if fuse -%>
+#endif
+<%- end -%>
 
     !$acc end data
 
@@ -1018,6 +1121,11 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
+<%- end -%>
 <%= f2h_decls(scalars_z) %>
     integer  :: k, i, j
     !---------------------------------------------------------------------------
@@ -1092,6 +1200,33 @@ contains
     else
 
 <% end %>
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+<%= f2h_assigns(scalars_z, mom_uvw_k, dens_uvw_k) %>
+       vel = <%= mom_uvw_k %> &
+           / <%= dens_uvw_k %>
+       flo = <%= flux_bnd("vel", order_lo(order, nh), 0) %>
+       fup = <%= flux_bnd("vel", order_up(order, nh), 0) %>
+       fin = <%= flux("vel", order, 0) %>
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(k,i,j) = merge( J33G * vel &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) <%= num_diff() %>, &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
+<%- end -%>
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -1152,6 +1287,9 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+<%- if fuse_lu -%>
+#endif
+<%- end -%>
 <% if i==1 %>
     end if
 <% end %>
@@ -1223,6 +1361,11 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
+<%- end -%>
 <%= f2h_decls(scalars_j) %>
     integer  :: k, i, j
     !---------------------------------------------------------------------------
@@ -1283,6 +1426,34 @@ contains
     else
 <% end %>
 
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+<%= f2h_assigns(scalars_j, mom_uvw_k, dens_uvw_k) %>
+       vel = <%= mom_uvw_k %> &
+           / <%= dens_uvw_k %>
+       vel = vel * <%=dir%>G(k,i,j)
+       flo = <%= flux_bnd("vel", order_lo(order, nh), 0) %>
+       fup = <%= flux_bnd("vel", order_up(order, nh), 0) %>
+       fin = <%= flux("vel", order, 0) %>
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(k,i,j) = merge( vel * RMAPF(i,j,<%=im%>) &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
+<%- end -%>
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -1328,6 +1499,9 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+<%- if fuse_lu -%>
+#endif
+<%- end -%>
 
 <% if i==1 && im==1 %>
     end if

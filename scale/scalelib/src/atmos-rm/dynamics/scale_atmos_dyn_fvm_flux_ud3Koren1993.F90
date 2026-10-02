@@ -716,6 +716,33 @@ contains
 
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
+#ifdef _OPENACC
+    ! The flux at KE is selected with merge() in the kernel for the inner levels
+    ! (see fluxZ_XYZ). The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS-1, IIE
+    do k = KS, KE
+       f2h1_UYZ_k = F2H(k,I_UYZ)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
+       vel = ( f2h1_UYZ_k * mom(k+1,i,j) &
+             + f2h2_UYZ_k * mom(k,i,j) ) &
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       flux(k,i,j) = merge( GSQRT(k,i,j) * RMAPF(i,j,+2) * vel &
+                   * ( ( val(k,i,j) &
+                       + 0.5_RP * phi(val(k,i+1,j),val(k,i,j),val(k,i-1,j)) * ( val(k,i,j)-val(k,i-1,j) ) ) &
+                       * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                     + ( val(k,i+1,j) &
+                       + 0.5_RP * phi(val(k,i,j),val(k,i+1,j),val(k,i+2,j)) * ( val(k,i+1,j)-val(k,i+2,j) ) ) &
+                       * ( 0.5_RP - sign(0.5_RP,vel) ) ) &
+                   + GSQRT(k,i,j) * num_diff(k,i,j), &
+                            0.0_RP, k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -764,6 +791,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
     !$acc end data
 
@@ -809,6 +837,33 @@ contains
 
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
+#ifdef _OPENACC
+    ! The flux at KE is selected with merge() in the kernel for the inner levels
+    ! (see fluxZ_XYZ). The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS-1, JJE
+    do i = IIS, IIE
+    do k = KS, KE
+       f2h1_XVZ_k = F2H(k,I_XVZ)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
+       vel = ( f2h1_XVZ_k * mom(k+1,i,j) &
+             + f2h2_XVZ_k * mom(k,i,j) ) &
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       flux(k,i,j) = merge( GSQRT(k,i,j) * RMAPF(i,j,+1) * vel &
+                   * ( ( val(k,i,j) &
+                       + 0.5_RP * phi(val(k,i,j+1),val(k,i,j),val(k,i,j-1)) * ( val(k,i,j)-val(k,i,j-1) ) ) &
+                       * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                     + ( val(k,i,j+1) &
+                       + 0.5_RP * phi(val(k,i,j),val(k,i,j+1),val(k,i,j+2)) * ( val(k,i,j+1)-val(k,i,j+2) ) ) &
+                       * ( 0.5_RP - sign(0.5_RP,vel) ) ) &
+                   + GSQRT(k,i,j) * num_diff(k,i,j), &
+                            0.0_RP, k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS-1, JJE
@@ -857,6 +912,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
     !$acc end data
 

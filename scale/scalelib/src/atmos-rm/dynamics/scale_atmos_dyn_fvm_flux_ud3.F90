@@ -83,6 +83,9 @@ module scale_atmos_dyn_fvm_flux_ud3
   !
 
   real(RP), parameter :: F2  =  0.5_RP          ! F2 is always used to calculate flux near boundary.
+#ifdef _OPENACC
+  real(RP), parameter :: F6  =  1.0_RP/6.0_RP   ! used instead of the division by 6 in the fused kernels
+#endif
 
 
   real(RP), parameter :: F31  = -1.0_RP/12.0_RP
@@ -111,8 +114,28 @@ contains
     real(RP), intent(in)  :: CDZ  (KA)
 
     integer  :: k
+#ifdef _OPENACC
+    real(RP) :: vlo, vup, vin
+#endif
     !---------------------------------------------------------------------------
 
+#ifdef _OPENACC
+    ! The values at KS and KE-1 are selected with merge() in the loop for the inner levels.
+    ! val(KS-1) and val(KE+1) are read but not used.
+    do k = KS, KE-1
+       vlo = F2 * ( val(k+1)+val(k) ) &
+                     * ( 0.5_RP + sign(0.5_RP,mflx(k)) ) &
+                + ( 2.0_RP * val(k) + 5.0_RP * val(k+1) - val(k+2) ) * F6 &
+                     * ( 0.5_RP - sign(0.5_RP,mflx(k)) )
+       vup = ( 2.0_RP * val(k+1) + 5.0_RP * val(k) - val(k-1) ) * F6 &
+                     * ( 0.5_RP + sign(0.5_RP,mflx(k)) ) &
+                + F2 * ( val(k+1)+val(k) ) &
+                     * ( 0.5_RP - sign(0.5_RP,mflx(k)) )
+       vin = ( F31 * ( val(k+2)+val(k-1) ) + F32 * ( val(k+1)+val(k) ) ) &
+                     - ( F31 * ( val(k+2)-val(k-1) ) + F33 * ( val(k+1)-val(k) ) ) * sign(1.0_RP,mflx(k))
+       valW(k) = merge( vlo, merge( vup, vin, k == KE-1 ), k == KS )
+    enddo
+#else
     do k = KS+1, KE-2
 #ifdef DEBUG
        call CHECK( __LINE__, mflx(k) )
@@ -151,6 +174,7 @@ contains
                 + F2 * ( val(KE)+val(KE-1) ) &
                      * ( 0.5_RP - sign(0.5_RP,mflx(KE-1)) )
 
+#endif
 
     return
   end subroutine ATMOS_DYN_FVM_flux_ValueW_Z_ud3
@@ -176,6 +200,9 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
     integer  :: k, i, j
     !---------------------------------------------------------------------------
 
@@ -184,6 +211,35 @@ contains
 
     !$acc data copy(flux) copyin(mflx, val, GSQRT, num_diff, CDZ)
 
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels. In a separate kernel over (i,j), the accesses to these
+    ! k-contiguous arrays are strided.
+    ! The values in the halo, val(KS-2:KS-1) and val(KE+1:KE+2), are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+       vel = mflx(k,i,j)
+       flo = F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + ( 2.0_RP * val(k,i,j) + 5.0_RP * val(k+1,i,j) - val(k+2,i,j) ) * F6 &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fup = ( 2.0_RP * val(k+1,i,j) + 5.0_RP * val(k,i,j) - val(k-1,i,j) ) * F6 &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fin = ( F31 * ( val(k+2,i,j)+val(k-1,i,j) ) + F32 * ( val(k+1,i,j)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k+2,i,j)-val(k-1,i,j) ) + F33 * ( val(k+1,i,j)-val(k,i,j) ) ) * sign(1.0_RP,vel)
+       flux(k,i,j) = merge( vel &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) &
+                   + GSQRT(k,i,j) * num_diff(k,i,j), &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -249,6 +305,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
     !$acc end data
 
@@ -681,6 +738,29 @@ contains
 
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
+#ifdef _OPENACC
+    ! The flux at KE is selected with merge() in the kernel for the inner levels
+    ! (see fluxZ_XYZ). The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS-1, IIE
+    do k = KS, KE
+       f2h1_UYZ_k = F2H(k,I_UYZ)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
+       vel = ( f2h1_UYZ_k * mom(k+1,i,j) &
+             + f2h2_UYZ_k * mom(k,i,j) ) &
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       flux(k,i,j) = merge( GSQRT(k,i,j) * RMAPF(i,j,+2) * vel &
+                   * ( ( F31 * ( val(k,i+2,j)+val(k,i-1,j) ) + F32 * ( val(k,i+1,j)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k,i+2,j)-val(k,i-1,j) ) + F33 * ( val(k,i+1,j)-val(k,i,j) ) ) * sign(1.0_RP,vel) ) &
+                   + GSQRT(k,i,j) * num_diff(k,i,j), &
+                            0.0_RP, k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -725,6 +805,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
     !$acc end data
 
@@ -770,6 +851,29 @@ contains
 
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
+#ifdef _OPENACC
+    ! The flux at KE is selected with merge() in the kernel for the inner levels
+    ! (see fluxZ_XYZ). The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS-1, JJE
+    do i = IIS, IIE
+    do k = KS, KE
+       f2h1_XVZ_k = F2H(k,I_XVZ)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
+       vel = ( f2h1_XVZ_k * mom(k+1,i,j) &
+             + f2h2_XVZ_k * mom(k,i,j) ) &
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       flux(k,i,j) = merge( GSQRT(k,i,j) * RMAPF(i,j,+1) * vel &
+                   * ( ( F31 * ( val(k,i,j+2)+val(k,i,j-1) ) + F32 * ( val(k,i,j+1)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k,i,j+2)-val(k,i,j-1) ) + F33 * ( val(k,i,j+1)-val(k,i,j) ) ) * sign(1.0_RP,vel) ) &
+                   + GSQRT(k,i,j) * num_diff(k,i,j), &
+                            0.0_RP, k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS-1, JJE
@@ -814,6 +918,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
     !$acc end data
 
@@ -849,6 +954,9 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
     real(RP) :: f2h1_XYZ_k, f2h2_XYZ_k
     real(RP) :: f2h1_XYZ_KS, f2h2_XYZ_KS
     real(RP) :: f2h1_XYZ_KEm1, f2h2_XYZ_KEm1
@@ -949,6 +1057,41 @@ contains
     else
 
 
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+       f2h1_UYZ_k = F2H(k,I_UYZ)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
+       vel = ( 0.5_RP * ( mom(k,i,j)+mom(k,i+1,j) ) ) &
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       flo = F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + ( 2.0_RP * val(k,i,j) + 5.0_RP * val(k+1,i,j) - val(k+2,i,j) ) * F6 &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fup = ( 2.0_RP * val(k+1,i,j) + 5.0_RP * val(k,i,j) - val(k-1,i,j) ) * F6 &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fin = ( F31 * ( val(k+2,i,j)+val(k-1,i,j) ) + F32 * ( val(k+1,i,j)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k+2,i,j)-val(k-1,i,j) ) + F33 * ( val(k+1,i,j)-val(k,i,j) ) ) * sign(1.0_RP,vel)
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(k,i,j) = merge( J33G * vel &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) &
+                   + GSQRT(k,i,j) * num_diff(k,i,j), &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -1028,6 +1171,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
     end if
 
@@ -1064,6 +1208,9 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
     real(RP) :: f2h1_UYZ_k, f2h2_UYZ_k
     real(RP) :: f2h1_UYZ_KS, f2h2_UYZ_KS
     real(RP) :: f2h1_UYZ_KEm1, f2h2_UYZ_KEm1
@@ -1080,6 +1227,42 @@ contains
 
 
 
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+       f2h1_UYZ_k = F2HW(k,i,j)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
+       vel = ( f2h1_UYZ_k * mom(k+1,i,j) &
+             + f2h2_UYZ_k * mom(k,i,j) ) &
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       vel = vel * J13G(k,i,j)
+       flo = F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + ( 2.0_RP * val(k,i,j) + 5.0_RP * val(k+1,i,j) - val(k+2,i,j) ) * F6 &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fup = ( 2.0_RP * val(k+1,i,j) + 5.0_RP * val(k,i,j) - val(k-1,i,j) ) * F6 &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fin = ( F31 * ( val(k+2,i,j)+val(k-1,i,j) ) + F32 * ( val(k+1,i,j)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k+2,i,j)-val(k-1,i,j) ) + F33 * ( val(k+1,i,j)-val(k,i,j) ) ) * sign(1.0_RP,vel)
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(k,i,j) = merge( vel * RMAPF(i,j,+2) &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -1141,6 +1324,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
 
 
@@ -1172,6 +1356,9 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
     real(RP) :: f2h1_XYZ_k, f2h2_XYZ_k
     real(RP) :: f2h1_XYZ_KS, f2h2_XYZ_KS
     real(RP) :: f2h1_XYZ_KEm1, f2h2_XYZ_KEm1
@@ -1255,6 +1442,42 @@ contains
     else
 
 
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+       f2h1_UYZ_k = F2HW(k,i,j)
+       f2h2_UYZ_k = 1.0_RP - f2h1_UYZ_k
+       vel = ( f2h1_UYZ_k * 0.25_RP * ( mom(k+1,i,j)+mom(k+1,i+1,j)+mom(k+1,i,j-1)+mom(k+1,i+1,j-1) ) &
+             + f2h2_UYZ_k * 0.25_RP * ( mom(k,i,j)+mom(k,i+1,j)+mom(k,i,j-1)+mom(k,i+1,j-1) ) ) &
+           / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+             + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       vel = vel * J23G(k,i,j)
+       flo = F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + ( 2.0_RP * val(k,i,j) + 5.0_RP * val(k+1,i,j) - val(k+2,i,j) ) * F6 &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fup = ( 2.0_RP * val(k+1,i,j) + 5.0_RP * val(k,i,j) - val(k-1,i,j) ) * F6 &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fin = ( F31 * ( val(k+2,i,j)+val(k-1,i,j) ) + F32 * ( val(k+1,i,j)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k+2,i,j)-val(k-1,i,j) ) + F33 * ( val(k+1,i,j)-val(k,i,j) ) ) * sign(1.0_RP,vel)
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(k,i,j) = merge( vel * RMAPF(i,j,+1) &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -1316,6 +1539,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
 
     end if
@@ -1521,6 +1745,9 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
     real(RP) :: f2h1_XVZ_k, f2h2_XVZ_k
     real(RP) :: f2h1_XVZ_KS, f2h2_XVZ_KS
     real(RP) :: f2h1_XVZ_KEm1, f2h2_XVZ_KEm1
@@ -1536,6 +1763,41 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, num_diff, CDZ)
 
 
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+       f2h1_XVZ_k = F2H(k,I_XVZ)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
+       vel = ( 0.5_RP * ( mom(k,i,j)+mom(k,i,j+1) ) ) &
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       flo = F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + ( 2.0_RP * val(k,i,j) + 5.0_RP * val(k+1,i,j) - val(k+2,i,j) ) * F6 &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fup = ( 2.0_RP * val(k+1,i,j) + 5.0_RP * val(k,i,j) - val(k-1,i,j) ) * F6 &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fin = ( F31 * ( val(k+2,i,j)+val(k-1,i,j) ) + F32 * ( val(k+1,i,j)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k+2,i,j)-val(k-1,i,j) ) + F33 * ( val(k+1,i,j)-val(k,i,j) ) ) * sign(1.0_RP,vel)
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(k,i,j) = merge( J33G * vel &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) &
+                   + GSQRT(k,i,j) * num_diff(k,i,j), &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -1615,6 +1877,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
 
     !$acc end data
@@ -1649,6 +1912,9 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
     real(RP) :: f2h1_XVZ_k, f2h2_XVZ_k
     real(RP) :: f2h1_XVZ_KS, f2h2_XVZ_KS
     real(RP) :: f2h1_XVZ_KEm1, f2h2_XVZ_KEm1
@@ -1665,6 +1931,42 @@ contains
 
 
 
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+       f2h1_XVZ_k = F2HW(k,i,j)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
+       vel = ( f2h1_XVZ_k * 0.25_RP * ( mom(k+1,i,j)+mom(k+1,i-1,j)+mom(k+1,i,j+1)+mom(k+1,i-1,j+1) ) &
+             + f2h2_XVZ_k * 0.25_RP * ( mom(k,i,j)+mom(k,i-1,j)+mom(k,i,j+1)+mom(k,i-1,j+1) ) ) &
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       vel = vel * J13G(k,i,j)
+       flo = F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + ( 2.0_RP * val(k,i,j) + 5.0_RP * val(k+1,i,j) - val(k+2,i,j) ) * F6 &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fup = ( 2.0_RP * val(k+1,i,j) + 5.0_RP * val(k,i,j) - val(k-1,i,j) ) * F6 &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fin = ( F31 * ( val(k+2,i,j)+val(k-1,i,j) ) + F32 * ( val(k+1,i,j)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k+2,i,j)-val(k-1,i,j) ) + F33 * ( val(k+1,i,j)-val(k,i,j) ) ) * sign(1.0_RP,vel)
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(k,i,j) = merge( vel * RMAPF(i,j,+2) &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -1726,6 +2028,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
 
 
@@ -1757,6 +2060,9 @@ contains
     integer,  intent(in)  :: IIS, IIE, JJS, JJE
 
     real(RP) :: vel
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
     real(RP) :: f2h1_XVZ_k, f2h2_XVZ_k
     real(RP) :: f2h1_XVZ_KS, f2h2_XVZ_KS
     real(RP) :: f2h1_XVZ_KEm1, f2h2_XVZ_KEm1
@@ -1773,6 +2079,42 @@ contains
 
 
 
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc kernels
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+       f2h1_XVZ_k = F2HW(k,i,j)
+       f2h2_XVZ_k = 1.0_RP - f2h1_XVZ_k
+       vel = ( f2h1_XVZ_k * mom(k+1,i,j) &
+             + f2h2_XVZ_k * mom(k,i,j) ) &
+           / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+             + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       vel = vel * J23G(k,i,j)
+       flo = F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + ( 2.0_RP * val(k,i,j) + 5.0_RP * val(k+1,i,j) - val(k+2,i,j) ) * F6 &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fup = ( 2.0_RP * val(k+1,i,j) + 5.0_RP * val(k,i,j) - val(k-1,i,j) ) * F6 &
+                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
+                + F2 * ( val(k+1,i,j)+val(k,i,j) ) &
+                     * ( 0.5_RP - sign(0.5_RP,vel) )
+       fin = ( F31 * ( val(k+2,i,j)+val(k-1,i,j) ) + F32 * ( val(k+1,i,j)+val(k,i,j) ) ) &
+                     - ( F31 * ( val(k+2,i,j)-val(k-1,i,j) ) + F33 * ( val(k+1,i,j)-val(k,i,j) ) ) * sign(1.0_RP,vel)
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux(k,i,j) = merge( vel * RMAPF(i,j,+1) &
+                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+    !$acc end kernels
+#else
     !$omp do OMP_SCHEDULE_ collapse(2)
     !$acc kernels
     do j = JJS, JJE
@@ -1834,6 +2176,7 @@ contains
     enddo
     !$acc end kernels
     !$omp end do nowait
+#endif
 
 
 
