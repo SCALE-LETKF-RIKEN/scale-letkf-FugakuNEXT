@@ -276,7 +276,7 @@ contains
 
        mapping_name = ""
        false_easting = UNDEF
-       false_easting = UNDEF
+       false_northing = UNDEF
        longitude_of_central_meridian = UNDEF
        longitude_of_projection_origin = UNDEF
        latitude_of_projection_origin = UNDEF
