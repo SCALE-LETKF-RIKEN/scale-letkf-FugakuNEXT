@@ -466,10 +466,9 @@ contains
 !           / DENS(KS+1,i,j)
        vel = vel * J13G(KS+1,i,j)
        flux(KS,i,j) =  vel * RMAPF(i,j,+2) &
-                   * ( val(KS,i,j) &
-                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
-                + ( 2.0_RP * val(KS,i,j) + 5.0_RP * val(KS+1,i,j) - val(KS+2,i,j) ) / 6.0_RP &
-                     * ( 0.5_RP - sign(0.5_RP,vel) ) ) ! k = KS+1
+                   * ( merge( val(KS,i,j), &
+                       ( 2.0_RP * val(KS,i,j) + 5.0_RP * val(KS+1,i,j) - val(KS+2,i,j) ) / 6.0_RP, &
+                       vel >= 0.0_RP ) ) ! k = KS+1
 
 
        flux(KE-1,i,j) = 0.0_RP
@@ -547,10 +546,9 @@ contains
 !           / DENS(KS+1,i,j)
        vel = vel * J23G(KS+1,i,j)
        flux(KS,i,j) =  vel * RMAPF(i,j,+1) &
-                   * ( val(KS,i,j) &
-                     * ( 0.5_RP + sign(0.5_RP,vel) ) &
-                + ( 2.0_RP * val(KS,i,j) + 5.0_RP * val(KS+1,i,j) - val(KS+2,i,j) ) / 6.0_RP &
-                     * ( 0.5_RP - sign(0.5_RP,vel) ) ) ! k = KS+1
+                   * ( merge( val(KS,i,j), &
+                       ( 2.0_RP * val(KS,i,j) + 5.0_RP * val(KS+1,i,j) - val(KS+2,i,j) ) / 6.0_RP, &
+                       vel >= 0.0_RP ) ) ! k = KS+1
 
 
        flux(KE-1,i,j) = 0.0_RP

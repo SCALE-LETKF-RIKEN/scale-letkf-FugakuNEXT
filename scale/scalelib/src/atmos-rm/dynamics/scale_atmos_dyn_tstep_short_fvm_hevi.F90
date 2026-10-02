@@ -1256,6 +1256,7 @@ contains
 
 #endif
 
+#ifdef HEVI_FISSION
 !OCL NORECURRENCE
              do k = KS, KE-1
 #ifdef DEBUG_HEVI2HEVE
@@ -1279,7 +1280,6 @@ contains
                 MOMZ_RK(k,i,j) = MOMZ0(k,i,j) + ( Co(k,l) - MOMZ(k,i,j) )
 #endif
              enddo
-#ifdef HEVI_FISSION
           enddo ! i
           enddo ! j
           !$acc end parallel
@@ -1290,10 +1290,8 @@ contains
           !$acc loop collapse(2)
           do j = JJS, JJE
           do i = IIS, IIE
-#endif
              MOMZ_RK(KS-1,i,j) = 0.0_RP
              MOMZ_RK(KE  ,i,j) = 0.0_RP
-#ifdef HEVI_FISSION
           enddo ! i
           enddo ! j
           !$acc end parallel
@@ -1303,23 +1301,25 @@ contains
           !$acc wait
 #endif
 
+          ! density and rho*theta
+          ! The levels KS and KE, at which Co at KS-1 and KE are zero, are computed in
+          ! the kernels for the inner levels. The factors of the fluxes, not their
+          ! products, are selected, so that the results are the same as with the
+          ! separate kernels.
           !$omp parallel do default(shared) OMP_SCHEDULE_ &
           !$omp private(k,i,j,advcv)
           !$acc parallel async(1)
           !$acc loop collapse(2)
           do j = JJS, JJE
           do i = IIS, IIE
-#endif
-             ! density and rho*theta
 !OCL NORECURRENCE
-             do k = KS+1, KE-1
-                advcv = - ( Co(k,l)         - Co(k-1,l) ) &
-                      * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
+             do k = KS, KE
+                advcv = - ( merge( Co(min(k,KE-1),l), 0.0_RP, k < KE ) &
+                          - merge( Co(max(k-1,KS),l), 0.0_RP, k > KS ) ) * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
                 DENS_RK(k,i,j) = DENS0(k,i,j) + dtrk * ( advcv + Sr(k,i,j) )
 #ifdef HIST_TEND
                 if ( lhist ) advcv_t(k,i,j,I_DENS) = advcv
 #endif
-#ifdef HEVI_FISSION
              enddo ! k
           enddo ! i
           enddo ! j
@@ -1332,7 +1332,62 @@ contains
           do j = JJS, JJE
           do i = IIS, IIE
 !OCL NORECURRENCE
+             do k = KS, KE
+                advcv = - ( merge( Co(min(k,KE-1),l), 0.0_RP, k < KE ) * PT(min(k,KE-1),l) &
+                          - merge( Co(max(k-1,KS),l), 0.0_RP, k > KS ) * PT(max(k-1,KS),l) ) &
+                      * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
+                RHOT_RK(k,i,j) = RHOT0(k,i,j) + dtrk * ( advcv + St(k,i,j) )
+#ifdef HIST_TEND
+                if ( lhist ) advcv_t(k,i,j,I_RHOT) = advcv
+#endif
+             enddo
+#ifdef DEBUG
+             call check_equation( &
+                  Co(:,l), &
+                  DENS(:,i,j), MOMZ(:,i,j), RHOT(:,i,j), DPRES(:,i,j), &
+                  REF_dens(:,i,j), &
+                  Sr(:,i,j), Sw(:,i,j), St(:,i,j), &
+                  J33G, GSQRT(:,i,j,:), &
+                  RT2P(:,i,j), &
+                  dtrk, i, j )
+#endif
+          enddo ! i
+          enddo ! j
+          !$acc end parallel
+#else
+!OCL NORECURRENCE
+             do k = KS, KE-1
+#ifdef DEBUG_HEVI2HEVE
+                ! for debug (change to explicit integration)
+                Co(k,l) = MOMZ(k,i,j)
+                tmp = J33G * MOMZ(k,i,j) * MAPF_R12(i,j,I_XY)
+                mflx_hi(k,i,j,ZDIR) = mflx_hi(k,i,j,ZDIR) + tmp
+                tflx_hi(k,i,j,ZDIR) = tflx_hi(k,i,j,ZDIR) + tmp * PT(k,l)
+                ! use not density at the half level but mean density between CZ(k) and CZ(k+1)
+                MOMZ_RK(k,i,j) = MOMZ0(k,i,j) &
+                     + dtrk*( &
+                     - J33G * ( DPRES(k+1,i,j)-DPRES(k,i,j) ) * RFDZ(k) * RGSQRT_XYW(k,i,j) &
+                     - GRAV * 0.5_RP * ( (DENS(k,i,j)-REF_dens(k,i,j)) + (DENS(k+1,i,j)-REF_dens(k+1,i,j)) ) &
+                     + Sw(k,i,j) )
+#else
+                ! z-flux
+                tmp = J33G * Co(k,l) * MAPF_R12(i,j,I_XY)
+                mflx_hi(k,i,j,ZDIR) = mflx_hi(k,i,j,ZDIR) + tmp
+                tflx_hi(k,i,j,ZDIR) = tflx_hi(k,i,j,ZDIR) + tmp * PT(k,l)
+                ! z-momentum
+                MOMZ_RK(k,i,j) = MOMZ0(k,i,j) + ( Co(k,l) - MOMZ(k,i,j) )
+#endif
+             enddo
+             MOMZ_RK(KS-1,i,j) = 0.0_RP
+             MOMZ_RK(KE  ,i,j) = 0.0_RP
+
+             ! density and rho*theta
+!OCL NORECURRENCE
              do k = KS+1, KE-1
+                advcv = - ( Co(k,l) - Co(k-1,l) ) * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
+                DENS_RK(k,i,j) = DENS0(k,i,j) + dtrk * ( advcv + Sr(k,i,j) )
+#ifdef HIST_TEND
+                if ( lhist ) advcv_t(k,i,j,I_DENS) = advcv
 #endif
                 advcv = - ( Co(k,l) * PT(k,l) - Co(k-1,l) * PT(k-1,l) ) &
                       * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
@@ -1341,18 +1396,6 @@ contains
                 if ( lhist ) advcv_t(k,i,j,I_RHOT) = advcv
 #endif
              enddo
-#ifdef HEVI_FISSION
-          enddo ! i
-          enddo ! j
-          !$acc end parallel
-
-          !$omp parallel do default(shared) OMP_SCHEDULE_ &
-          !$omp private(i,j,advcv)
-          !$acc parallel async(1)
-          !$acc loop collapse(2)
-          do j = JJS, JJE
-          do i = IIS, IIE
-#endif
              advcv = - Co(KS,l)          * J33G * RCDZ(KS) * RGSQRT_XYZ(KS,i,j) ! Co at KS-1 is 0
              DENS_RK(KS,i,j) = DENS0(KS,i,j) + dtrk * ( advcv + Sr(KS,i,j) )
 #ifdef HIST_TEND
@@ -1362,18 +1405,6 @@ contains
              DENS_RK(KE,i,j) = DENS0(KE,i,j) + dtrk * ( advcv + Sr(KE,i,j) )
 #ifdef HIST_TEND
              if ( lhist ) advcv_t(KE,i,j,I_DENS) = advcv
-#endif
-#ifdef HEVI_FISSION
-          enddo ! i
-          enddo ! j
-          !$acc end parallel
-
-          !$omp parallel do default(shared) OMP_SCHEDULE_ &
-          !$omp private(i,j,advcv)
-          !$acc parallel async(2)
-          !$acc loop collapse(2)
-          do j = JJS, JJE
-          do i = IIS, IIE
 #endif
              advcv = - Co(KS,l) * PT(KS,l) * J33G * RCDZ(KS) * RGSQRT_XYZ(KS,i,j) ! Co at KS-1 is 0
              RHOT_RK(KS,i,j) = RHOT0(KS,i,j) + dtrk * ( advcv + St(KS,i,j) )
@@ -1404,6 +1435,7 @@ contains
        enddo
        enddo
        !$acc end parallel
+#endif
 #ifdef DEBUG
        k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif

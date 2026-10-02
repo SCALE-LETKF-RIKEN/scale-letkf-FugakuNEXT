@@ -672,6 +672,7 @@ contains
     real(RP) :: dtl
     real(RP) :: dts
     integer  :: nstep
+    real(RP) :: tavg_coef ! coefficient of the time average of the damping tendencies (1/nstep)
 
     ! for history
     logical :: do_put
@@ -684,6 +685,9 @@ contains
     logical :: MONIT_lateral_flag(3)
 
     integer  :: i, j, k, iq, iqb, step
+#ifdef _OPENACC
+    integer  :: kk
+#endif
     integer  :: iv
     integer  :: n
 #ifdef USE_CUDALIB
@@ -715,6 +719,7 @@ contains
     dtl   = real(DTLS, kind=RP)            ! large time step
     nstep = ceiling( ( dtl - eps ) / dts )
     dts   = dtl / nstep                    ! dts is divisor of dtl and smaller or equal to dtss
+    tavg_coef = 1.0_RP / nstep
 
     MONIT_lateral_flag(ZDIR) = .false.
     MONIT_lateral_flag(XDIR) = MONIT_mflx_west > 0 .or. MONIT_mflx_east > 0
@@ -1024,7 +1029,7 @@ contains
           !$omp private(j,k) &
           !$omp shared(IS,JS,JE,KS,KE) &
           !$omp shared(DAMP_alpha_DENS,diff,DENS_tq,DENS_t,DENS_tp,BND_SMOOTHER_FACT,EPS) &
-          !$omp shared(damp_t_DENS,DENS_damp,do_put,nstep)
+          !$omp shared(damp_t_DENS,DENS_damp,do_put,tavg_coef)
           !$acc kernels
 !OCL XFILL
           do j = JS, JE
@@ -1036,7 +1041,7 @@ contains
                   + DENS_tq(k,IS,j) * ( 0.5_RP - sign( 0.5_RP, DAMP_alpha_DENS(k,IS,j)-EPS ) ) ! dencity change due to rayleigh damping for tracers
              DENS_t(k,IS,j) = DENS_tp(k,IS,j) & ! tendency from physical step
                            + DENS_damp(k,IS,j)
-             if ( do_put ) damp_t_DENS(k,IS,j) = damp_t_DENS(k,IS,j) + DENS_damp(k,IS,j) / nstep
+             if ( do_put ) damp_t_DENS(k,IS,j) = damp_t_DENS(k,IS,j) + DENS_damp(k,IS,j) * tavg_coef
           enddo
           enddo
           !$acc end kernels
@@ -1045,7 +1050,7 @@ contains
           !$omp private(i,j,k) &
           !$omp shared(JS,JE,IS,IE,KS,KE) &
           !$omp shared(DAMP_alpha_DENS,diff,DENS_tq,DENS_t,DENS_tp,BND_SMOOTHER_FACT,EPS) &
-          !$omp shared(damp_t_DENS,DENS_damp,do_put,nstep)
+          !$omp shared(damp_t_DENS,DENS_damp,do_put,tavg_coef)
           !$acc kernels
 !OCL XFILL
           do j = JS, JE
@@ -1058,7 +1063,7 @@ contains
                   + DENS_tq(k,i,j) * ( 0.5_RP - sign( 0.5_RP, DAMP_alpha_DENS(k,i,j)-EPS ) ) ! density change due to rayleigh damping for tracers
              DENS_t(k,i,j) = DENS_tp(k,i,j) & ! tendency from physical step
                            + DENS_damp(k,i,j)
-             if ( do_put ) damp_t_DENS(k,i,j) = damp_t_DENS(k,i,j) + DENS_damp(k,i,j) / nstep
+             if ( do_put ) damp_t_DENS(k,i,j) = damp_t_DENS(k,i,j) + DENS_damp(k,i,j) * tavg_coef
           enddo
           enddo
           enddo
@@ -1087,7 +1092,7 @@ contains
           !$omp shared(IS,JS,JE,KS,KE) &
           !$omp shared(DENS_damp,DENS,MOMZ) &
           !$omp shared(DAMP_alpha_VELZ,diff,BND_SMOOTHER_FACT,MOMZ_t,MOMZ_tp) &
-          !$omp shared(damp_t_MOMZ,do_put,nstep)
+          !$omp shared(damp_t_MOMZ,do_put,tavg_coef)
           !$acc kernels
 !OCL XFILL
           do j = JS, JE
@@ -1100,17 +1105,41 @@ contains
              MOMZ_t(k,IS,j) = MOMZ_tp(k,IS,j) & ! tendency from physical step
                            + damp &
                            + ( DENS_damp(k,IS,j) + DENS_damp(k+1,IS,j) ) * MOMZ(k,IS,j) / ( DENS(k,IS,j) + DENS(k+1,IS,j) )
-             if ( do_put ) damp_t_MOMZ(k,IS,j) = damp_t_MOMZ(k,IS,j) + damp / nstep
+             if ( do_put ) damp_t_MOMZ(k,IS,j) = damp_t_MOMZ(k,IS,j) + damp * tavg_coef
           enddo
           enddo
           !$acc end kernels
        else
+#ifdef _OPENACC
+          ! MOMZ_t at 1:KS-1 and KE:KA are set to zero in this kernel with merge(),
+          ! instead of in a separate kernel over (i,j), in which the accesses are strided.
+          ! kk is the level clamped to KS:KE-1.
+          !$acc kernels
+          do j = JS, JE
+          do i = IS, IE
+          do k = 1, KA
+             kk = min( max( k, KS ), KE-1 )
+             damp = - DAMP_alpha_VELZ(kk,i,j) &
+                  * ( diff(kk,i,j) & ! rayleigh damping
+                    - ( diff(kk,i-1,j) + diff(kk,i+1,j) + diff(kk,i,j-1) + diff(kk,i,j+1) - diff(kk,i,j)*4.0_RP ) &
+                    * 0.125_RP * BND_SMOOTHER_FACT ) ! horizontal smoother
+
+             MOMZ_t(k,i,j) = merge( MOMZ_tp(kk,i,j) & ! tendency from physical step
+                                  + damp &
+                                  + ( DENS_damp(kk,i,j) + DENS_damp(kk+1,i,j) ) * MOMZ(kk,i,j) / ( DENS(kk,i,j) + DENS(kk+1,i,j) ), &
+                                    0.0_RP, KS <= k .and. k <= KE-1 )
+             if ( do_put .and. KS <= k .and. k <= KE-1 ) damp_t_MOMZ(k,i,j) = damp_t_MOMZ(k,i,j) + damp * tavg_coef
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+#else
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,damp) &
           !$omp shared(JS,JE,IS,IE,KS,KE) &
           !$omp shared(DENS_damp,DENS,MOMZ) &
           !$omp shared(DAMP_alpha_VELZ,diff,BND_SMOOTHER_FACT,MOMZ_t,MOMZ_tp) &
-          !$omp shared(damp_t_MOMZ,do_put,nstep)
+          !$omp shared(damp_t_MOMZ,do_put,tavg_coef)
           !$acc kernels
 !OCL XFILL
           do j = JS, JE
@@ -1124,12 +1153,16 @@ contains
              MOMZ_t(k,i,j) = MOMZ_tp(k,i,j) & ! tendency from physical step
                            + damp &
                            + ( DENS_damp(k,i,j) + DENS_damp(k+1,i,j) ) * MOMZ(k,i,j) / ( DENS(k,i,j) + DENS(k+1,i,j) )
-             if ( do_put ) damp_t_MOMZ(k,i,j) = damp_t_MOMZ(k,i,j) + damp / nstep
+             if ( do_put ) damp_t_MOMZ(k,i,j) = damp_t_MOMZ(k,i,j) + damp * tavg_coef
           enddo
           enddo
           enddo
           !$acc end kernels
+#endif
        end if
+#ifdef _OPENACC
+       if ( TwoD ) then
+#endif
        !$omp parallel do
        !$acc kernels copy(momz_t)
 !OCL XFILL
@@ -1140,6 +1173,9 @@ contains
        enddo
        enddo
        !$acc end kernels
+#ifdef _OPENACC
+       end if
+#endif
        call COMM_vars8( MOMZ_t(:,:,:), I_COMM_MOMZ_t )
 
        call COMM_wait( DENS_damp(:,:,:), I_COMM_DENS_damp )
@@ -1177,7 +1213,7 @@ contains
           !$omp shared(IS,JS,JE,KS,KE) &
           !$omp shared(DENS_damp,DENS,MOMX) &
           !$omp shared(DAMP_alpha_VELX,diff,BND_SMOOTHER_FACT,MOMX_tp,MOMX_t) &
-          !$omp shared(damp_t_MOMX,do_put,nstep)
+          !$omp shared(damp_t_MOMX,do_put,tavg_coef)
           !$acc kernels
           do j = JS, JE
           do k = KS, KE
@@ -1188,7 +1224,7 @@ contains
              MOMX_t(k,IS,j) = MOMX_tp(k,IS,j) & ! tendency from physical step
                            + damp &
                            + DENS_damp(k,IS,j) * MOMX(k,IS,j) / DENS(k,IS,j)
-             if ( do_put ) damp_t_MOMX(k,IS,j) = damp_t_MOMX(k,IS,j) + damp / nstep
+             if ( do_put ) damp_t_MOMX(k,IS,j) = damp_t_MOMX(k,IS,j) + damp * tavg_coef
           enddo
           enddo
           !$acc end kernels
@@ -1296,7 +1332,7 @@ contains
           !$omp shared(JS,JE,IS,IE,KS,KE) &
           !$omp shared(DENS_damp,DENS,MOMX) &
           !$omp shared(DAMP_alpha_VELX,diff,diff2,BND_SMOOTHER_FACT,SPNUDGE_u_alpha,MOMX_tp,MOMX_t) &
-          !$omp shared(damp_t_MOMX,do_put,nstep)
+          !$omp shared(damp_t_MOMX,do_put,tavg_coef)
           !$acc kernels
           do j = JS, JE
           do i = IS, IE
@@ -1309,7 +1345,7 @@ contains
              MOMX_t(k,i,j) = MOMX_tp(k,i,j) & ! tendency from physical step
                            + damp &
                            + ( DENS_damp(k,i,j) + DENS_damp(k,i+1,j) ) * MOMX(k,i,j) / ( DENS(k,i,j) + DENS(k,i+1,j) )
-             if ( do_put ) damp_t_MOMX(k,i,j) = damp_t_MOMX(k,i,j) + damp / nstep
+             if ( do_put ) damp_t_MOMX(k,i,j) = damp_t_MOMX(k,i,j) + damp * tavg_coef
           enddo
           enddo
           enddo
@@ -1339,7 +1375,7 @@ contains
           !$omp shared(IS,JS,JE,KS,KE) &
           !$omp shared(DENS_damp,DENS,MOMY) &
           !$omp shared(DAMP_alpha_VELY,diff,BND_SMOOTHER_FACT,MOMY_tp,MOMY_t) &
-          !$omp shared(damp_t_MOMY,do_put,nstep)
+          !$omp shared(damp_t_MOMY,do_put,tavg_coef)
           !$acc kernels
           do j = JS, JE
           do k = KS, KE
@@ -1350,7 +1386,7 @@ contains
              MOMY_t(k,IS,j) = MOMY_tp(k,IS,j) & ! tendency from physical step
                            + damp &
                            + ( DENS_damp(k,IS,j) + DENS_damp(k,IS,j+1) ) * MOMY(k,IS,j) / ( DENS(k,IS,j) + DENS(k,IS,j+1) )
-             if ( do_put ) damp_t_MOMY(k,IS,j) = damp_t_MOMY(k,IS,j) + damp / nstep
+             if ( do_put ) damp_t_MOMY(k,IS,j) = damp_t_MOMY(k,IS,j) + damp * tavg_coef
           enddo
           enddo
           !$acc end kernels
@@ -1405,7 +1441,7 @@ contains
           !$omp shared(JS,JE,IS,IE,KS,KE) &
           !$omp shared(DENS_damp,DENS,MOMY) &
           !$omp shared(DAMP_alpha_VELY,diff,diff2,BND_SMOOTHER_FACT,SPNUDGE_v_alpha,MOMY_tp,MOMY_t) &
-          !$omp shared(damp_t_MOMY,do_put,nstep)
+          !$omp shared(damp_t_MOMY,do_put,tavg_coef)
           !$acc kernels
           do j = JS, JE
           do i = IS, IE
@@ -1418,7 +1454,7 @@ contains
              MOMY_t(k,i,j) = MOMY_tp(k,i,j) & ! tendency from physical step
                            + damp &
                            + ( DENS_damp(k,i,j) + DENS_damp(k,i,j+1) ) * MOMY(k,i,j) / ( DENS(k,i,j) + DENS(k,i,j+1) )
-             if ( do_put ) damp_t_MOMY(k,i,j) = damp_t_MOMY(k,i,j) + damp / nstep
+             if ( do_put ) damp_t_MOMY(k,i,j) = damp_t_MOMY(k,i,j) + damp * tavg_coef
           enddo
           enddo
           enddo
@@ -1448,7 +1484,7 @@ contains
           !$omp shared(IS,JS,JE,KS,KE) &
           !$omp shared(DENS_damp,DENS,RHOT) &
           !$omp shared(DAMP_alpha_POTT,diff,BND_SMOOTHER_FACT,RHOT_t,RHOT_tp) &
-          !$omp shared(damp_t_RHOT,do_put,nstep)
+          !$omp shared(damp_t_RHOT,do_put,tavg_coef)
           !$acc kernels
           do j = JS, JE
           do k = KS, KE
@@ -1459,7 +1495,7 @@ contains
              RHOT_t(k,IS,j) = RHOT_tp(k,IS,j) & ! tendency from physical step
                            + damp &
                            + DENS_damp(k,IS,j) * RHOT(k,IS,j) / DENS(k,IS,j)
-             if ( do_put ) damp_t_RHOT(k,IS,j) = damp_t_RHOT(k,IS,j) + damp / nstep
+             if ( do_put ) damp_t_RHOT(k,IS,j) = damp_t_RHOT(k,IS,j) + damp * tavg_coef
           enddo
           enddo
           !$acc end kernels
@@ -1514,7 +1550,7 @@ contains
           !$omp shared(JS,JE,IS,IE,KS,KE) &
           !$omp shared(DENS_damp,DENS,RHOT) &
           !$omp shared(DAMP_alpha_POTT,diff,diff2,BND_SMOOTHER_FACT,SPNUDGE_pt_alpha,RHOT_t,RHOT_tp) &
-          !$omp shared(damp_t_RHOT,do_put,nstep)
+          !$omp shared(damp_t_RHOT,do_put,tavg_coef)
           !$acc kernels
           do j = JS, JE
           do i = IS, IE
@@ -1527,7 +1563,7 @@ contains
              RHOT_t(k,i,j) = RHOT_tp(k,i,j) & ! tendency from physical step
                            + damp &
                            + DENS_damp(k,i,j) * RHOT(k,i,j) / DENS(k,i,j)
-             if ( do_put ) damp_t_RHOT(k,i,j) = damp_t_RHOT(k,i,j) + damp / nstep
+             if ( do_put ) damp_t_RHOT(k,i,j) = damp_t_RHOT(k,i,j) + damp * tavg_coef
           enddo
           enddo
           enddo
