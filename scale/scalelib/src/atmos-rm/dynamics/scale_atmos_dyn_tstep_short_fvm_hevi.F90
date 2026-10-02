@@ -39,6 +39,18 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   use scale_atmos_grid_cartesC_index
   use scale_index
   use scale_tracer
+  use scale_atmos_dyn_fvm_metric, only: &
+     RMAPF, &
+     F2H_UYZ, &
+     F2H_XVZ, &
+     MAPF_M12, &
+     MAPF_R12, &
+     RGSQRT_XYZ, &
+     RGSQRT_XYW, &
+     RGSQRT_UYZ, &
+     RGSQRT_XVZ, &
+     COEF_CF_U, &
+     COEF_CF_V
 #if defined DEBUG || defined QUICKDEBUG
   use scale_debug, only: &
      CHECK
@@ -55,7 +67,6 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   !
   public :: ATMOS_DYN_Tstep_short_fvm_hevi_regist
   public :: ATMOS_DYN_Tstep_short_fvm_hevi_setup
-  public :: ATMOS_DYN_Tstep_short_fvm_hevi_finalize
   public :: ATMOS_DYN_Tstep_short_fvm_hevi
 
   !-----------------------------------------------------------------------------
@@ -66,13 +77,6 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   !
   !++ Private procedure
   !
-#if 1
-! weight for full-level k+1; weight for k is 1 - F2H(k,idx)
-#define F2H(k,idx) (CDZ(k)*GSQRT(k,i,j,idx)/(CDZ(k)*GSQRT(k,i,j,idx)+CDZ(k+1)*GSQRT(k+1,i,j,idx)))
-#else
-#define F2H(k,idx) 0.5_RP
-#endif
-
   !-----------------------------------------------------------------------------
   !
   !++ Private parameters & variables
@@ -81,25 +85,6 @@ module scale_atmos_dyn_tstep_short_fvm_hevi
   integer,  private, parameter :: VA_FVM_HEVI = 0
   integer                      :: IFS_OFF
   integer                      :: JFS_OFF
-
-  ! time-invariant coefficients of the Coriolis and metric terms, set in setup
-  ! COEF_CF_U at (u,y): 0.5*(f(i+1)+f(i)), m1*m2, d(1/m2)/dx, d(1/m1)/dy
-  ! COEF_CF_V at (x,v): 0.5*(f(j+1)+f(j)), m1*m2, d(1/m2)/dx, d(1/m1)/dy
-  real(RP), private, allocatable :: COEF_CF_U(:,:,:) ! (4,IA,JA)
-  real(RP), private, allocatable :: COEF_CF_V(:,:,:) ! (4,IA,JA)
-
-  ! time-invariant map-factor coefficients, set in setup
-  real(RP), private, allocatable :: RMAPF   (:,:,:,:) ! (IA,JA,2,I_XY_MAX) 1 / MAPF
-  real(RP), private, allocatable :: MAPF_M12(:,:,:)   ! (IA,JA,I_XY_MAX)   MAPF(1) * MAPF(2)
-  real(RP), private, allocatable :: MAPF_R12(:,:,:)   ! (IA,JA,I_XY_MAX)   1 / ( MAPF(1) * MAPF(2) )
-
-  ! time-invariant 3D metric coefficients, set in setup
-  real(RP), private, allocatable :: RGSQRT_XYZ(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (x,y,z)
-  real(RP), private, allocatable :: RGSQRT_XYW(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (x,y,w)
-  real(RP), private, allocatable :: RGSQRT_UYZ(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (u,y,z)
-  real(RP), private, allocatable :: RGSQRT_XVZ(:,:,:) ! (KA,IA,JA) 1 / GSQRT at (x,v,z)
-  real(RP), private, allocatable :: F2H_UYZ   (:,:,:) ! (KA,IA,JA) F2H(k,I_UYZ)
-  real(RP), private, allocatable :: F2H_XVZ   (:,:,:) ! (KA,IA,JA) F2H(k,I_XVZ)
 
   !-----------------------------------------------------------------------------
 contains
@@ -143,122 +128,14 @@ contains
 
   !-----------------------------------------------------------------------------
   !> Setup
-  subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup( &
-       CORIOLI,               &
-       MAPF, GSQRT,           &
-       CDZ,                   &
-       RCDX, RCDY, RFDX, RFDY )
+  subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup
     implicit none
-
-    real(RP), intent(in) :: CORIOLI(IA,JA)
-    real(RP), intent(in) :: MAPF   (IA,JA,2,I_XY_MAX)
-    real(RP), intent(in) :: GSQRT  (KA,IA,JA,I_XYZ_MAX)
-    real(RP), intent(in) :: CDZ (KA)
-    real(RP), intent(in) :: RCDX(IA)
-    real(RP), intent(in) :: RCDY(JA)
-    real(RP), intent(in) :: RFDX(IA-1)
-    real(RP), intent(in) :: RFDY(JA-1)
-
-    integer :: k, i, j, n
     !---------------------------------------------------------------------------
 
     LOG_INFO("ATMOS_DYN_Tstep_short_fvm_hevi_setup",*) 'HEVI Setup'
 
-    ! time-invariant map-factor coefficients
-    allocate( RMAPF   (IA,JA,2,I_XY_MAX) )
-    allocate( MAPF_M12(IA,JA,  I_XY_MAX) )
-    allocate( MAPF_R12(IA,JA,  I_XY_MAX) )
-    do n = 1, I_XY_MAX
-    do j = 1, JA
-    do i = 1, IA
-       RMAPF   (i,j,1,n) = 1.0_RP / MAPF(i,j,1,n)
-       RMAPF   (i,j,2,n) = 1.0_RP / MAPF(i,j,2,n)
-       MAPF_M12(i,j,n)   = MAPF(i,j,1,n) * MAPF(i,j,2,n)
-       MAPF_R12(i,j,n)   = 1.0_RP / MAPF_M12(i,j,n)
-    enddo
-    enddo
-    enddo
-    !$acc enter data copyin(RMAPF, MAPF_M12, MAPF_R12)
-
-    ! time-invariant 3D metric coefficients
-    allocate( RGSQRT_XYZ(KA,IA,JA) )
-    allocate( RGSQRT_XYW(KA,IA,JA) )
-    allocate( RGSQRT_UYZ(KA,IA,JA) )
-    allocate( RGSQRT_XVZ(KA,IA,JA) )
-    allocate( F2H_UYZ   (KA,IA,JA) )
-    allocate( F2H_XVZ   (KA,IA,JA) )
-    do j = 1, JA
-    do i = 1, IA
-       do k = 1, KA
-          RGSQRT_XYZ(k,i,j) = 1.0_RP / GSQRT(k,i,j,I_XYZ)
-          RGSQRT_XYW(k,i,j) = 1.0_RP / GSQRT(k,i,j,I_XYW)
-          RGSQRT_UYZ(k,i,j) = 1.0_RP / GSQRT(k,i,j,I_UYZ)
-          RGSQRT_XVZ(k,i,j) = 1.0_RP / GSQRT(k,i,j,I_XVZ)
-       enddo
-       do k = 1, KA-1
-          F2H_UYZ(k,i,j) = F2H(k,I_UYZ)
-          F2H_XVZ(k,i,j) = F2H(k,I_XVZ)
-       enddo
-       F2H_UYZ(KA,i,j) = 0.0_RP
-       F2H_XVZ(KA,i,j) = 0.0_RP
-    enddo
-    enddo
-    !$acc enter data copyin(RGSQRT_XYZ, RGSQRT_XYW, RGSQRT_UYZ, RGSQRT_XVZ, F2H_UYZ, F2H_XVZ)    ! time-invariant coefficients of the Coriolis and metric terms
-    allocate( COEF_CF_U(4,IA,JA) )
-    allocate( COEF_CF_V(4,IA,JA) )
-
-    ! at (u, y, z)
-    COEF_CF_U(:,:,:) = 0.0_RP
-    do j = 2, JA
-    do i = 1, IA-1
-       COEF_CF_U(1,i,j) = 0.5_RP * ( CORIOLI(i+1,j) + CORIOLI(i,j) )
-       COEF_CF_U(2,i,j) = MAPF(i,j,1,I_UY) * MAPF(i,j,2,I_UY)
-       COEF_CF_U(3,i,j) = ( 1.0_RP/MAPF(i+1,j,2,I_XY) - 1.0_RP/MAPF(i,j  ,2,I_XY) ) * RFDX(i)
-       COEF_CF_U(4,i,j) = ( 1.0_RP/MAPF(i  ,j,1,I_UV) - 1.0_RP/MAPF(i,j-1,1,I_UV) ) * RCDY(j)
-    enddo
-    enddo
-
-    ! at (x, v, z)
-    COEF_CF_V(:,:,:) = 0.0_RP
-    do j = 1, JA-1
-    do i = 2, IA
-       COEF_CF_V(1,i,j) = 0.5_RP * ( CORIOLI(i,j+1) + CORIOLI(i,j) )
-       COEF_CF_V(2,i,j) = MAPF(i,j,1,I_XV) * MAPF(i,j,2,I_XV)
-       COEF_CF_V(3,i,j) = ( 1.0_RP/MAPF(i,j  ,2,I_UV) - 1.0_RP/MAPF(i-1,j,2,I_UV) ) * RCDX(i)
-       COEF_CF_V(4,i,j) = ( 1.0_RP/MAPF(i,j+1,1,I_XY) - 1.0_RP/MAPF(i  ,j,1,I_XY) ) * RFDY(j)
-    enddo
-    enddo
-
-    !$acc enter data copyin(COEF_CF_U, COEF_CF_V)
-
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup
-
-  !-----------------------------------------------------------------------------
-  !> Finalize
-  subroutine ATMOS_DYN_Tstep_short_fvm_hevi_finalize
-    implicit none
-    !---------------------------------------------------------------------------
-
-    !$acc exit data delete(COEF_CF_U, COEF_CF_V)
-    deallocate( COEF_CF_U )
-    deallocate( COEF_CF_V )
-
-    !$acc exit data delete(RMAPF, MAPF_M12, MAPF_R12)
-    deallocate( RMAPF    )
-    deallocate( MAPF_M12 )
-    deallocate( MAPF_R12 )
-
-    !$acc exit data delete(RGSQRT_XYZ, RGSQRT_XYW, RGSQRT_UYZ, RGSQRT_XVZ, F2H_UYZ, F2H_XVZ)
-    deallocate( RGSQRT_XYZ )
-    deallocate( RGSQRT_XYW )
-    deallocate( RGSQRT_UYZ )
-    deallocate( RGSQRT_XVZ )
-    deallocate( F2H_UYZ    )
-    deallocate( F2H_XVZ    )
-
-    return
-  end subroutine ATMOS_DYN_Tstep_short_fvm_hevi_finalize
 
   !-----------------------------------------------------------------------------
   subroutine ATMOS_DYN_Tstep_short_fvm_hevi( &
@@ -1250,11 +1127,22 @@ contains
                 tmp = tmp * RFDZ(k) * J33G
                 A0 = RCDZ(k  ) * RT2P(k  ,i,j) * RGSQRT_XYZ(k  ,i,j) * tmp
                 A1 = RCDZ(k+1) * RT2P(k+1,i,j) * RGSQRT_XYZ(k+1,i,j) * tmp
+#ifdef USE_CUDALIB
+                ! cuSPARSE (gtsv2StridedBatch) requires the first element of the
+                ! lower diagonal and the last element of the upper diagonal to be zero.
+                ! Select the value instead of branching, so that each array is stored
+                ! once and the loads are not split by divergent branches.
+                ! The indices of PT are clamped, since PT(KS-1) and PT(KE) are not set.
+                F1(k,l) = merge( - ( PT(min(k+1,KE-1),l) *   A1      + B ), 0.0_RP, k < KE-1 )
+                F2(k,l) = 1.0_RP + ( PT(k  ,l) * ( A1+A0 )     )
+                F3(k,l) = merge( - ( PT(max(k-1,KS  ),l) *      A0   - B ), 0.0_RP, k > KS   )
+#else
                 if ( k < KE-1 ) &
                 F1(k,l) =        - ( PT(k+1,l) *   A1      + B )
                 F2(k,l) = 1.0_RP + ( PT(k  ,l) * ( A1+A0 )     )
                 if ( k > KS ) &
                 F3(k,l) =        - ( PT(k-1,l) *      A0   - B )
+#endif
              end do
 #else
              do k = KS, KE
@@ -1269,6 +1157,8 @@ contains
              !       Zeroing them costs a measurable amount of time, so it is
              !       not done. If the solver implementation is changed, check
              !       whether the new one requires them to be zero.
+             !       The cuSPARSE solver (USE_CUDALIB) does require them to be
+             !       zero, and they are zeroed in the _OPENACC branch above.
              tmp = fact * RGSQRT_XYW(KS,i,j)
              B = GRAV / ( CDZ(KS+1) + CDZ(KS) )
              F1(KS,l) =        - ( PT(KS+1,l) * RFDZ(KS) *   A(KS+1)         + B ) * tmp

@@ -1324,7 +1324,7 @@ contains
           end do
           end do
           end do
-          !$acc end parallel
+          !$acc end parallel loop
 #endif
 
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
@@ -1381,7 +1381,7 @@ contains
 #ifdef _OPENACC
           end do
           end do
-          !$acc end parallel
+          !$acc end parallel loop
 
           !$acc parallel loop collapse(4)
           do j = JS, JE
@@ -1396,7 +1396,7 @@ contains
 #ifdef _OPENACC
           end do
           end do
-          !$acc end parallel
+          !$acc end parallel loop
 #endif
              if( flg_lt ) then
 #ifdef _OPENACC
@@ -1412,7 +1412,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
 #endif
              endif
 #ifdef _OPENACC
@@ -1434,7 +1434,7 @@ contains
 #ifdef _OPENACC
           end do
           end do
-          !$acc end kernels
+          !$acc end kernels loop
 #endif
 
              do step = 1, MP_NSTEP_SEDIMENTATION
@@ -1454,7 +1454,7 @@ contains
 #ifdef _OPENACC
                    end do
                    end do
-                   !$acc end parallel
+                   !$acc end parallel loop
 #endif
                 case ( I_TOMITA08 )
 #ifdef _OPENACC
@@ -1469,7 +1469,7 @@ contains
 #ifdef _OPENACC
                    end do
                    end do
-                   !$acc end parallel
+                   !$acc end parallel loop
 #endif
                   case ( I_SN14 )
 #ifdef _OPENACC
@@ -1484,7 +1484,7 @@ contains
 #ifdef _OPENACC
                    end do
                    end do
-                   !$acc end parallel
+                   !$acc end parallel loop
 #endif
                   case ( I_SUZUKI10 )
 #ifdef _OPENACC
@@ -1498,7 +1498,7 @@ contains
 #ifdef _OPENACC
                    end do
                    end do
-                   !$acc end parallel
+                   !$acc end parallel loop
 #endif
                case ( I_AMPS )
                    ! do nothing
@@ -1516,7 +1516,7 @@ contains
 #ifdef _OPENACC
                   end do
                   end do
-                  !$acc end parallel
+                  !$acc end parallel loop
 #endif
                 end select
 
@@ -1539,7 +1539,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
 #endif
 
                 select case ( MP_upwind_scheme_id )
@@ -1563,7 +1563,7 @@ contains
 #ifdef _OPENACC
                    end do
                    end do
-                   !$acc end parallel
+                   !$acc end parallel loop
 #endif
                 case ( I_SEMILAG )
 #ifdef _OPENACC
@@ -1586,7 +1586,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
 #endif
                 case default
 #ifdef _OPENACC
@@ -1598,7 +1598,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
                 !$acc parallel loop collapse(2)
                 do j = JS, JE
                 do i = IS, IE
@@ -1608,7 +1608,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
 #endif
                 end select
 
@@ -1635,7 +1635,7 @@ contains
 #ifdef _OPENACC
                    end do
                    end do
-                   !$acc end parallel
+                   !$acc end parallel loop
 #endif
                    case ( I_SEMILAG )
 #ifdef _OPENACC
@@ -1658,7 +1658,7 @@ contains
 #ifdef _OPENACC
                    end do
                    end do
-                   !$acc end parallel
+                   !$acc end parallel loop
 #endif
                    case default
 #ifdef _OPENACC
@@ -1670,7 +1670,7 @@ contains
 #ifdef _OPENACC
                   end do
                   end do
-                  !$acc end parallel
+                  !$acc end parallel loop
 
                   !$acc parallel loop collapse(2)
                   do j = JS, JE
@@ -1681,7 +1681,7 @@ contains
 #ifdef _OPENACC
                    end do
                    end do
-                   !$acc end parallel
+                   !$acc end parallel loop
 #endif
                    end select
 
@@ -1698,7 +1698,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
 
                 !$acc parallel loop collapse(3)
                 do j = JS, JE
@@ -1710,7 +1710,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
 
                 !$acc parallel loop collapse(2)
                 do j = JS, JE
@@ -1723,7 +1723,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
 #endif
 
              enddo ! step
@@ -1738,7 +1738,7 @@ contains
 #ifdef _OPENACC
              end do
              end do
-             !$acc end parallel
+             !$acc end parallel loop
 
              !$acc parallel loop collapse(3)
              do j = JS, JE
@@ -1751,7 +1751,7 @@ contains
 #ifdef _OPENACC
              end do
              end do
-             !$acc end parallel
+             !$acc end parallel loop
 
              !$acc parallel loop collapse(3)
              do j = JS, JE
@@ -1779,7 +1779,7 @@ contains
 #ifdef _OPENACC
             end do
             end do
-            !$acc end parallel
+            !$acc end parallel loop
 
             !$acc parallel loop collapse(4)
             do j = JS, JE
@@ -1794,7 +1794,7 @@ contains
 #ifdef _OPENACC
              end do
              end do
-             !$acc end parallel
+             !$acc end parallel loop
 #endif
 
              if( flg_lt ) then
@@ -1812,7 +1812,7 @@ contains
 #ifdef _OPENACC
                 end do
                 end do
-                !$acc end parallel
+                !$acc end parallel loop
 #endif
              endif
 
@@ -1830,7 +1830,7 @@ contains
 
           enddo
           enddo
-          !$acc end parallel
+          !$acc end parallel loop
 
           ! history output
           do iq = QS_MP+1, QE_MP

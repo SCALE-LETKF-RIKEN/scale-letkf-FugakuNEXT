@@ -41,6 +41,9 @@ ifeq ($(SCALE_USE_SINGLEFP),T)
 endif
 
 ifeq ($(SCALE_ENABLE_OPENMP),T)
+   ifeq ($(SCALE_ENABLE_OPENACC),T)
+      $(error SCALE_ENABLE_OPENMP=T and SCALE_ENABLE_OPENACC=T cannot be used together)
+   endif
    FFLAGS += $(FFLAGS_OPENMP)
 endif
 

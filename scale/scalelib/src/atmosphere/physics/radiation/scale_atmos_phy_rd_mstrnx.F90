@@ -1875,7 +1875,7 @@ contains
     end do
     end do
     end do
-    !$acc end kernels
+    !$acc end kernels loop
     !$acc kernels async(0)
     do irgn_alb = 1, N_RAD_RGN
     do idir = 1, N_RAD_DIR

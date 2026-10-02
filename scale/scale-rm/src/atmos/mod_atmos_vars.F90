@@ -1703,7 +1703,7 @@ contains
        end do
        end do
        end do
-       !$acc end kernels
+       !$acc end kernels loop
 
        if ( ATMOS_VARS_CHECKCFL_HARD > 0.0_RP .AND. CFLMAX > ATMOS_VARS_CHECKCFL_HARD ) then
           LOG_INFO("ATMOS_vars_check",*) "Courant number =", CFLMAX, " exceeded the hard limit =", ATMOS_VARS_CHECKCFL_HARD

@@ -124,6 +124,8 @@ contains
        ATMOS_DYN_tstep_large_setup
     use scale_atmos_dyn_fvm_flux, only: &
        ATMOS_DYN_FVM_flux_setup
+    use scale_atmos_dyn_fvm_metric, only: &
+       ATMOS_DYN_FVM_metric_setup
     use scale_spnudge, only: &
        SPNUDGE_setup
 #ifdef USE_CUDALIB
@@ -168,6 +170,7 @@ contains
 #ifdef USE_CUDALIB
     integer :: istat
 #endif
+    logical :: metric_full
     !---------------------------------------------------------------------------
 
     DYN_NONE = .false.
@@ -222,9 +225,19 @@ contains
        call ATMOS_DYN_FVM_flux_setup     ( DYN_FVM_FLUX_TYPE,            & ! [IN]
                                            DYN_FVM_FLUX_TYPE_TRACER      ) ! [IN]
 
-       call ATMOS_DYN_tstep_short_setup  ( CORIOLIS, MAPF, GSQRT,        & ! [IN]
+       ! the full set of the metric coefficients is used only by HEVE and HEVI
+       select case( DYN_Tstep_Short_TYPE )
+       case( 'FVM-HEVE', 'HEVE', 'FVM-HEVI', 'HEVI' )
+          metric_full = .true.
+       case default
+          metric_full = .false.
+       end select
+       call ATMOS_DYN_FVM_metric_setup   ( CORIOLIS, MAPF, GSQRT,        & ! [IN]
                                            CDZ,                          & ! [IN]
-                                           RCDX, RCDY, RFDX, RFDY        ) ! [IN]
+                                           RCDX, RCDY, RFDX, RFDY,       & ! [IN]
+                                           metric_full                   ) ! [IN]
+
+       call ATMOS_DYN_tstep_short_setup
 
        call ATMOS_DYN_tstep_tracer_setup ( DYN_Tstep_Tracer_TYPE         ) ! [IN]
 
@@ -277,8 +290,8 @@ contains
   !-----------------------------------------------------------------------------
   !> finalize
   subroutine ATMOS_DYN_finalize
-    use scale_atmos_dyn_tstep_short, only: &
-       ATMOS_DYN_Tstep_short_finalize
+    use scale_atmos_dyn_fvm_metric, only: &
+       ATMOS_DYN_FVM_metric_finalize
     use scale_atmos_dyn_tstep_large, only: &
        ATMOS_DYN_Tstep_large_finalize
     use scale_atmos_dyn_tinteg_short, only: &
@@ -295,7 +308,7 @@ contains
 
     if ( .NOT. DYN_NONE ) then
 
-       call ATMOS_DYN_Tstep_short_finalize
+       call ATMOS_DYN_FVM_metric_finalize
 
        call ATMOS_DYN_Tstep_large_finalize
 
