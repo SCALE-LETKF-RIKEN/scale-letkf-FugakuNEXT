@@ -201,22 +201,16 @@ def flux(vel, order, dir, k="k", i="i", j="j", dim=3)
     else
        raise "invalid order: #{order}"
     end
-                 "#{fu} &
-                     * ( 0.5_RP + sign(0.5_RP,#{vel}) ) &
-                + #{fd} &
-                     * ( 0.5_RP - sign(0.5_RP,#{vel}) )"
+                 "merge( #{fu}, &
+                       #{fd}, &
+                       #{vel} >= 0.0_RP )"
   when 1
     "F1 * ( val(#{idx1})+val(#{idx0}) ) - sign(F1,#{vel}) * ( val(#{idx1})-val(#{idx0}) )"
   when 2
     "#{flux2(idx1,idx0)}"
   when 3
     if @scheme=="ud3Koren1993"
-                      "( val(#{idx0}) &
-                       + 0.5_RP * phi(val(#{idx1}),val(#{idx0}),val(#{idxn1})) * ( val(#{idx0})-val(#{idxn1}) ) ) &
-                       * ( 0.5_RP + sign(0.5_RP,#{vel}) ) &
-                     + ( val(#{idx1}) &
-                       + 0.5_RP * phi(val(#{idx0}),val(#{idx1}),val(#{idx2 })) * ( val(#{idx1})-val(#{idx2 }) ) ) &
-                       * ( 0.5_RP - sign(0.5_RP,#{vel}) )"
+                      "flux3k_upwind( #{vel}, val(#{idxn1}), val(#{idx0}), val(#{idx1}), val(#{idx2}) )"
     else
                       "( F31 * ( val(#{idx2})+val(#{idxn1}) ) + F32 * ( val(#{idx1})+val(#{idx0}) ) ) &
                      - ( F31 * ( val(#{idx2})-val(#{idxn1}) ) + F33 * ( val(#{idx1})-val(#{idx0}) ) ) * sign(1.0_RP,#{vel})"
@@ -360,10 +354,12 @@ end
 # In the fused kernel, the division by 6 is therefore replaced by the multiplication
 # by F6 = 1/6, which changes the boundary fluxes in the last bit, and the fusion is
 # done only if no division remains in the boundary candidates (e.g. phi() of ud3Koren1993).
+# For ud3Koren1993, even with phi() evaluated once per candidate (flux3k_upwind),
+# the fused fluxZ_XYZ was slower (841 -> 1143 ms per 2700 calls).
 def flux_bnd(*args)
   flux(*args).gsub("/ 6.0_RP", "* F6")
 end
-fuse_lu = fuse && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", order_up(order, nh), 0) ) !~ %r{/|phi\(}
+fuse_lu = fuse && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", order_up(order, nh), 0) ) !~ %r{/|phi\(|flux3k_upwind\(}
 use_f6  = fuse_lu && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", order_up(order, nh), 0) ).include?("F6")
 %>
 !-------------------------------------------------------------------------------
@@ -1659,6 +1655,8 @@ contains
     real(RP) :: zerosw1, zerosw2
     !---------------------------------------------------------------------------
 
+    ! With merge() instead of sign(), the kernels use more registers and are slower
+    ! (fluxX_XYZ: 80 -> 94 registers, 958 -> 1116 ms per 2700 calls on GB200).
     zerosw1 = EPS - sign(EPS, abs(v1-v2)-EPS)
     zerosw2 = EPS - sign(EPS, abs(v2-v3)-EPS)
     r2 = 2.0_RP * (v1-v2+zerosw1*zerosw2) / (v2-v3+zerosw2)
@@ -1666,6 +1664,41 @@ contains
     phi = max(0.0_RP, min(r2, min((1.0_RP+r2)/3.0_RP, 2.0_RP) ) )
 
   end function phi
+
+  !-----------------------------------------------------------------------------
+  !> Koren (1993) flux at the face between v0 and v1, upwinded by the sign of vel
+  !> The stencil is selected before phi() is evaluated, so phi() is evaluated once.
+  function flux3k_upwind(vel, vn1, v0, v1, v2)
+    !$acc routine seq
+    implicit none
+
+    real(RP)              :: flux3k_upwind
+#ifdef _OPENACC
+    real(RP), intent(in), value :: vel
+    real(RP), intent(in), value :: vn1
+    real(RP), intent(in), value :: v0
+    real(RP), intent(in), value :: v1
+    real(RP), intent(in), value :: v2
+#else
+    real(RP), intent(in) :: vel
+    real(RP), intent(in) :: vn1
+    real(RP), intent(in) :: v0
+    real(RP), intent(in) :: v1
+    real(RP), intent(in) :: v2
+#endif
+
+    real(RP) :: vu, vc, vd
+    logical  :: up
+    !---------------------------------------------------------------------------
+
+    up = vel >= 0.0_RP
+    vu = merge( vn1, v2, up ) ! upwind of vc
+    vc = merge( v0,  v1, up ) ! upwind cell
+    vd = merge( v1,  v0, up ) ! downwind cell
+
+    flux3k_upwind = vc + 0.5_RP * phi(vd, vc, vu) * ( vc - vu )
+
+  end function flux3k_upwind
 <% end %>
 
 end module <%= modname %>
