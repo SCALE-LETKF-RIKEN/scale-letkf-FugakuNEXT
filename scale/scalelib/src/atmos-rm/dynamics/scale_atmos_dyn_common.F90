@@ -600,6 +600,9 @@ contains
 
    integer :: i, j, k
    integer :: iq    
+#ifdef _OPENACC
+   integer :: kk, kb
+#endif
    real(RP) :: QDRY (KA) ! dry air
    real(RP) :: Rtot (KA) ! total R
    real(RP) :: CVtot(KA) ! total CV
@@ -649,6 +652,23 @@ contains
          CVtot(k) = CVtot(k) + CVdry * QDRY(k)
          CPtot(k) = CPtot(k) + CPdry * QDRY(k)
       end do
+#ifdef _OPENACC
+      ! DPRES at KS-1 and KE+1 are selected with merge() in the loop for the inner levels,
+      ! instead of being set after it from DPRES(KS+1) and DPRES(KE-1) of the other threads.
+      ! kb is KS+1 at KS-1, KE-1 at KE+1, and k at the inner levels.
+      do k = KS-1, KE+1
+        kk = min( max( k, KS ), KE )
+        kb = 2 * kk - k
+        PRES = P0 * ( Rtot(kb) * RHOT(kb,i,j) / P0 )**( CPtot(kb) / CVtot(kb) )
+        DPRES(k,i,j) = merge( PRES - REF_pres(kb,i,j), &
+                              ( PRES - REF_pres(kb,i,j) ) + ( REF_pres(kb,i,j) - REF_pres(k,i,j) ), &
+                              KS <= k .and. k <= KE )
+        if ( KS <= k .and. k <= KE ) then
+          RT2P(k,i,j) = CPtot(k) / CVtot(k) * PRES / RHOT(k,i,j)
+          REF_rhot(k,i,j) = RHOT(k,i,j)
+        end if
+      end do
+#else
       do k = KS, KE
         PRES = P0 * ( Rtot(k) * RHOT(k,i,j) / P0 )**( CPtot(k) / CVtot(k) )
         RT2P(k,i,j) = CPtot(k) / CVtot(k) * PRES / RHOT(k,i,j)
@@ -657,6 +677,7 @@ contains
       end do
       DPRES(KS-1,i,j) = DPRES(KS+1,i,j) + ( REF_pres(KS+1,i,j) - REF_pres(KS-1,i,j) )
       DPRES(KE+1,i,j) = DPRES(KE-1,i,j) + ( REF_pres(KE-1,i,j) - REF_pres(KE+1,i,j) )
+#endif
    end do
    end do
    !$acc end kernels
