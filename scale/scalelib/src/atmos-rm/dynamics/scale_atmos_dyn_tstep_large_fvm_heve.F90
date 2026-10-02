@@ -684,6 +684,9 @@ contains
     logical :: MONIT_lateral_flag(3)
 
     integer  :: i, j, k, iq, iqb, step
+#ifdef _OPENACC
+    integer  :: kk
+#endif
     integer  :: iv
     integer  :: n
 #ifdef USE_CUDALIB
@@ -1105,6 +1108,30 @@ contains
           enddo
           !$acc end kernels
        else
+#ifdef _OPENACC
+          ! MOMZ_t at 1:KS-1 and KE:KA are set to zero in this kernel with merge(),
+          ! instead of in a separate kernel over (i,j), in which the accesses are strided.
+          ! kk is the level clamped to KS:KE-1.
+          !$acc kernels
+          do j = JS, JE
+          do i = IS, IE
+          do k = 1, KA
+             kk = min( max( k, KS ), KE-1 )
+             damp = - DAMP_alpha_VELZ(kk,i,j) &
+                  * ( diff(kk,i,j) & ! rayleigh damping
+                    - ( diff(kk,i-1,j) + diff(kk,i+1,j) + diff(kk,i,j-1) + diff(kk,i,j+1) - diff(kk,i,j)*4.0_RP ) &
+                    * 0.125_RP * BND_SMOOTHER_FACT ) ! horizontal smoother
+
+             MOMZ_t(k,i,j) = merge( MOMZ_tp(kk,i,j) & ! tendency from physical step
+                                  + damp &
+                                  + ( DENS_damp(kk,i,j) + DENS_damp(kk+1,i,j) ) * MOMZ(kk,i,j) / ( DENS(kk,i,j) + DENS(kk+1,i,j) ), &
+                                    0.0_RP, KS <= k .and. k <= KE-1 )
+             if ( do_put .and. KS <= k .and. k <= KE-1 ) damp_t_MOMZ(k,i,j) = damp_t_MOMZ(k,i,j) + damp / nstep
+          enddo
+          enddo
+          enddo
+          !$acc end kernels
+#else
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,damp) &
           !$omp shared(JS,JE,IS,IE,KS,KE) &
@@ -1129,7 +1156,11 @@ contains
           enddo
           enddo
           !$acc end kernels
+#endif
        end if
+#ifdef _OPENACC
+       if ( TwoD ) then
+#endif
        !$omp parallel do
        !$acc kernels copy(momz_t)
 !OCL XFILL
@@ -1140,6 +1171,9 @@ contains
        enddo
        enddo
        !$acc end kernels
+#ifdef _OPENACC
+       end if
+#endif
        call COMM_vars8( MOMZ_t(:,:,:), I_COMM_MOMZ_t )
 
        call COMM_wait( DENS_damp(:,:,:), I_COMM_DENS_damp )
