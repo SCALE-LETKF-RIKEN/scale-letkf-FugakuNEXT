@@ -2212,10 +2212,10 @@ contains
 
        ! two-stream transfer
        ! Use I2S:I2E sections so non-OpenACC (I2S=I2E=i) hits column i, not column 1.
-#ifdef _OPENACC
-       ! The CPU path calls this from inside the OpenMP parallel region.
-       call PROF_rapstart('RD_MSTRN_twst', 3)
-#endif
+       ! No PROF range here: the CPU path is inside the OpenMP parallel region, and
+       ! with OpenACC the kernels run on async(0), so the range would only time
+       ! their launch.
+       !call PROF_rapstart('RD_MSTRN_twst', 3)
        if ( ncloud_in > 1 ) then
           call RD_MSTRN_two_stream( RD_KMAX, chmax,        &
                                     ncloud_in, ncloud_out, &
@@ -2262,17 +2262,15 @@ contains
                                     tau_bar_sol, R, T, Em, Ep,                 & ! [WORK]
                                     R12mns, R12pls, E12mns, E12pls             ) ! [WORK]
        end if
-
-#ifdef _OPENACC
-       call PROF_rapend  ('RD_MSTRN_twst', 3)
-#endif
+       !call PROF_rapend  ('RD_MSTRN_twst', 3)
 
     enddo ! IW loop
 
-    call PROF_rapend('RD', 4)
-
-    ! the async(0) kernels above use the work arrays created in this data region
+    ! the async(0) kernels above use the work arrays created in this data region,
+    ! and the RD range must include their execution
     !$acc wait
+
+    call PROF_rapend('RD', 4)
 
     !$acc end data
     !$acc end data
