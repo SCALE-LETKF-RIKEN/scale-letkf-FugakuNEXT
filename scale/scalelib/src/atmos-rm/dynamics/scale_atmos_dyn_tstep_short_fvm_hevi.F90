@@ -1080,9 +1080,6 @@ contains
 #endif
        !$acc parallel async(0)
        !$acc loop collapse(2)
-#ifndef HEVI_FISSION
-       !$acc private(PT,Ci,Co,F1,F2,F3,work)
-#endif
        do j = JJS, JJE
 #if LSIZE == 1
        do i = IIS, IIE
@@ -1114,7 +1111,7 @@ contains
        enddo ! j
        !$acc end parallel
 
-       !$omp parallel do default(shared) OMP_SCHEDULE_ private(k,i,j,A,B,tmp)
+       !$omp parallel do default(shared) OMP_SCHEDULE_ private(k,i,j,A0,A1,B,tmp)
        !$acc parallel async(0)
        !$acc loop collapse(3)
        do j = JJS, JJE

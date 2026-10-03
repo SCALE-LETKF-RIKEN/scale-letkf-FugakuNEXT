@@ -627,6 +627,9 @@ contains
    !$omp shared(CPovCV) &
 #endif
    !$omp private(i,j,k,iq) &
+#ifdef _OPENACC
+   !$omp private(kk,kb) &
+#endif
    !$omp private(PRES,Rtot,CVtot,CPtot,QDRY)
    !$acc kernels copyout(DPRES, RT2P, REF_rhot) copyin(RHOT, QTRC, REF_pres, AQ_R, AQ_CV, AQ_CP, AQ_MASS)
    do j = 1, JA
