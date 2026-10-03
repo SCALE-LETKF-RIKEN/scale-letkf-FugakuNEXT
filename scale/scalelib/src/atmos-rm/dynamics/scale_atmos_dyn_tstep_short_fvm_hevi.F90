@@ -1078,8 +1078,15 @@ contains
        !$omp private(A,B,pg,advcv,tmp)
 #endif
 #endif
+#ifdef HEVI_FISSION
        !$acc parallel async(0)
        !$acc loop collapse(2)
+#else
+       ! The column work arrays are private to each (i,j). This kernel is synchronous,
+       ! since there is no wait for it below.
+       !$acc parallel
+       !$acc loop collapse(2) private(F1,F2,F3,PT,Ci,Co,work)
+#endif
        do j = JJS, JJE
 #if LSIZE == 1
        do i = IIS, IIE
