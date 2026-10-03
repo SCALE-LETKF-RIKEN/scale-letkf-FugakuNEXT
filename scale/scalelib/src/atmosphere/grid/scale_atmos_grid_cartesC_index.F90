@@ -291,6 +291,14 @@ contains
     IA = IMAX + IHALO * 2
     JA = JMAX + JHALO * 2
 
+#ifdef KAMAX
+    if ( KA > KAMAX ) then
+       LOG_ERROR("ATMOS_GRID_CARTESC_index_setup_main",*) 'KA exceeds KAMAX, the size of the column work arrays fixed at the compilation! ', KA, KAMAX
+       LOG_ERROR_CONT(*) 'Rebuild with a larger KAMAX, e.g. -DKAMAX=', KA
+       call PRC_abort
+    endif
+#endif
+
     KS = 1    + KHALO
     KE = KMAX + KHALO
     IS = 1    + IHALO

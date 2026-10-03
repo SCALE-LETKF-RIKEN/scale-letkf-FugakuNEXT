@@ -12,6 +12,13 @@
 #define HEVI_FISSION 1
 #endif
 
+! number of the columns solved in a gang in the implicit solver with KAMAX.
+! More columns use more shared memory per gang and lower the occupancy:
+! 2 is the fastest of 1, 2, 4, and 8 on GB200 with KMAX = 90.
+#ifndef HEVI_NCOL
+#define HEVI_NCOL 2
+#endif
+
 #ifdef PROFILE_FAPP
 #define PROFILE_START(name) call fapp_start(name, 1, 1)
 #define PROFILE_STOP(name)  call fapp_stop (name, 1, 1)
@@ -356,6 +363,14 @@ contains
     real(RP) :: work(KMAX-1,4) ! for CR
 #endif
 
+#if defined(HEVI_FISSION) && defined(KAMAX)
+    ! column work arrays of the implicit solver, private to each gang
+    real(RP) :: PT_s(KAMAX,HEVI_NCOL)
+    real(RP) :: F1_s(KAMAX,HEVI_NCOL), F2_s(KAMAX,HEVI_NCOL), F3_s(KAMAX,HEVI_NCOL)
+    real(RP) :: Co_s(KAMAX,HEVI_NCOL)
+    integer  :: ic
+#endif
+
     ! for temporary variables
     real(RP) :: tmp
 
@@ -401,7 +416,7 @@ contains
     call fipp_start()
 #endif
 
-#if defined(HEVI_FISSION) && defined(USE_CUDALIB)
+#if defined(HEVI_FISSION) && defined(USE_CUDALIB) && !defined(KAMAX)
     ! The cuSPARSE branch of MATRIX_SOLVER_tridiagonal_3D solves the whole
     ! (IA,JA) plane in one batched call and ignores the IS:IE / JS:JE loop
     ! range, so with cache blocking it would repeat the full-plane solve for
@@ -418,7 +433,7 @@ contains
     if ( BND_W ) IFS_OFF = 0
     if ( BND_S ) JFS_OFF = 0
 
-#ifdef HEVI_FISSION
+#if defined(HEVI_FISSION) && !defined(KAMAX)
     ! allocated here (not inside the block loop) to avoid repeated device
     ! allocation, and freed on return so that no memory is held outside dynamics
     allocate( PT_work(KA,      IS:IE, JS:JE) )
@@ -450,7 +465,9 @@ contains
     !$acc        qflx_hi,qflx_J13,qflx_J23, &
 #ifdef HEVI_FISSION
     !$acc        pg_work,cf_work,advc_work,div_work, &
+#ifndef KAMAX
     !$acc        PT_work,Ci_work,Co_work,F1_work,F2_work,F3_work, &
+#endif
 #endif
     !$acc        Sr,Sw,St)
 
@@ -1046,6 +1063,152 @@ contains
 
        fact = dtrk**2 * J33G
 
+#if defined(HEVI_FISSION) && defined(KAMAX)
+       ! All the steps of the implicit solver are fused into a single kernel,
+       ! in which each gang solves HEVI_NCOL columns along i. The column work
+       ! arrays are private to the gang and have the fixed size KAMAX, so that
+       ! they are placed in the shared memory instead of the global memory.
+       ! The coefficients and the results are computed for one column after
+       ! another, with the vector lanes along k, while the tridiagonal systems
+       ! are solved by the Thomas algorithm with one column on each lane.
+       ! In the latter, the lanes access the work arrays with the stride KAMAX,
+       ! which must be odd to avoid bank conflicts.
+       !$acc parallel vector_length(32)
+       !$acc loop gang collapse(2) private(i,PT_s,F1_s,F2_s,F3_s,Co_s)
+       do j = JJS, JJE
+       do ii = IIS, IIE, HEVI_NCOL
+          ! without the cache directive, the two-dimensional work arrays are not placed in the shared memory
+          !$acc cache(PT_s,F1_s,F2_s,F3_s,Co_s)
+
+          !$acc loop seq
+          do ic = 1, HEVI_NCOL
+             i = ii + ic - 1
+             if ( i <= IIE ) then
+
+                call ATMOS_DYN_FVM_flux_valueW_Z( PT_s(:,ic), & ! (out)
+                     MOMZ(:,i,j), POTT(:,i,j), GSQRT(:,i,j,I_XYZ), & ! (in)
+                     CDZ )
+
+                ! F3_s(KS) and F1_s(KE-1) lie outside the tridiagonal system and are
+                ! not read by the solver below, so they are not set.
+                !$acc loop vector private(tmp,B,A0,A1,pg)
+                do k = KS, KE-1
+                   tmp = fact * RGSQRT_XYW(k,i,j)
+                   B = GRAV * tmp / ( CDZ(k+1) + CDZ(k) )
+                   tmp = tmp * RFDZ(k) * J33G
+                   A0 = RCDZ(k  ) * RT2P(k  ,i,j) * RGSQRT_XYZ(k  ,i,j) * tmp
+                   A1 = RCDZ(k+1) * RT2P(k+1,i,j) * RGSQRT_XYZ(k+1,i,j) * tmp
+                   if ( k < KE-1 ) &
+                   F1_s(k,ic) =        - ( PT_s(k+1,ic) *   A1      + B )
+                   F2_s(k,ic) = 1.0_RP + ( PT_s(k  ,ic) * ( A1+A0 )     )
+                   if ( k > KS ) &
+                   F3_s(k,ic) =        - ( PT_s(k-1,ic) *      A0   - B )
+
+                   ! use not density at the half level but mean density between CZ(k) and CZ(k+1)
+                   pg = - ( DPRES(k+1,i,j) + RT2P(k+1,i,j)*dtrk*St(k+1,i,j) &
+                          - DPRES(k  ,i,j) - RT2P(k  ,i,j)*dtrk*St(k  ,i,j) ) &
+                          * RFDZ(k) * J33G * RGSQRT_XYW(k,i,j) &
+                        - GRAV * 0.5_RP &
+                          * ( ( DENS(k+1,i,j) - REF_dens(k+1,i,j) + Sr(k+1,i,j) * dtrk ) &
+                            + ( DENS(k  ,i,j) - REF_dens(k  ,i,j) + Sr(k  ,i,j) * dtrk ) )
+                   ! the right hand side, which is overwritten with the solution below
+                   Co_s(k,ic) = MOMZ(k,i,j) + dtrk * ( pg + Sw(k,i,j) )
+#ifdef HIST_TEND
+                   if ( lhist ) pg_t(k,i,j,1) = pg
+#endif
+                end do
+             end if
+          end do
+
+          ! Thomas algorithm; F1_s and Co_s are overwritten
+          !$acc loop vector private(k,tmp)
+          do ic = 1, HEVI_NCOL
+             if ( ii + ic - 1 <= IIE ) then
+                tmp = 1.0_RP / F2_s(KS,ic)
+                F1_s(KS,ic) = F1_s(KS,ic) * tmp
+                Co_s(KS,ic) = Co_s(KS,ic) * tmp
+                !$acc loop seq
+                do k = KS+1, KE-1
+                   tmp = 1.0_RP / ( F2_s(k,ic) - F3_s(k,ic) * F1_s(k-1,ic) )
+                   if ( k < KE-1 ) F1_s(k,ic) = F1_s(k,ic) * tmp
+                   Co_s(k,ic) = ( Co_s(k,ic) - F3_s(k,ic) * Co_s(k-1,ic) ) * tmp
+                end do
+                !$acc loop seq
+                do k = KE-2, KS, -1
+                   Co_s(k,ic) = Co_s(k,ic) - F1_s(k,ic) * Co_s(k+1,ic)
+                end do
+             end if
+          end do
+
+          !$acc loop seq
+          do ic = 1, HEVI_NCOL
+             i = ii + ic - 1
+             if ( i <= IIE ) then
+
+                !$acc loop vector private(tmp)
+                do k = KS, KE-1
+#ifdef DEBUG_HEVI2HEVE
+                   ! for debug (change to explicit integration)
+                   Co_s(k,ic) = MOMZ(k,i,j)
+                   tmp = J33G * MOMZ(k,i,j) * MAPF_R12(i,j,I_XY)
+                   mflx_hi(k,i,j,ZDIR) = mflx_hi(k,i,j,ZDIR) + tmp
+                   tflx_hi(k,i,j,ZDIR) = tflx_hi(k,i,j,ZDIR) + tmp * PT_s(k,ic)
+                   ! use not density at the half level but mean density between CZ(k) and CZ(k+1)
+                   MOMZ_RK(k,i,j) = MOMZ0(k,i,j) &
+                        + dtrk*( &
+                        - J33G * ( DPRES(k+1,i,j)-DPRES(k,i,j) ) * RFDZ(k) * RGSQRT_XYW(k,i,j) &
+                        - GRAV * 0.5_RP * ( (DENS(k,i,j)-REF_dens(k,i,j)) + (DENS(k+1,i,j)-REF_dens(k+1,i,j)) ) &
+                        + Sw(k,i,j) )
+#else
+                   ! z-flux
+                   tmp = J33G * Co_s(k,ic) * MAPF_R12(i,j,I_XY)
+                   mflx_hi(k,i,j,ZDIR) = mflx_hi(k,i,j,ZDIR) + tmp
+                   tflx_hi(k,i,j,ZDIR) = tflx_hi(k,i,j,ZDIR) + tmp * PT_s(k,ic)
+                   ! z-momentum
+                   MOMZ_RK(k,i,j) = MOMZ0(k,i,j) + ( Co_s(k,ic) - MOMZ(k,i,j) )
+#endif
+                end do
+                MOMZ_RK(KS-1,i,j) = 0.0_RP
+                MOMZ_RK(KE  ,i,j) = 0.0_RP
+
+                ! density and rho*theta
+                ! The levels KS and KE, at which Co at KS-1 and KE are zero, are computed in
+                ! the loop for the inner levels.
+                !$acc loop vector private(advcv)
+                do k = KS, KE
+                   advcv = - ( merge( Co_s(min(k,KE-1),ic), 0.0_RP, k < KE ) &
+                             - merge( Co_s(max(k-1,KS),ic), 0.0_RP, k > KS ) ) * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
+                   DENS_RK(k,i,j) = DENS0(k,i,j) + dtrk * ( advcv + Sr(k,i,j) )
+#ifdef HIST_TEND
+                   if ( lhist ) advcv_t(k,i,j,I_DENS) = advcv
+#endif
+                   advcv = - ( merge( Co_s(min(k,KE-1),ic), 0.0_RP, k < KE ) * PT_s(min(k,KE-1),ic) &
+                             - merge( Co_s(max(k-1,KS),ic), 0.0_RP, k > KS ) * PT_s(max(k-1,KS),ic) ) &
+                         * J33G * RCDZ(k) * RGSQRT_XYZ(k,i,j)
+                   RHOT_RK(k,i,j) = RHOT0(k,i,j) + dtrk * ( advcv + St(k,i,j) )
+#ifdef HIST_TEND
+                   if ( lhist ) advcv_t(k,i,j,I_RHOT) = advcv
+#endif
+                end do
+#ifdef DEBUG
+                call check_equation( &
+                     Co_s(KS:KE-1,ic), &
+                     DENS(:,i,j), MOMZ(:,i,j), RHOT(:,i,j), DPRES(:,i,j), &
+                     REF_dens(:,i,j), &
+                     Sr(:,i,j), Sw(:,i,j), St(:,i,j), &
+                     J33G, GSQRT(:,i,j,:), &
+                     RT2P(:,i,j), &
+                     dtrk, i, j )
+#endif
+             end if
+          end do
+
+       end do
+       end do
+       !$acc end parallel
+
+#else
+
        !OCL INDEPENDENT
 !OCL PREFETCH_SEQUENTIAL(SOFT)
 #ifdef HEVI_FISSION
@@ -1439,6 +1602,7 @@ contains
        enddo
        enddo
        !$acc end parallel
+#endif
 #endif
 #ifdef DEBUG
        k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -2031,7 +2195,7 @@ contains
 
     !$acc end data
 
-#ifdef HEVI_FISSION
+#if defined(HEVI_FISSION) && !defined(KAMAX)
     deallocate( PT_work )
     deallocate( Ci_work )
     deallocate( Co_work )
