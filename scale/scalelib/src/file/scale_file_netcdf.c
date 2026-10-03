@@ -141,10 +141,8 @@ static inline int file_enddef( const int fid, const int ncid ) // (in)
   if (files[fid]->defmode == 1) {
     if ( files[fid]->shared_mode )
       CHECK_PNC_ERROR( ncmpi_enddef(ncid) )
-#ifdef NETCDF3
     else
       CHECK_ERROR( nc_enddef(ncid) )
-#endif
     files[fid]->defmode = 0;
   }
 #endif
@@ -158,10 +156,8 @@ static inline int file_redef( const int fid, const int ncid ) // (in)
   if (files[fid]->defmode == 0) {
     if (files[fid]->shared_mode)
       CHECK_PNC_ERROR( ncmpi_redef(ncid) )
-#ifdef NETCDF3
     else
       CHECK_ERROR( nc_redef(ncid) )
-#endif
     files[fid]->defmode = 1;
   }
 #endif
@@ -759,7 +755,7 @@ int file_read_data_c(       void       *var,       // (out)
     free(str);
     free(cnt);
     dtype_ = dtype == 0 ? MPI_DATATYPE_NULL : MPI_Type_f2c(dtype);
-    CHECK_PNC_ERROR( ncmpi_iget_vara(ncid, varid, strp, cntp, var, (MPI_Offset) ntypes, dtype_, NULL) )
+    CHECK_PNC_ERROR( ncmpi_get_vara_all(ncid, varid, strp, cntp, var, (MPI_Offset) ntypes, dtype_) )
     free(strp);
     free(cntp);
     if ( dtype_ == MPI_FLOAT ) {
@@ -1059,7 +1055,8 @@ int file_set_attribute_text_c( const int   fid,   // (in)
     } else
       CHECK_PNC_ERROR( ncmpi_inq_varid(ncid, vname, &varid) )
 
-    if ( ncmpi_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
+    if ( files[fid]->defmode != 1 &&
+         ncmpi_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
   }
   else {
     if ( strcmp(vname, "global") == 0 ) {
@@ -1067,7 +1064,8 @@ int file_set_attribute_text_c( const int   fid,   // (in)
     } else
       CHECK_ERROR( nc_inq_varid(ncid, vname, &varid) )
 
-    if ( nc_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
+    if ( files[fid]->defmode != 1 &&
+         nc_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
   }
 
   ret = file_redef(fid, ncid);
@@ -1101,7 +1099,8 @@ int file_set_attribute_int_c( const int   fid,   // (in)
     } else
       CHECK_PNC_ERROR( ncmpi_inq_varid(ncid, vname, &varid) )
 
-    if ( ncmpi_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
+    if ( files[fid]->defmode != 1 &&
+         ncmpi_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
   }
   else {
     if ( strcmp(vname, "global") == 0 ) {
@@ -1109,7 +1108,8 @@ int file_set_attribute_int_c( const int   fid,   // (in)
     } else
       CHECK_ERROR( nc_inq_varid(ncid, vname, &varid) )
 
-    if ( nc_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
+    if ( files[fid]->defmode != 1 &&
+         nc_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
   }
 
   ret = file_redef(fid, ncid);
@@ -1144,7 +1144,8 @@ int file_set_attribute_float_c( const int    fid,   // (in)
     } else
       CHECK_PNC_ERROR( ncmpi_inq_varid(ncid, vname, &varid) )
 
-    if ( ncmpi_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
+    if ( files[fid]->defmode != 1 &&
+         ncmpi_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
   }
   else {
     if ( strcmp(vname, "global") == 0 ) {
@@ -1152,7 +1153,8 @@ int file_set_attribute_float_c( const int    fid,   // (in)
     } else
       CHECK_ERROR( nc_inq_varid(ncid, vname, &varid) )
 
-    if ( nc_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
+    if ( files[fid]->defmode != 1 &&
+         nc_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
   }
 
   ret = file_redef(fid, ncid);
@@ -1175,6 +1177,7 @@ int file_set_attribute_double_c( const int     fid,   // (in)
   int ncid;
   int varid;
   int attid;
+  int ret;
 
   if ( files[fid] == NULL ) return ALREADY_CLOSED_CODE;
   ncid = files[fid]->ncid;
@@ -1185,7 +1188,8 @@ int file_set_attribute_double_c( const int     fid,   // (in)
     } else
       CHECK_PNC_ERROR( ncmpi_inq_varid(ncid, vname, &varid) )
 
-    if ( ncmpi_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
+    if ( files[fid]->defmode != 1 &&
+         ncmpi_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
   }
   else {
     if ( strcmp(vname, "global") == 0 ) {
@@ -1193,8 +1197,12 @@ int file_set_attribute_double_c( const int     fid,   // (in)
     } else
       CHECK_ERROR( nc_inq_varid(ncid, vname, &varid) )
 
-    if ( nc_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
+    if ( files[fid]->defmode != 1 &&
+         nc_inq_attid(ncid, varid, key, &attid) == NC_NOERR ) return ALREADY_EXISTED_CODE;
   }
+
+  ret = file_redef(fid, ncid);
+  if ( ret != SUCCESS_CODE ) return ret;
 
   if ( files[fid]->shared_mode )
     CHECK_PNC_ERROR( ncmpi_put_att_double(ncid, varid, key, NC_DOUBLE, len, value) )
