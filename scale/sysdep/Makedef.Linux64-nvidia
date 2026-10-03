@@ -13,14 +13,15 @@ MODDIROPT = -module
 
 FFLAGS_FAST  = -Mpreprocess -m64 -fast                \
                -Mbyteswapio                           \
-               -Mflushz -Mfprelaxed -Mfpapprox -Kieee \
+               -Mflushz -Mfpapprox -Kieee             \
                -Mvect=assoc
 #FFLAGS_FAST  = -Mpreprocess -m64                      \
 #	       -O1 -Mlre -Mcache_align                \
 #	       -Mbyteswapio                           \
 #	       -Mflushz -Mfprelaxed -Mfpapprox -Kieee \
 
-FFLAGS_AGGRESSIVE = -gpu=safecache
+# -Kieee overrides -Mfprelaxed regardless of the order; -Knoieee is required to relax division
+FFLAGS_AGGRESSIVE = -gpu=safecache -Mfprelaxed -Knoieee
 
 #FFLAGS_QUICKDEBUG = -Ktrap=fp -Mbounds -gopt -g -traceback
 FFLAGS_QUICKDEBUG = -Mbounds -gopt -g -traceback
