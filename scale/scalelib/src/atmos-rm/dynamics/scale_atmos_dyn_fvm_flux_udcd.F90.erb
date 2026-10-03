@@ -201,6 +201,9 @@ def flux(vel, order, dir, k="k", i="i", j="j", dim=3)
     else
        raise "invalid order: #{order}"
     end
+    # vel = -0.0 takes the upwind (fu) side, unlike the weights 0.5 +- sign(0.5,vel).
+    # This changes only valueW_Z at exactly zero velocity (the fluxes are multiplied by vel).
+    # Testing the sign bit with sign() would cost extra instructions in the kernels.
                  "merge( #{fu}, &
                        #{fd}, &
                        #{vel} >= 0.0_RP )"
@@ -521,12 +524,13 @@ contains
 <%- if fuse_lu -%>
 #ifdef _OPENACC
     ! The values at KS and KE-1 are selected with merge() in the loop for the inner levels.
+    ! KE-1 is tested first, so that it takes precedence over KS when KS == KE-1 (KMAX = 2).
     ! val(KS-1) and val(KE+1) are read but not used.
     do k = KS, KE-1
        vlo = <%= flux_bnd("mflx(k)", order_lo(order, nh), 0, "k", nil, nil, 1) %>
        vup = <%= flux_bnd("mflx(k)", order_up(order, nh), 0, "k", nil, nil, 1) %>
        vin = <%= flux("mflx(k)", order, 0, "k", nil, nil, 1) %>
-       valW(k) = merge( vlo, merge( vup, vin, k == KE-1 ), k == KS )
+       valW(k) = merge( vup, merge( vlo, vin, k == KS ), k == KE-1 )
     enddo
 #else
 <%- end -%>
@@ -602,7 +606,8 @@ contains
 <%- if fuse_lu -%>
 #ifdef _OPENACC
     ! The fluxes at the boundary levels are selected with merge() in the kernel for
-    ! the inner levels. In a separate kernel over (i,j), the accesses to these
+    ! the inner levels. KE-1 is tested first, so that it takes precedence over KS
+    ! when KS == KE-1 (KMAX = 2). In a separate kernel over (i,j), the accesses to these
     ! k-contiguous arrays are strided.
     ! The values in the halo, val(KS-2:KS-1) and val(KE+1:KE+2), are read but not used.
     !$acc kernels
@@ -614,7 +619,7 @@ contains
        fup = <%= flux_bnd("vel", order_up(order, nh), 0) %>
        fin = <%= flux("vel", order, 0) %>
        flux(k,i,j) = merge( vel &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) <%= num_diff() %>, &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ) <%= num_diff() %>, &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
     enddo
@@ -1215,7 +1220,7 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(k,i,j) = merge( J33G * vel &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) <%= num_diff() %>, &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ) <%= num_diff() %>, &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
     enddo
@@ -1442,7 +1447,7 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(k,i,j) = merge( vel * RMAPF(i,j,<%=im%>) &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ), &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
     enddo

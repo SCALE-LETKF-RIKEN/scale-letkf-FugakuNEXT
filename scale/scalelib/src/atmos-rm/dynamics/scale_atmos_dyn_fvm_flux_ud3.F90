@@ -121,6 +121,7 @@ contains
 
 #ifdef _OPENACC
     ! The values at KS and KE-1 are selected with merge() in the loop for the inner levels.
+    ! KE-1 is tested first, so that it takes precedence over KS when KS == KE-1 (KMAX = 2).
     ! val(KS-1) and val(KE+1) are read but not used.
     do k = KS, KE-1
        vlo = merge( F2 * ( val(k+1)+val(k) ), &
@@ -131,7 +132,7 @@ contains
                        mflx(k) >= 0.0_RP )
        vin = ( F31 * ( val(k+2)+val(k-1) ) + F32 * ( val(k+1)+val(k) ) ) &
                      - ( F31 * ( val(k+2)-val(k-1) ) + F33 * ( val(k+1)-val(k) ) ) * sign(1.0_RP,mflx(k))
-       valW(k) = merge( vlo, merge( vup, vin, k == KE-1 ), k == KS )
+       valW(k) = merge( vup, merge( vlo, vin, k == KS ), k == KE-1 )
     enddo
 #else
     do k = KS+1, KE-2
@@ -209,7 +210,8 @@ contains
 
 #ifdef _OPENACC
     ! The fluxes at the boundary levels are selected with merge() in the kernel for
-    ! the inner levels. In a separate kernel over (i,j), the accesses to these
+    ! the inner levels. KE-1 is tested first, so that it takes precedence over KS
+    ! when KS == KE-1 (KMAX = 2). In a separate kernel over (i,j), the accesses to these
     ! k-contiguous arrays are strided.
     ! The values in the halo, val(KS-2:KS-1) and val(KE+1:KE+2), are read but not used.
     !$acc kernels
@@ -226,7 +228,7 @@ contains
        fin = ( F31 * ( val(k+2,i,j)+val(k-1,i,j) ) + F32 * ( val(k+1,i,j)+val(k,i,j) ) ) &
                      - ( F31 * ( val(k+2,i,j)-val(k-1,i,j) ) + F33 * ( val(k+1,i,j)-val(k,i,j) ) ) * sign(1.0_RP,vel)
        flux(k,i,j) = merge( vel &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ) &
                    + GSQRT(k,i,j) * num_diff(k,i,j), &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
@@ -1069,7 +1071,7 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(k,i,j) = merge( J33G * vel &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ) &
                    + GSQRT(k,i,j) * num_diff(k,i,j), &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
@@ -1237,7 +1239,7 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(k,i,j) = merge( vel * RMAPF(i,j,+2) &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ), &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
     enddo
@@ -1446,7 +1448,7 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(k,i,j) = merge( vel * RMAPF(i,j,+1) &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ), &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
     enddo
@@ -1761,7 +1763,7 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(k,i,j) = merge( J33G * vel &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ) &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ) &
                    + GSQRT(k,i,j) * num_diff(k,i,j), &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
@@ -1927,7 +1929,7 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(k,i,j) = merge( vel * RMAPF(i,j,+2) &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ), &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
     enddo
@@ -2071,7 +2073,7 @@ contains
        ! The flux at KS-1 can be non-zero.
        ! To reduce calculations, all the fluxes are set to zero.
        flux(k,i,j) = merge( vel * RMAPF(i,j,+1) &
-                   * ( merge( flo, merge( fup, fin, k == KE-1 ), k == KS ) ), &
+                   * ( merge( fup, merge( flo, fin, k == KS ), k == KE-1 ) ), &
                             0.0_RP, KS <= k .and. k <= KE-1 )
     enddo
     enddo
