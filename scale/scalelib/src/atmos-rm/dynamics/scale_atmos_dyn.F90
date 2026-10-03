@@ -196,7 +196,7 @@ contains
 #ifdef USE_CUDALIB
        ! index calculation causes a significant drop in performance, since num_diff is a 5D array
        !$acc host_data use_device(num_diff)
-       istat = cudaMemset(num_diff, 0.0_RP, KA*IA*JA*5*3)
+       istat = cudaMemset(num_diff, 0.0_RP, int(KA,8)*IA*JA*5*3)
        !$acc end host_data
        if ( istat /= cudaSuccess ) then
           LOG_ERROR("ATMOS_DYN_setup",*)'cudaMemset for num_diff failed'
@@ -205,7 +205,7 @@ contains
           call PRC_abort
        endif
        !$acc host_data use_device(num_diff_q)
-       istat = cudaMemset(num_diff_q, 0.0_RP, KA*IA*JA*3)
+       istat = cudaMemset(num_diff_q, 0.0_RP, int(KA,8)*IA*JA*3)
        !$acc end host_data
        if ( istat /= cudaSuccess ) then
           LOG_ERROR("ATMOS_DYN_setup",*)'cudaMemset for num_diff_q failed'
