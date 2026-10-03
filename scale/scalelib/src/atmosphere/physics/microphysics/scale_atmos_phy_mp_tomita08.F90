@@ -1268,6 +1268,12 @@ contains
     allocate( sw_bergeron_3d(KS:KE,IA,JA) )
     !$acc data create(w3d, sw_bergeron_3d)
 #endif
+    ! only KS:KE of the inner grid points are set below; zero the halo for the history output
+    if ( hist_flag ) then
+       !$acc kernels
+       w3d(:,:,:,:) = 0.0_RP
+       !$acc end kernels
+    end if
 
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(KA,KS,KE,IS,IE,JS,JE, &
