@@ -159,7 +159,7 @@ def flux(vel, order, dir, k="k", i="i", j="j", dim=3)
       end
     when 3
       if @scheme=="ud3Koren1993"
-        fu = flux3k(idxn1,idx0,idx1)
+        fu = flux3k(idx1,idx0,idxn1)
       else
         fu = flux3(idx1,idx0,idxn1)
       end

@@ -146,7 +146,7 @@ contains
                        + 0.5_RP * phi(val(KS),val(KS+1),val(KS+2)) * ( val(KS+1)-val(KS+2) ) ), &
                        mflx(KS) >= 0.0_RP )
        valW(KE-1) = merge( ( val(KE-1) &
-                       + 0.5_RP * phi(val(KE-2),val(KE-1),val(KE)) * ( val(KE-1)-val(KE) ) ), &
+                       + 0.5_RP * phi(val(KE),val(KE-1),val(KE-2)) * ( val(KE-1)-val(KE-2) ) ), &
                        F2 * ( val(KE)+val(KE-1) ), &
                        mflx(KE-1) >= 0.0_RP )
 
@@ -237,7 +237,7 @@ contains
        vel = mflx(KE-1,i,j)
        flux(KE-1,i,j) = vel &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
@@ -972,7 +972,7 @@ contains
              + f2h2_XYZ_KEm1 * DENS(KE-1,i,j) )
        flux(KE-1,i,j) = J33G * vel &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
@@ -1053,7 +1053,7 @@ contains
              + f2h2_UYZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i+1,j) ) )
        flux(KE-1,i,j) = J33G * vel &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
@@ -1166,7 +1166,7 @@ contains
        vel = vel * J13G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+2) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1276,7 +1276,7 @@ contains
        vel = vel * J23G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1339,7 +1339,7 @@ contains
        vel = vel * J23G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1633,7 +1633,7 @@ contains
              + f2h2_XVZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i,j+1) ) )
        flux(KE-1,i,j) = J33G * vel &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
@@ -1744,7 +1744,7 @@ contains
        vel = vel * J13G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+2) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1851,7 +1851,7 @@ contains
        vel = vel * J23G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) * ( val(KE-1,i,j)-val(KE-2,i,j) ) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
