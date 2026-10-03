@@ -2271,6 +2271,9 @@ contains
 
     call PROF_rapend('RD', 4)
 
+    ! the async(0) kernels above use the work arrays created in this data region
+    !$acc wait
+
     !$acc end data
     !$acc end data
 

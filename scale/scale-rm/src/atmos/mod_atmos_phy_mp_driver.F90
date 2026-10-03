@@ -1310,6 +1310,7 @@ contains
           !$acc update device(hist_vterm_idx)
           if ( ih > 0 ) then
              allocate( vterm_hist(KA,IA,JA,ih) )
+             !$acc enter data create(vterm_hist)
              !$acc kernels
              vterm_hist(:,:,:,:) = 0.0_RP
              !$acc end kernels
@@ -1442,7 +1443,7 @@ contains
                 select case ( MP_model_id )
                 case ( I_KESSLER )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2)
+                   !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1458,7 +1459,7 @@ contains
 #endif
                 case ( I_TOMITA08 )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2)
+                   !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1473,7 +1474,7 @@ contains
 #endif
                   case ( I_SN14 )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2)
+                   !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1488,7 +1489,7 @@ contains
 #endif
                   case ( I_SUZUKI10 )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2)
+                   !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1545,7 +1546,7 @@ contains
                 select case ( MP_upwind_scheme_id )
                 case ( I_UPWIND )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2)
+                   !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1567,7 +1568,7 @@ contains
 #endif
                 case ( I_SEMILAG )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2)
+                   !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1617,7 +1618,7 @@ contains
                    select case ( MP_upwind_scheme_id )
                    case ( I_UPWIND )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2)
+                   !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1639,7 +1640,7 @@ contains
 #endif
                    case ( I_SEMILAG )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2)
+                   !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1817,7 +1818,7 @@ contains
              endif
 
 #ifdef _OPENACC
-          !$acc parallel loop collapse(2)
+          !$acc parallel loop collapse(2) gang
           do j = JS, JE
           do i = IS, IE
 #endif
@@ -1833,12 +1834,16 @@ contains
           !$acc end parallel loop
 
           ! history output
+          if ( allocated( vterm_hist ) ) then
+             !$acc update host(vterm_hist)
+          end if
           do iq = QS_MP+1, QE_MP
              if ( hist_vterm_idx(iq) > 0 ) then
                 call FILE_HISTORY_put( hist_vterm_id(iq), vterm_hist(:,:,:,hist_vterm_idx(iq)) )
              end if
           end do
           if ( allocated( vterm_hist ) ) then
+             !$acc exit data delete(vterm_hist)
              deallocate( vterm_hist )
           end if
 
@@ -2034,15 +2039,17 @@ contains
     !$acc data copyin(QV, QHYD) copyout(QTRC)
     !$acc data copyin(QNUM) if(present(QNUM))
 
-    select case( MP_model_id )
-    case ( I_NONE )
+    ! ATMOS_PHY_MP_TYPE is used instead of MP_model_id, because this routine is also
+    ! called without ATMOS_PHY_MP_driver_setup (e.g., MKINIT with ATMOS_do = .false.).
+    select case( ATMOS_PHY_MP_TYPE )
+    case ( "NONE" )
        if ( associated( ATMOS_PHY_MP_USER_qhyd2qtrc ) ) then
           call ATMOS_PHY_MP_USER_qhyd2qtrc( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                                             QV(:,:,:), QHYD(:,:,:,:), & ! [IN]
                                             QTRC(:,:,:,:),            & ! [OUT]
                                             QNUM=QNUM                 ) ! [IN]
        end if
-    case ( I_KESSLER )
+    case ( "KESSLER" )
        !$omp parallel do OMP_SCHEDULE_
        !$acc kernels
        do j = JS, JE
@@ -2056,7 +2063,7 @@ contains
        call ATMOS_PHY_MP_KESSLER_qhyd2qtrc( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                                             QHYD(:,:,:,:),  & ! [IN]
                                             QTRC(:,:,:,2:)  ) ! [OUT]
-    case ( I_TOMITA08 )
+    case ( "TOMITA08" )
        !$omp parallel do OMP_SCHEDULE_
        !$acc kernels
        do j = JS, JE
@@ -2070,7 +2077,7 @@ contains
        call ATMOS_PHY_MP_TOMITA08_qhyd2qtrc( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                                              QHYD(:,:,:,:),  & ! [IN]
                                              QTRC(:,:,:,2:)  ) ! [OUT]
-    case ( I_SN14 )
+    case ( "SN14" )
        !$omp parallel do OMP_SCHEDULE_
        do j = JS, JE
        do i = IS, IE
@@ -2086,7 +2093,7 @@ contains
                                          QNUM=QNUM       ) ! [IN]
        !$acc update device(QTRC(:,:,:,2:))
        !$acc update device(QNUM) if(present(QNUM))
-    case ( I_SUZUKI10 )
+    case ( "SUZUKI10" )
        !$omp parallel do OMP_SCHEDULE_
        do j = JS, JE
        do i = IS, IE
@@ -2102,7 +2109,7 @@ contains
                                              QNUM=QNUM       ) ! [IN]
        !$acc update device(QTRC(:,:,:,2:))
        !$acc update device(QNUM) if(present(QNUM))
-!    case ( I_AMPS )
+!    case ( "AMPS" )
 !       !$omp parallel do OMP_SCHEDULE_
 !       do j = JS, JE
 !       do i = IS, IE
@@ -2117,7 +2124,7 @@ contains
 !                                         QTRC(:,:,:,2:), & ! [OUT]
 !                                         QNUM=QNUM       ) ! [IN]
     case default
-       LOG_ERROR("ATMOS_PHY_MP_driver_qhyd2qtrc",*) 'MP_model_id is invalid: ', MP_model_id
+       LOG_ERROR("ATMOS_PHY_MP_driver_qhyd2qtrc",*) 'ATMOS_PHY_MP_TYPE (', trim(ATMOS_PHY_MP_TYPE), ') is not supported'
        call PRC_abort
     end select
 
