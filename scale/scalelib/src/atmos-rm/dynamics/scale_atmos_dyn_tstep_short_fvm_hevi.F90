@@ -381,9 +381,7 @@ contains
     real(RP) :: F3(KAMAX,HEVI_NCOL)
 #define Ci Co
     ! for the partition method
-    real(RP) :: rdiag, Xl, Xu
-    integer  :: npart, nbase, nrem
-    integer  :: p, kb, kt
+#include "matrix_solver_tridiagonal_pm_decl.h"
 #else
     real(RP) :: PT(KA,LSIZE)
     real(RP) :: Ci(KS:KE-1,LSIZE)
@@ -1054,14 +1052,6 @@ contains
 
        fact = dtrk**2 * J33G
 
-#ifdef KAMAX
-       ! The KMAX-1 rows are divided into npart chunks by npart-1 separator rows.
-       ! The first nrem chunks have nbase+1 rows and the others have nbase rows.
-       npart = max( min( HEVI_NPART, KMAX / 2 ), 1 )
-       nbase = ( KMAX - npart ) / npart
-       nrem  = mod( KMAX - npart, npart )
-#endif
-
        !OCL INDEPENDENT
 !OCL PREFETCH_SEQUENTIAL(SOFT)
 #ifdef KAMAX
@@ -1190,98 +1180,15 @@ contains
           end do
 
           ! The tridiagonal systems are solved in place by the partition method.
-          ! The rows of a column are divided into npart chunks by npart-1 separator
-          ! rows, and a lane handles a chunk.
-          ! 1. Each lane eliminates the rows in its chunk, giving the solution in the
-          !    chunk as x = Co + F3 * Xl + F1 * Xu, where Xl and Xu are the solutions at
-          !    the separators below and above the chunk.
-          ! 2. Substituting them into the separator rows gives a tridiagonal system
-          !    for the separators, which is solved with one column on each lane.
-          ! 3. Each lane substitutes Xl and Xu back into its chunk.
-          ! F3(KS,l) and F1(KE-1,l) are not set, and are not read.
-          !$acc loop vector collapse(2) private(k,kb,kt,tmp)
-          do l = 1, min( HEVI_NCOL, IIE-ii+1 )
-          do p = 0, npart-1
-             kb = KS + p * ( nbase + 1 ) + min( p, nrem )
-             kt = kb + nbase - 1 + merge( 1, 0, p < nrem )
-             ! forward elimination: Co, F3, and F1 store y', v', and c' of the three
-             ! right hand sides, y for the original one, and v and w for the
-             ! couplings with the lower and upper separators
-             tmp = 1.0_RP / F2(kb,l)
-             Co(kb,l) = Co(kb,l) * tmp
-             if ( p > 0 ) then
-                F3(kb,l) = - F3(kb,l) * tmp
-             else
-                F3(kb,l) = 0.0_RP
-             end if
-             if ( kb < kt ) F1(kb,l) = F1(kb,l) * tmp
-             !$acc loop seq
-             do k = kb+1, kt
-                tmp = 1.0_RP / ( F2(k,l) - F3(k,l) * F1(k-1,l) )
-                Co(k,l) = ( Co(k,l) - F3(k,l) * Co(k-1,l) ) * tmp
-                F3(k,l) = - F3(k,l) * F3(k-1,l) * tmp
-                if ( k < kt ) F1(k,l) = F1(k,l) * tmp
-             end do
-             ! w' at the top row of the chunk
-             if ( p < npart-1 ) then
-                F1(kt,l) = - F1(kt,l) * tmp
-             else
-                F1(kt,l) = 0.0_RP
-             end if
-             ! back substitution: F1 is overwritten from c' to w
-             !$acc loop seq
-             do k = kt-1, kb, -1
-                Co(k,l) = Co(k,l) - F1(k,l) * Co(k+1,l)
-                F3(k,l) = F3(k,l) - F1(k,l) * F3(k+1,l)
-                F1(k,l) =         - F1(k,l) * F1(k+1,l)
-             end do
-          end do
-          end do
-
-          ! tridiagonal system for the separators, by the Thomas algorithm.
-          ! At the separator k, the sub- and super-diagonal elements are F3(k) * v(k-1)
-          ! and F1(k) * w(k+1), and the diagonal element is F2(k) + F3(k) * w(k-1)
-          ! + F1(k) * v(k+1). F1 and Co are overwritten by c' and the solution.
-          !$acc loop vector private(k,p,kb,tmp,rdiag)
-          do l = 1, min( HEVI_NCOL, IIE-ii+1 )
-             !$acc loop seq
-             do p = 0, npart-2
-                k = KS + p * ( nbase + 1 ) + min( p, nrem ) + nbase + merge( 1, 0, p < nrem )
-                tmp = Co(k,l) - F3(k,l) * Co(k-1,l) - F1(k,l) * Co(k+1,l)
-                rdiag = F2(k,l) + F3(k,l) * F1(k-1,l) + F1(k,l) * F3(k+1,l)
-                if ( p > 0 ) then
-                   ! F3(k) * v(k-1) is the sub-diagonal element
-                   rdiag = rdiag - F3(k,l) * F3(k-1,l) * F1(kb,l)
-                   tmp   = tmp   - F3(k,l) * F3(k-1,l) * Co(kb,l)
-                end if
-                rdiag = 1.0_RP / rdiag
-                F1(k,l) = F1(k,l) * F1(k+1,l) * rdiag
-                Co(k,l) = tmp * rdiag
-                kb = k ! the previous separator
-             end do
-             !$acc loop seq
-             do p = npart-3, 0, -1
-                k = KS + p * ( nbase + 1 ) + min( p, nrem ) + nbase + merge( 1, 0, p < nrem )
-                Co(k,l) = Co(k,l) - F1(k,l) * Co(kb,l)
-                kb = k ! the next separator
-             end do
-          end do
-
-          !$acc loop vector collapse(2) private(k,kb,kt,Xl,Xu)
-          do l = 1, min( HEVI_NCOL, IIE-ii+1 )
-          do p = 0, npart-1
-             kb = KS + p * ( nbase + 1 ) + min( p, nrem )
-             kt = kb + nbase - 1 + merge( 1, 0, p < nrem )
-             Xl = 0.0_RP
-             Xu = 0.0_RP
-             if ( p > 0 )       Xl = Co(kb-1,l)
-             if ( p < npart-1 ) Xu = Co(kt+1,l)
-             !$acc loop seq
-             do k = kb, kt
-                Co(k,l) = Co(k,l) + F3(k,l) * Xl + F1(k,l) * Xu
-             end do
-          end do
-          end do
+#define TDPM_UD(k,l) F1(k,l)
+#define TDPM_MD(k,l) F2(k,l)
+#define TDPM_LD(k,l) F3(k,l)
+#define TDPM_X(k,l)  Co(k,l)
+#define TDPM_KS      KS
+#define TDPM_KE      (KE-1)
+#define TDPM_NC      min( HEVI_NCOL, IIE-ii+1 )
+#define TDPM_NPART   HEVI_NPART
+#include "matrix_solver_tridiagonal_pm.h"
 
           !$acc loop seq
           do l = 1, min( HEVI_NCOL, IIE-ii+1 )
