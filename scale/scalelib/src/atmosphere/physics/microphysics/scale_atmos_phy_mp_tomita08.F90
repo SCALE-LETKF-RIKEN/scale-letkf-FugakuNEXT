@@ -279,6 +279,7 @@ module scale_atmos_phy_mp_tomita08
   logical,  private              :: only_liquid = .false.
   real(RP), private              :: sw_expice   = 0.0_RP
   real(RP), private, parameter   :: Nc_ihtr     = 300.0_RP  !< cloud number concentration for heterogeneous ice nucleation [1/cc]
+  real(RP), private, parameter   :: Qig_fact    = 4.92E-11_RP * 1000.0_RP**1.33_RP !< coefficient of the ice nucleation (Pigen)
   real(RP), private, parameter   :: Di_max      = 500.E-6_RP
   real(RP), private, parameter   :: Di_a        = 11.9_RP
 
@@ -992,11 +993,14 @@ contains
 
 #ifdef _OPENACC
     real(RP) :: rho_fact
+    real(RP) :: rdens
     real(RP) :: temc
 #define rho_fact(k) rho_fact
+#define rdens(k) rdens
 #define temc(k) temc
 #else
     real(RP) :: rho_fact(KS:KE)        ! density factor
+    real(RP) :: rdens(KS:KE)           ! 1 / density
     real(RP) :: temc(KS:KE)            ! T - T0 [K]
 #endif
 
@@ -1121,14 +1125,14 @@ contains
     real(RP) :: Da                             !< thermal diffusion coefficient of air
     real(RP) :: Kd                             !< diffusion coefficient of water vapor in air
 #ifdef _OPENACC
-    real(RP) :: Nu
+    real(RP) :: rNu
     real(RP) :: Glv, Giv, Gil
-#define Nu(k) Nu
+#define rNu(k) rNu
 #define Glv(k) Glv
 #define Giv(k) Giv
 #define Gil(k) Gil
 #else
-    real(RP) :: Nu(KS:KE)                      !< kinematic viscosity of air
+    real(RP) :: rNu(KS:KE)                     !< 1 / kinematic viscosity of air
     real(RP) :: Glv(KS:KE), Giv(KS:KE), Gil(KS:KE)      !< thermodynamic function
 #endif
     real(RP) :: ventr, vents, ventg            !< ventilation factor
@@ -1150,7 +1154,7 @@ contains
 #endif
     real(RP) :: a1, a2
     real(RP) :: ma2 !< 1-a2
-    real(RP) :: dt1                   !< time during which the an ice particle of 40um grows to 50um
+    real(RP) :: rdt1                  !< 1 / time during which the an ice particle of 40um grows to 50um
     real(RP) :: Ni50                  !< number concentration of ice particle of 50um
 
     !---< Explicit ice generation >---
@@ -1164,6 +1168,8 @@ contains
 #else
     real(RP) :: w(KS:KE,w_nmax)
 #endif
+
+    real(RP) :: rdt, rLHF0, coef_Vtr, coef_Vtg, coef_RMOMs_Vt
 
     integer  :: k, i, j, ip
 
@@ -1282,9 +1288,18 @@ contains
        !$acc end kernels
     end if
 
+    ! The reciprocals and the coefficients are computed here, so that the kernel
+    ! multiplies by them instead of dividing; a division costs more than ten
+    ! multiplications on GPUs.
+    rdt   = 1.0_RP / dt
+    rLHF0 = 1.0_RP / LHF0
+    coef_Vtr = Cr * GAM_1brdr / GAM_1br
+    coef_Vtg = Cg * GAM_1bgdg / GAM_1bg
+    coef_RMOMs_Vt = GAM_1bsds / GAM_1bs
+
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(KA,KS,KE,IS,IE,JS,JE, &
-    !$omp        DENS,TEMP,PRES,QTRC,CCN,CPtot0,CVtot0,dt, &
+    !$omp        DENS,TEMP,PRES,QTRC,CCN,CPtot0,CVtot0,dt,rdt,rLHF0,coef_Vtr,coef_Vtg,coef_RMOMs_Vt, &
     !$omp        RHOE_t, &
     !$omp        UNDEF,EPS,PRE00,LHV,LHF,LHF0,CP_VAPOR,CP_WATER,CP_ICE,CV_VAPOR,CV_WATER,CV_ICE, &
     !$omp        do_couple_aerosol,sw_expice,enable_WDXZ2014,enable_RS2014,enable_KK2000,enable_HZDFHI2007,enable_TRAWLBG2017, &
@@ -1297,7 +1312,7 @@ contains
     !$omp        flg_lt_l,flg_ecoali,flg_ecoals, &
     !$omp        w3d,HIST_sw,hist_flag) &
     !$omp private(cvtot,qv,qc,qr,qi,qs,qg,qv_t,qc_t,qr_t,qi_t,qs_t,qg_t,e_t,cp_t,cv_t, &
-    !$omp         QSATL,QSATI,Sliq,Sice,rho_fact,temc,N0r,N0s,N0g, &
+    !$omp         QSATL,QSATI,Sliq,Sice,rho_fact,rdens,temc,N0r,N0s,N0g, &
     !$omp         RLMDr,RLMDr_2,RLMDr_3,RLMDs,RLMDs_2,RLMDs_3,RLMDg,RLMDg_2,RLMDg_3, &
     !$omp         RLMDr_1br,RLMDr_2br,RLMDr_3br,RLMDs_1bs,RLMDs_2bs,RLMDs_3bs, &
     !$omp         RLMDr_dr,RLMDr_3dr,RLMDr_5dr,RLMDs_ds,RLMDs_3ds,RLMDs_5ds, &
@@ -1307,21 +1322,21 @@ contains
     !$omp         coef_at,coef_bt,loga_,b_,nm, &
     !$omp         coef_a0,coef_a1,coef_b0,coef_b1, &
     !$omp         Vti,Vtr,Vts,Vtg,Esi_mod,Egs_mod,rhoqc,Nc, &
-    !$omp         Pracw_orig,Pracw_kk,Praut_berry,Praut_kk,Dc,betai,betas,Da,Kd,Nu, &
+    !$omp         Pracw_orig,Pracw_kk,Praut_berry,Praut_kk,Dc,betai,betas,Da,Kd,rNu, &
     !$omp         Glv,Giv,Gil,ventr,vents,ventg,net,fac,fack,fac_sw,zerosw,tmp, &
     !$omp         qc_crg_t,qr_crg_t,qi_crg_t,qs_crg_t,qg_crg_t,qcrg_c,qcrg_r,qcrg_i,qcrg_s,qcrg_g, &
     !$omp         w_q,w_qcrg,re_qs,dcrg,beta1_crg,alpha,facq_QC,facq_QR,facq_QI,facq_QS,facq_QG,rlambda_qr,rlambda_qs,rlambda_qg, &
-    !$omp         sw_bergeron,a1,a2,ma2,dt1,Ni50, &
+    !$omp         sw_bergeron,a1,a2,ma2,rdt1,Ni50, &
     !$omp         sw,rhoqi,XNi,XMi,Di,Nig,Qig,w)
     !$acc parallel
     !$acc loop collapse(3) &
     !$acc      private(cvtot, qv, qc, qr, qi, qs, qg, qv_t, qc_t, qr_t, qi_t, qs_t, qg_t, &
-    !$acc              QSATL, QSATI, Sliq, Sice, rho_fact, temc, N0r, N0s, N0g, &
+    !$acc              QSATL, QSATI, Sliq, Sice, rho_fact, rdens, temc, N0r, N0s, N0g, &
     !$acc              RLMDr, RLMDr_2, RLMDr_3, RLMDg, RLMDg_2, RLMDg_3, &
     !$acc              RLMDr_1br, RLMDr_2br, RLMDr_3br, RLMDr_dr, RLMDr_3dr, RLMDr_5dr, &
     !$acc              RLMDg_dg, RLMDg_3dg, RLMDg_5dg, RLMDr_7, RLMDr_6dr, &
     !$acc              MOMs_0, MOMs_1, MOMs_2, MOMs_0bs, MOMs_1bs, MOMs_2bs, MOMs_2ds, MOMs_5ds_h, RMOMs_Vt, &
-    !$acc              Vti, Vtr, Vts, Vtg, Egs_mod, Nc, Nu, fack, Glv, Giv, Gil, a1, a2, ma2, &
+    !$acc              Vti, Vtr, Vts, Vtg, Egs_mod, Nc, rNu, fack, Glv, Giv, Gil, a1, a2, ma2, &
     !$acc              coef_at, coef_bt, w, sw_bergeron)
     do j = JS, JE
     do i = IS, IE
@@ -1380,7 +1395,8 @@ contains
           Sliq(k) = qv(k) / max( QSATL(k), EPS )
           Sice(k) = qv(k) / max( QSATI(k), EPS )
 
-          rho_fact(k) = sqrt( dens00 / dens(k,i,j) )
+          rdens(k)    = 1.0_RP / dens(k,i,j)
+          rho_fact(k) = sqrt( dens00 * rdens(k) )
           temc(k)     = temp(k,i,j) - TEM00
        END_LOOP_K
 
@@ -1396,12 +1412,12 @@ contains
        END_LOOP_K
 
        LOOP_K
-          w(k,I_dqv_dt) = qv(k) / dt
-          w(k,I_dqc_dt) = qc(k) / dt
-          w(k,I_dqr_dt) = qr(k) / dt
-          w(k,I_dqi_dt) = qi(k) / dt
-          w(k,I_dqs_dt) = qs(k) / dt
-          w(k,I_dqg_dt) = qg(k) / dt
+          w(k,I_dqv_dt) = qv(k) * rdt
+          w(k,I_dqc_dt) = qc(k) * rdt
+          w(k,I_dqr_dt) = qr(k) * rdt
+          w(k,I_dqi_dt) = qi(k) * rdt
+          w(k,I_dqs_dt) = qs(k) * rdt
+          w(k,I_dqg_dt) = qg(k) * rdt
        END_LOOP_K
 
        LOOP_K
@@ -1527,7 +1543,7 @@ contains
              MOMs_2bs  (k) = N0s(k) * GAM_3bs   * RLMDs_3bs       ! Ns * 2+bs
              MOMs_2ds  (k) = N0s(k) * GAM_3ds   * RLMDs_3ds       ! Ns * 2+ds
              MOMs_5ds_h(k) = N0s(k) * GAM_5ds_h * sqrt(RLMDs_5ds) ! Ns * (5+ds)/2
-             RMOMs_Vt  (k) = GAM_1bsds / GAM_1bs * RLMDs_ds
+             RMOMs_Vt  (k) = coef_RMOMs_Vt * RLMDs_ds
 
              w(k,I_RLMDs) = RLMDs
           END_LOOP_K
@@ -1564,18 +1580,19 @@ contains
        end if
 
        LOOP_K
-          Vtr(k) = -Cr * rho_fact(k) * GAM_1brdr / GAM_1br * RLMDr_dr(k)
+          Vtr(k) = - coef_Vtr * rho_fact(k) * RLMDr_dr(k)
           Vts(k) = -Cs * rho_fact(k) * RMOMs_Vt(k)
-          Vtg(k) = -Cg * rho_fact(k) * GAM_1bgdg / GAM_1bg * RLMDg_dg(k)
+          Vtg(k) = - coef_Vtg * rho_fact(k) * RLMDg_dg(k)
        END_LOOP_K
 
 
        !---< Nucleation >---
        ! [Pigen] ice nucleation
        LOOP_K
-          Nig = max( exp(-0.1_RP*temc(k)), 1.0_RP ) * 1000.0_RP
-          Qig = 4.92E-11_RP * exp(log(Nig)*1.33_RP) / dens(k,i,j)
-          w(k,I_Pigen) = max( min( Qig-qi(k), qv(k)-QSATI(k) ), 0.0_RP ) / dt
+          ! Nig = max( exp(-0.1_RP*temc(k)), 1.0_RP ) * 1000.0_RP
+          ! Qig = 4.92E-11_RP * Nig**1.33 / dens
+          Qig = Qig_fact * exp( max( -0.1_RP*temc(k), 0.0_RP ) * 1.33_RP ) * rdens(k)
+          w(k,I_Pigen) = max( min( Qig-qi(k), qv(k)-QSATI(k) ), 0.0_RP ) * rdt
        END_LOOP_K
 
 
@@ -1616,7 +1633,7 @@ contains
 
        LOOP_K
           ! [Psacr] accretion rate of rain by snow
-          w(k,I_Psacr) = Ar * 0.25_RP * PI / dens(k,i,j) * Esr * N0r(k)          * abs(Vtr(k)-Vts(k)) &
+          w(k,I_Psacr) = Ar * 0.25_RP * PI * rdens(k) * Esr * N0r(k)          * abs(Vtr(k)-Vts(k)) &
                        * (          GAM_1br * RLMDr_1br(k) * MOMs_2(k)          &
                          + 2.0_RP * GAM_2br * RLMDr_2br(k) * MOMs_1(k)          &
                          +          GAM_3br * RLMDr_3br(k) * MOMs_0(k)          )
@@ -1624,7 +1641,7 @@ contains
 
        LOOP_K
           ! [Pgacr] accretion rate of rain by graupel
-          w(k,I_Pgacr) = Ar * 0.25_RP * PI / dens(k,i,j) * Egr * N0g(k) * N0r(k) * abs(Vtg(k)-Vtr(k)) &
+          w(k,I_Pgacr) = Ar * 0.25_RP * PI * rdens(k) * Egr * N0g(k) * N0r(k) * abs(Vtg(k)-Vtr(k)) &
                        * (          GAM_1br * RLMDr_1br(k) * GAM_3 * RLMDg_3(k) &
                          + 2.0_RP * GAM_2br * RLMDr_2br(k) * GAM_2 * RLMDg_2(k) &
                          +          GAM_3br * RLMDr_3br(k) * GAM   * RLMDg  (k) )
@@ -1632,7 +1649,7 @@ contains
 
        LOOP_K
           ! [Pracs] accretion rate of snow by rain
-          w(k,I_Pracs) = As * 0.25_RP * PI / dens(k,i,j) * Esr       *  N0r(k)   * abs(Vtr(k)-Vts(k)) &
+          w(k,I_Pracs) = As * 0.25_RP * PI * rdens(k) * Esr       *  N0r(k)   * abs(Vtr(k)-Vts(k)) &
                        * (          MOMs_0bs(k)            * GAM_3 * RLMDr_3(k) &
                          + 2.0_RP * MOMs_1bs(k)            * GAM_2 * RLMDr_2(k) &
                          +          MOMs_2bs(k)            * GAM   * RLMDr  (k) )
@@ -1641,7 +1658,7 @@ contains
        LOOP_K
           ! [Pgacs] accretion rate of snow by graupel
           Egs_mod(k) = min( Egs, Egs * exp( gamma_gacs * temc(k) ) )
-          w(k,I_Pgacs) = As * 0.25_RP * PI / dens(k,i,j) * Egs_mod(k) * N0g(k)   * abs(Vtg(k)-Vts(k)) &
+          w(k,I_Pgacs) = As * 0.25_RP * PI * rdens(k) * Egs_mod(k) * N0g(k)   * abs(Vtg(k)-Vts(k)) &
                        * (          MOMs_0bs(k)            * GAM_3 * RLMDg_3(k) &
                          + 2.0_RP * MOMs_1bs(k)            * GAM_2 * RLMDg_2(k) &
                          +          MOMs_2bs(k)            * GAM   * RLMDg  (k) )
@@ -1663,7 +1680,7 @@ contains
        else
           LOOP_K
              rhoqc = dens(k,i,j) * qc(k) * 1000.0_RP ! [g/m3]
-             Dc    = 0.146_RP - 5.964E-2_RP * log( Nc(k) / 2000.0_RP )
+             Dc    = 0.146_RP - 5.964E-2_RP * log( Nc(k) * ( 1.0_RP / 2000.0_RP ) )
              Praut_berry = 1.67E-5_RP * rhoqc * rhoqc / ( ( 5.0_RP + 3.66E-2_RP * Nc(k) / ( Dc * rhoqc + EPS ) ) * dens(k,i,j) )
              w(k,I_Praut) = Praut_berry
           END_LOOP_K
@@ -1684,17 +1701,17 @@ contains
        LOOP_K
           Da    = ( Da0 + dDa_dT * temc(k) )
           Kd    = ( Dw0 + dDw_dT * temc(k) ) * PRE00 / PRES(k,i,j)
-          Nu(k) = ( mu0 + dmu_dT * temc(k) ) / dens(k,i,j)
+          rNu(k) = dens(k,i,j) / ( mu0 + dmu_dT * temc(k) )
 
           Glv(k) = 1.0_RP / ( LHV0/(Da*temp(k,i,j)) * ( LHV0/(Rvap*temp(k,i,j)) - 1.0_RP ) + 1.0_RP/(Kd*dens(k,i,j)*QSATL(k)) )
           Giv(k) = 1.0_RP / ( LHS0/(Da*temp(k,i,j)) * ( LHS0/(Rvap*temp(k,i,j)) - 1.0_RP ) + 1.0_RP/(Kd*dens(k,i,j)*QSATI(k)) )
-          Gil(k) = ( Da * temc(k) ) / LHF0
+          Gil(k) = ( Da * temc(k) ) * rLHF0
        END_LOOP_K
 
        LOOP_K
           ! [Prevp] evaporation rate of rain
-          ventr = f1r * GAM_2 * RLMDr_2(k) + f2r * sqrt( Cr * rho_fact(k) / Nu(k) * RLMDr_5dr(k) ) * GAM_5dr_h
-          w(k,I_Prevp) = 2.0_RP * PI / dens(k,i,j) * N0r(k) * ( 1.0_RP-min(Sliq(k),1.0_RP) ) * Glv(k) * ventr
+          ventr = f1r * GAM_2 * RLMDr_2(k) + f2r * sqrt( Cr * rho_fact(k) * rNu(k) * RLMDr_5dr(k) ) * GAM_5dr_h
+          w(k,I_Prevp) = 2.0_RP * PI * rdens(k) * N0r(k) * ( 1.0_RP-min(Sliq(k),1.0_RP) ) * Glv(k) * ventr
        END_LOOP_K
 
        LOOP_K
@@ -1703,53 +1720,53 @@ contains
           XNi   = min( max( 5.38E+7_RP * exp( log(rhoqi)*0.75_RP ), 1.E+3_RP ), 1.E+6_RP )
           XMi   = rhoqi / XNi
           Di    = min( Di_a * sqrt(XMi), Di_max )
-          tmp = 4.0_RP * Di * XNi / dens(k,i,j) * ( Sice(k)-1.0_RP ) * Giv(k)
+          tmp = 4.0_RP * Di * XNi * rdens(k) * ( Sice(k)-1.0_RP ) * Giv(k)
           w(k,I_Pidep) = (          w(k,I_spsati) ) * ( tmp) ! Sice > 1
           w(k,I_Pisub) = ( 1.0_RP - w(k,I_spsati) ) * (-tmp) ! Sice < 1
 
           ! [Pihom] homogenious freezing at T < -40C
           sw = ( 0.5_RP - sign(0.5_RP, temc(k) + 40.0_RP ) ) ! if T < -40C, sw=1
-          w(k,I_Pihom) = sw * qc(k) / dt
+          w(k,I_Pihom) = sw * qc(k) * rdt
 
           ! [Pihtr] heteroginous freezing at -40C < T < 0C
           sw = ( 0.5_RP + sign(0.5_RP, temc(k) + 40.0_RP ) ) &
              * ( 0.5_RP - sign(0.5_RP, temc(k)           ) ) ! if -40C < T < 0C, sw=1
-          w(k,I_Pihtr) = sw * ( dens(k,i,j) / DWATR * qc(k)**2 / ( Nc_ihtr * 1.E+6_RP ) ) &
+          w(k,I_Pihtr) = sw * ( dens(k,i,j) * qc(k)**2 * ( 1.0_RP / ( DWATR * Nc_ihtr * 1.E+6_RP ) ) ) &
                        * B_frz * ( exp(-A_frz*temc(k)) - 1.0_RP )
 
           ! [Pimlt] ice melting at T > 0C
           sw = ( 0.5_RP + sign(0.5_RP, temc(k)           ) ) ! if T > 0C, sw=1
-          w(k,I_Pimlt) = sw * qi(k) / dt
+          w(k,I_Pimlt) = sw * qi(k) * rdt
        END_LOOP_K
 
        LOOP_K
           ! [Psdep,Pssub] deposition/sublimation rate for snow
-          vents = f1s * MOMs_1(k)          + f2s * sqrt( Cs * rho_fact(k) / Nu(k)             ) * MOMs_5ds_h(k)
-          tmp = 2.0_RP * PI / dens(k,i,j) *       ( Sice(k)-1.0_RP ) * Giv(k) * vents
+          vents = f1s * MOMs_1(k)          + f2s * sqrt( Cs * rho_fact(k) * rNu(k)             ) * MOMs_5ds_h(k)
+          tmp = 2.0_RP * PI * rdens(k) *       ( Sice(k)-1.0_RP ) * Giv(k) * vents
           w(k,I_Psdep) = (          w(k,I_spsati) ) * ( tmp) ! Sice > 1
           w(k,I_Pssub) = ( 1.0_RP - w(k,I_spsati) ) * (-tmp) ! Sice < 1
           ! [Psmlt] melting rate of snow
-          w(k,I_Psmlt) = 2.0_RP * PI / dens(k,i,j) *       Gil(k) * vents &
-                       + CL * temc(k) / LHF0 * ( w(k,I_Psacw) + w(k,I_Psacr) )
+          w(k,I_Psmlt) = 2.0_RP * PI * rdens(k) *       Gil(k) * vents &
+                       + CL * temc(k) * rLHF0 * ( w(k,I_Psacw) + w(k,I_Psacr) )
           w(k,I_Psmlt) = max( w(k,I_Psmlt), 0.0_RP )
        END_LOOP_K
 
        LOOP_K
           ! [Pgdep/pgsub] deposition/sublimation rate for graupel
-          ventg = f1g * GAM_2 * RLMDg_2(k) + f2g * sqrt( Cg * rho_fact(k) / Nu(k) * RLMDg_5dg(k) ) * GAM_5dg_h
-          tmp = 2.0_RP * PI / dens(k,i,j) * N0g(k) * ( Sice(k)-1.0_RP ) * Giv(k) * ventg
+          ventg = f1g * GAM_2 * RLMDg_2(k) + f2g * sqrt( Cg * rho_fact(k) * rNu(k) * RLMDg_5dg(k) ) * GAM_5dg_h
+          tmp = 2.0_RP * PI * rdens(k) * N0g(k) * ( Sice(k)-1.0_RP ) * Giv(k) * ventg
           w(k,I_Pgdep) = (          w(k,I_spsati) ) * ( tmp) ! Sice > 1
           w(k,I_Pgsub) = ( 1.0_RP - w(k,I_spsati) ) * (-tmp) ! Sice < 1
           ! [Pgmlt] melting rate of graupel
-          w(k,I_Pgmlt) = 2.0_RP * PI / dens(k,i,j) * N0g(k) * Gil(k) * ventg &
-                       + CL * temc(k) / LHF0 * ( w(k,I_Pgacw) + w(k,I_Pgacr) )
+          w(k,I_Pgmlt) = 2.0_RP * PI * rdens(k) * N0g(k) * Gil(k) * ventg &
+                       + CL * temc(k) * rLHF0 * ( w(k,I_Pgacw) + w(k,I_Pgacr) )
           w(k,I_Pgmlt) = max( w(k,I_Pgmlt), 0.0_RP )
        END_LOOP_K
 
        ! [Pgfrz] freezing rate of graupel
        LOOP_K
           tmp = ( exp(-A_frz*temc(k)) - 1.0_RP ) * RLMDr_7(k) ! to avoid floating overflow
-          w(k,I_Pgfrz) = 2.0_RP * PI / dens(k,i,j) * N0r(k) * 60.0_RP * B_frz * Ar * tmp
+          w(k,I_Pgfrz) = 2.0_RP * PI * rdens(k) * N0r(k) * 60.0_RP * B_frz * Ar * tmp
        END_LOOP_K
 
        LOOP_K
@@ -1763,12 +1780,12 @@ contains
              + (        fact ) * Bergeron_a2_tab(itemc+1)
           ma2 = 1.0_RP - a2
           a1 = a1 * exp( log(1.E-3_RP)*ma2 ) ! [g->kg]
-          dt1  = ( exp( log(mi50)*ma2 ) &
-                 - exp( log(mi40)*ma2 ) ) / ( a1 * ma2 )
-          Ni50 = qi(k) * dt / ( mi50 * dt1 )
+          rdt1 = ( a1 * ma2 ) &
+               / ( exp( log(mi50)*ma2 ) - exp( log(mi40)*ma2 ) )
+          Ni50 = qi(k) * dt * rdt1 * ( 1.0_RP / mi50 )
           w(k,I_Psfw ) = Ni50 * ( a1 * exp( log(mi50)*a2 )                 &
                                 + PI * Eiw * dens(k,i,j) * qc(k) * Ri50*Ri50 * vti50 )
-          w(k,I_Psfi ) = qi(k) / dt1
+          w(k,I_Psfi ) = qi(k) * rdt1
        END_LOOP_K
 
 #ifdef _OPENACC
@@ -2571,7 +2588,7 @@ contains
 #undef Vtg
 #undef Egs_mod
 #undef Nc
-#undef Nu
+#undef rNu
 #undef Glv
 #undef Giv
 #undef Gil
