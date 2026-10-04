@@ -28,6 +28,17 @@
 #error "HEVI_FISSION is not supported with LSIZE > 1"
 #endif
 
+! upper limit of KA for the column work arrays of fixed size in the implicit
+! solver, which can be placed in the shared memory.
+! KA larger than this is rejected at the setup; rebuild with -DKAMAX=<n> (n >= KA).
+! An odd number avoids the bank conflicts when the vector lanes access
+! the different columns of a work array (KAMAX,n) at the same k.
+#ifdef _OPENACC
+#ifndef KAMAX
+#define KAMAX 129
+#endif
+#endif
+
 ! number of the columns handled together in the implicit solver
 #ifdef KAMAX
 ! With KAMAX (i.e., with OpenACC), a gang solves HEVI_NCOL columns with the
@@ -142,10 +153,22 @@ contains
   !-----------------------------------------------------------------------------
   !> Setup
   subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup
+#ifdef KAMAX
+    use scale_prc, only: &
+       PRC_abort
+#endif
     implicit none
     !---------------------------------------------------------------------------
 
     LOG_INFO("ATMOS_DYN_Tstep_short_fvm_hevi_setup",*) 'HEVI Setup'
+
+#ifdef KAMAX
+    if ( KA > KAMAX ) then
+       LOG_ERROR("ATMOS_DYN_Tstep_short_fvm_hevi_setup",*) 'KA exceeds KAMAX, the size of the column work arrays fixed at the compilation! ', KA, KAMAX
+       LOG_ERROR_CONT(*) 'Rebuild with a larger KAMAX, e.g. -DKAMAX=', KA
+       call PRC_abort
+    endif
+#endif
 
     return
   end subroutine ATMOS_DYN_Tstep_short_fvm_hevi_setup

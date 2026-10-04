@@ -194,14 +194,6 @@ contains
     KE = ADM_kmax
     KA = ADM_kall
 
-#ifdef KAMAX
-    if ( KA > KAMAX ) then
-       LOG_ERROR("ATMOS_GRID_ICOA_INDEX_setup",*) 'KA exceeds KAMAX, the size of the column work arrays fixed at the compilation! ', KA, KAMAX
-       LOG_ERROR_CONT(*) 'Rebuild with a larger KAMAX, e.g. -DKAMAX=', KA
-       call PRC_abort
-    endif
-#endif
-
     IMAX = nmax
     ! IS = 1
     IE = nmax + 1
