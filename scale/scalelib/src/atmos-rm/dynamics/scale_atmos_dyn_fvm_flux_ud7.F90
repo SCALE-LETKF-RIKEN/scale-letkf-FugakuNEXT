@@ -265,7 +265,7 @@ contains
     !$acc data copy(flux) copyin(mflx, val, GSQRT, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -299,7 +299,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -443,7 +442,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE
@@ -477,7 +476,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -510,7 +508,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE
@@ -544,7 +542,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -589,7 +586,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, num_diff, CDZ, FDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+4, KE-3
@@ -626,7 +623,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -781,7 +777,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J13G, RMAPF, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-3
@@ -800,7 +796,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -900,7 +895,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J23G, RMAPF, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-3
@@ -919,7 +914,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -1024,7 +1018,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE-1
@@ -1064,7 +1058,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -1125,7 +1118,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE-1
@@ -1165,7 +1158,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -1416,7 +1408,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -1455,7 +1447,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -1643,7 +1634,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -1666,7 +1657,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -1990,7 +1980,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -2013,7 +2003,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -2174,7 +2163,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE+1
     do k = KS, KE
@@ -2210,7 +2199,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -2298,7 +2286,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE
@@ -2334,7 +2322,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -2393,7 +2380,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -2432,7 +2419,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -2618,7 +2604,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -2641,7 +2627,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -2812,7 +2797,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -2835,7 +2820,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -2992,7 +2976,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE
@@ -3028,7 +3012,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -3071,7 +3054,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE+1
     do i = IIS, IIE
     do k = KS, KE
@@ -3107,7 +3090,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
