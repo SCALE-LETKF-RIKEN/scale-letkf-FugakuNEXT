@@ -2098,13 +2098,19 @@ contains
 #else
     real(RP) :: fluxZ(0:KA)
 #endif
+    ! products of the map factors at the faces, to merge the divisions into one
+    real(RP) :: MAPFu2, MAPFv2
     integer  :: k, i, j
+
+    ! The divisions by the map factors at the faces and by GSQRT are merged into
+    ! one division by their product, since a division costs more than ten
+    ! multiplications on GPUs.
 
     if ( twoD ) then
 
        i = IIS
        !$omp parallel do default(none) OMP_SCHEDULE_ &
-       !$omp private(j,k, &
+       !$omp private(j,k,MAPFv2, &
        !$omp         fluxZ) &
        !$omp shared(JJS,JJE,i,KS,KE,I_UYZ,I_UY, &
        !$omp        phi_t_TB,QFLX_phi,GSQRT,MAPF, &
@@ -2143,18 +2149,19 @@ contains
                     + J33G * QFLX_phi(k,i,j,ZDIR)
           end if
 #endif
+             MAPFv2 = MAPF(i,j,1,I_XV) * MAPF(i,j-1,1,I_XV)
              phi_t_TB(k,i,j) = &
                   - ( ( &
-                      + ( GSQRT(k,i,j  ,I_XVZ) * QFLX_phi(k,i,j  ,YDIR) / MAPF(i,j  ,1,I_XV) &
-                        - GSQRT(k,i,j-1,I_XVZ) * QFLX_phi(k,i,j-1,YDIR) / MAPF(i,j-1,1,I_XV) ) * RCDY(j) &
+                      + ( GSQRT(k,i,j  ,I_XVZ) * QFLX_phi(k,i,j  ,YDIR) * MAPF(i,j-1,1,I_XV) &
+                        - GSQRT(k,i,j-1,I_XVZ) * QFLX_phi(k,i,j-1,YDIR) * MAPF(i,j  ,1,I_XV) ) * RCDY(j) &
                       ) * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) &
 #ifdef _OPENACC
                     + ( fluxZ1 - fluxZ0 ) &
 #else
                     + ( fluxZ(k) - fluxZ(k-1) ) &
 #endif
-                    * RCDZ(k) &
-                    ) / GSQRT(k,i,j,I_XYZ)
+                    * RCDZ(k) * MAPFv2 &
+                    ) / ( GSQRT(k,i,j,I_XYZ) * MAPFv2 )
           enddo
        enddo
        !$acc end kernels
@@ -2162,7 +2169,7 @@ contains
     else
 
        !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
-       !$omp private(i,j,k, &
+       !$omp private(i,j,k,MAPFu2,MAPFv2, &
        !$omp         fluxZ) &
        !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UYZ,I_UY, &
        !$omp        phi_t_TB,QFLX_phi,GSQRT,MAPF, &
@@ -2205,19 +2212,21 @@ contains
                 + J33G * QFLX_phi(k,i,j,ZDIR)
           end if
 #endif
+             MAPFu2 = MAPF(i,j,2,I_UY) * MAPF(i-1,j,2,I_UY)
+             MAPFv2 = MAPF(i,j,1,I_XV) * MAPF(i,j-1,1,I_XV)
              phi_t_TB(k,i,j) = &
-                  - ( ( ( GSQRT(k,i  ,j,I_UYZ) * QFLX_phi(k,i  ,j,XDIR) / MAPF(i  ,j,2,I_UY) &
-                        - GSQRT(k,i-1,j,I_UYZ) * QFLX_phi(k,i-1,j,XDIR) / MAPF(i-1,j,2,I_UY) ) * RCDX(i) &
-                      + ( GSQRT(k,i,j  ,I_XVZ) * QFLX_phi(k,i,j  ,YDIR) / MAPF(i,j  ,1,I_XV) &
-                        - GSQRT(k,i,j-1,I_XVZ) * QFLX_phi(k,i,j-1,YDIR) / MAPF(i,j-1,1,I_XV) ) * RCDY(j) &
+                  - ( ( ( GSQRT(k,i  ,j,I_UYZ) * QFLX_phi(k,i  ,j,XDIR) * MAPF(i-1,j,2,I_UY) &
+                        - GSQRT(k,i-1,j,I_UYZ) * QFLX_phi(k,i-1,j,XDIR) * MAPF(i  ,j,2,I_UY) ) * RCDX(i) * MAPFv2 &
+                      + ( GSQRT(k,i,j  ,I_XVZ) * QFLX_phi(k,i,j  ,YDIR) * MAPF(i,j-1,1,I_XV) &
+                        - GSQRT(k,i,j-1,I_XVZ) * QFLX_phi(k,i,j-1,YDIR) * MAPF(i,j  ,1,I_XV) ) * RCDY(j) * MAPFu2 &
                       ) * MAPF(i,j,1,I_XY) * MAPF(i,j,2,I_XY) &
 #ifdef _OPENACC
                     + ( fluxZ1 - fluxZ0 ) &
 #else
                     + ( fluxZ(k) - fluxZ(k-1) ) &
 #endif
-                    * RCDZ(k) &
-                    ) / GSQRT(k,i,j,I_XYZ)
+                    * RCDZ(k) * MAPFu2 * MAPFv2 &
+                    ) / ( GSQRT(k,i,j,I_XYZ) * MAPFu2 * MAPFv2 )
           enddo
        enddo
        enddo
