@@ -862,6 +862,7 @@ contains
     real(RP) :: RHOQ     (KA,QS_MP+1:QE_MP,IA,JA)
     real(RP) :: RHOQ2    (KA,QS_MP+1:QE_MP,IA,JA)
     real(RP), allocatable :: RHOQ2_0(:,:,:,:) ! RHOQ2 at the entry of the sedimentation step (step > 1)
+    real(RP), allocatable :: RHOQ2_crg_0(:,:,:,:) ! RHOQ2_crg at the entry of the sedimentation step
     real(RP) :: mflux    (KA,IA,JA)
     real(RP) :: sflux    (2,IA,JA)  !> 1: rain, 2: snow
     real(RP) :: eflux_2d (IA,JA)
@@ -1321,6 +1322,10 @@ contains
              allocate( RHOQ2_0(KA,QS_MP+1:QE_MP,IA,JA) )
              !$acc enter data create(RHOQ2_0)
           end if
+          if ( flg_lt .and. MP_upwind_scheme_id == I_UPWIND ) then
+             allocate( RHOQ2_crg_0(KA,QS_LT:QE_LT,IA,JA) )
+             !$acc enter data create(RHOQ2_crg_0)
+          end if
 #endif
 
 #ifdef _OPENACC
@@ -1671,10 +1676,37 @@ contains
                    select case ( MP_upwind_scheme_id )
                    case ( I_UPWIND )
 #ifdef _OPENACC
+                   ! as for RHOQ2 above, RHOQ2_crg at the entry is passed in another array
+                   !$acc parallel loop collapse(4)
+                   do j = JS, JE
+                   do i = IS, IE
+                   do iq = QS_LT, QE_LT
+                   do k = KS, KE
+                      RHOQ2_crg_0(k,iq,i,j) = RHOQ2_crg(k,iq)
+                   end do
+                   end do
+                   end do
+                   end do
+                   !$acc end parallel loop
                    !$acc parallel loop collapse(2) gang
                    do j = JS, JE
                    do i = IS, IE
-#endif
+                      call ATMOS_PHY_MP_precipitation_upwind( &
+                           KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
+                           TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
+                           FDZ(:), RCDZ(:),            & ! [IN]
+                           MP_DTSEC_SEDIMENTATION,     & ! [IN]
+                           i, j,                       & ! [IN]
+                           DENS2(:), RHOQ2_crg(:,:),   & ! [INOUT]
+                           CPtot2(:), CVtot2(:),       & ! [INOUT]
+                           RHOE2(:),                   & ! [INOUT]
+                           mflux_crg(:), sflux_crg(:), & ! [OUT] dummy
+                           eflux_crg,                  & ! [OUT] dummy
+                           RHOQ0 = RHOQ2_crg_0(:,:,i,j) ) ! [IN]
+                   end do
+                   end do
+                   !$acc end parallel loop
+#else
                       call ATMOS_PHY_MP_precipitation_upwind( &
                            KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
                            TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
@@ -1686,10 +1718,6 @@ contains
                            RHOE2(:),                   & ! [INOUT]
                            mflux_crg(:), sflux_crg(:), & ! [OUT] dummy
                            eflux_crg                   ) ! [OUT] dummy
-#ifdef _OPENACC
-                   end do
-                   end do
-                   !$acc end parallel loop
 #endif
                    case ( I_SEMILAG )
 #ifdef _OPENACC
@@ -1903,6 +1931,10 @@ contains
           if ( allocated( RHOQ2_0 ) ) then
              !$acc exit data delete(RHOQ2_0)
              deallocate( RHOQ2_0 )
+          end if
+          if ( allocated( RHOQ2_crg_0 ) ) then
+             !$acc exit data delete(RHOQ2_crg_0)
+             deallocate( RHOQ2_crg_0 )
           end if
 #endif
 

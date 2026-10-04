@@ -147,7 +147,7 @@ contains
        end do
 
        ! dens * coefficient at the half level
-       !$acc loop vector
+       !$acc loop vector private(rho_h)
        do k = KS, KE_PBL-1
           rho_h = F2H(k,1,i,j) * DENS(k+1,i,j) + F2H(k,2,i,j) * DENS(k,i,j)
           RHOKh(k) = rho_h * Kh(k,i,j)
@@ -160,7 +160,7 @@ contains
        end do
 
        c(KS) = 0.0_RP
-       !$acc loop vector
+       !$acc loop vector private(ap)
        do k = KS, KE_PBL-1
           ap = - dt * RHOKh(k) / FDZ(k)
           a(k) = ap / ( RHO(k) * CDZ(k) )
