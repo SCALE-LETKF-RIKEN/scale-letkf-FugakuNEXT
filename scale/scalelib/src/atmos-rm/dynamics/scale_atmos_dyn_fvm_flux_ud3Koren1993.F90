@@ -143,10 +143,10 @@ contains
 
        valW(KS) = merge( F2 * ( val(KS+1)+val(KS) ), &
                        ( val(KS+1) &
-                       + 0.5_RP * phi(val(KS),val(KS+1),val(KS+2)) * ( val(KS+1)-val(KS+2) ) ), &
+                       + 0.5_RP * phi_dv(val(KS),val(KS+1),val(KS+2)) ), &
                        mflx(KS) >= 0.0_RP )
        valW(KE-1) = merge( ( val(KE-1) &
-                       + 0.5_RP * phi(val(KE-2),val(KE-1),val(KE)) * ( val(KE-1)-val(KE) ) ), &
+                       + 0.5_RP * phi_dv(val(KE),val(KE-1),val(KE-2)) ), &
                        F2 * ( val(KE)+val(KE-1) ), &
                        mflx(KE-1) >= 0.0_RP )
 
@@ -184,7 +184,7 @@ contains
     !$acc data copy(flux) copyin(mflx, val, GSQRT, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+1, KE-2
@@ -205,7 +205,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -231,13 +230,13 @@ contains
        flux(KS,i,j) = vel &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KS,i,j) * num_diff(KS,i,j)
        vel = mflx(KE-1,i,j)
        flux(KE-1,i,j) = vel &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
@@ -283,7 +282,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE
@@ -304,7 +303,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -337,7 +335,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE
@@ -358,7 +356,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -403,7 +400,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, num_diff, CDZ, FDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+2, KE-1
@@ -427,7 +424,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -456,7 +452,7 @@ contains
        flux(KS,i,j) = J33G * vel &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KS+1,i,j) * num_diff(KS+1,i,j) ! k = KS+1
 
@@ -508,7 +504,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J13G, RMAPF, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+2, KE-1
@@ -520,7 +516,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -541,7 +536,7 @@ contains
        flux(KS,i,j) =  vel * RMAPF(i,j,+2) &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) ) ! k = KS+1
 
 
@@ -589,7 +584,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J23G, RMAPF, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+2, KE-1
@@ -601,7 +596,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -622,7 +616,7 @@ contains
        flux(KS,i,j) =  vel * RMAPF(i,j,+1) &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) ) ! k = KS+1
 
 
@@ -677,7 +671,7 @@ contains
 #ifdef _OPENACC
     ! The flux at KE is selected with merge() in the kernel for the inner levels
     ! (see fluxZ_XYZ). The values in the halo are read but not used.
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE
@@ -694,10 +688,9 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #else
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE-1
@@ -724,7 +717,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -788,7 +780,7 @@ contains
 #ifdef _OPENACC
     ! The flux at KE is selected with merge() in the kernel for the inner levels
     ! (see fluxZ_XYZ). The values in the halo are read but not used.
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE
@@ -805,10 +797,9 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #else
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE-1
@@ -835,7 +826,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -962,7 +952,7 @@ contains
        flux(KS,i,j) = J33G * vel &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KS,i,j) * num_diff(KS,i,j)
        f2h1_XYZ_KEm1 = F2H(KE-1,I_XYZ)
@@ -972,7 +962,7 @@ contains
              + f2h2_XYZ_KEm1 * DENS(KE-1,i,j) )
        flux(KE-1,i,j) = J33G * vel &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
@@ -986,7 +976,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+1, KE-2
@@ -1012,7 +1002,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -1043,7 +1032,7 @@ contains
        flux(KS,i,j) = J33G * vel &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KS,i,j) * num_diff(KS,i,j)
        f2h1_UYZ_KEm1 = F2H(KE-1,I_UYZ)
@@ -1053,7 +1042,7 @@ contains
              + f2h2_UYZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i+1,j) ) )
        flux(KE-1,i,j) = J33G * vel &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
@@ -1116,7 +1105,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+1, KE-2
@@ -1132,7 +1121,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -1154,7 +1142,7 @@ contains
        flux(KS,i,j) = vel * RMAPF(i,j,+2) &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) )
 
        f2h1_UYZ_KEm1 = F2HW(KE-1,i,j)
@@ -1166,7 +1154,7 @@ contains
        vel = vel * J13G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+2) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1264,7 +1252,7 @@ contains
        flux(KS,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) )
 
        f2h1_XYZ_KEm1 = F2HW(KE-1,i,j)
@@ -1276,7 +1264,7 @@ contains
        vel = vel * J23G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1289,7 +1277,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+1, KE-2
@@ -1305,7 +1293,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -1327,7 +1314,7 @@ contains
        flux(KS,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) )
 
        f2h1_UYZ_KEm1 = F2HW(KE-1,i,j)
@@ -1339,7 +1326,7 @@ contains
        vel = vel * J23G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1392,7 +1379,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE+1
     do k = KS, KE
@@ -1415,7 +1402,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -1490,7 +1476,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE
@@ -1513,7 +1499,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -1566,7 +1551,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+1, KE-2
@@ -1592,7 +1577,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
@@ -1623,7 +1607,7 @@ contains
        flux(KS,i,j) = J33G * vel &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KS,i,j) * num_diff(KS,i,j)
        f2h1_XVZ_KEm1 = F2H(KE-1,I_XVZ)
@@ -1633,7 +1617,7 @@ contains
              + f2h2_XVZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i,j+1) ) )
        flux(KE-1,i,j) = J33G * vel &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) ) &
                    + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
@@ -1694,7 +1678,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+1, KE-2
@@ -1710,7 +1694,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -1732,7 +1715,7 @@ contains
        flux(KS,i,j) = vel * RMAPF(i,j,+2) &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) )
 
        f2h1_XVZ_KEm1 = F2HW(KE-1,i,j)
@@ -1744,7 +1727,7 @@ contains
        vel = vel * J13G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+2) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1801,7 +1784,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+1, KE-2
@@ -1817,7 +1800,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
@@ -1839,7 +1821,7 @@ contains
        flux(KS,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
                        ( val(KS+1,i,j) &
-                       + 0.5_RP * phi(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) * ( val(KS+1,i,j)-val(KS+2,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
                        vel >= 0.0_RP ) )
 
        f2h1_XVZ_KEm1 = F2HW(KE-1,i,j)
@@ -1851,7 +1833,7 @@ contains
        vel = vel * J23G(KE-1,i,j)
        flux(KE-1,i,j) = vel * RMAPF(i,j,+1) &
                    * ( merge( ( val(KE-1,i,j) &
-                       + 0.5_RP * phi(val(KE-2,i,j),val(KE-1,i,j),val(KE,i,j)) * ( val(KE-1,i,j)-val(KE,i,j) ) ), &
+                       + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
                        F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
                        vel >= 0.0_RP ) )
 
@@ -1900,7 +1882,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE
@@ -1923,7 +1905,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -1966,7 +1947,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc kernels
+    !$acc parallel loop collapse(3)
     do j = JJS, JJE+1
     do i = IIS, IIE
     do k = KS, KE
@@ -1989,7 +1970,6 @@ contains
     enddo
     enddo
     enddo
-    !$acc end kernels
 #ifdef DEBUG
     k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
@@ -2005,13 +1985,16 @@ contains
 
 
   !-----------------------------------------------------------------------------
-  function phi(v1, v2, v3)
-    use scale_const, only: &
-       EPS => CONST_EPS
+  !> phi(r) * (v2-v3) of Koren (1993), where r = 2 (v1-v2) / (v2-v3)
+  !> phi(r) = max(0, min(r, (1+r)/3, 2)) is multiplied by v2-v3 before it is evaluated,
+  !> so that no division is needed. With a division, which calls the slow path of
+  !> the IEEE division, the kernels use more registers and are slower
+  !> (fluxX_XYZ: 50 -> 40 registers, 628 -> 397 ms per 2700 calls on GB200).
+  function phi_dv(v1, v2, v3)
     !$acc routine seq
     implicit none
 
-    real(RP)              :: phi
+    real(RP)              :: phi_dv
 #ifdef _OPENACC
     real(RP), intent(in), value :: v1
     real(RP), intent(in), value :: v2
@@ -2022,23 +2005,21 @@ contains
     real(RP), intent(in) :: v3
 #endif
 
-    real(RP) :: r2
-    real(RP) :: zerosw1, zerosw2
+    real(RP) :: sw, a, b
     !---------------------------------------------------------------------------
 
-    ! With merge() instead of sign(), the kernels use more registers and are slower
-    ! (fluxX_XYZ: 80 -> 94 registers, 958 -> 1116 ms per 2700 calls on GB200).
-    zerosw1 = EPS - sign(EPS, abs(v1-v2)-EPS)
-    zerosw2 = EPS - sign(EPS, abs(v2-v3)-EPS)
-    r2 = 2.0_RP * (v1-v2+zerosw1*zerosw2) / (v2-v3+zerosw2)
+    ! a and b are 2 (v1-v2) and v2-v3 multiplied by the sign of v2-v3, so that b >= 0
+    sw = sign( 1.0_RP, v2-v3 )
+    a  = sw * 2.0_RP * ( v1-v2 )
+    b  = sw * ( v2-v3 )
 
-    phi = max(0.0_RP, min(r2, min((1.0_RP+r2)/3.0_RP, 2.0_RP) ) )
+    phi_dv = sw * max( 0.0_RP, min( a, ( a + b ) * ( 1.0_RP / 3.0_RP ), 2.0_RP * b ) )
 
-  end function phi
+  end function phi_dv
 
   !-----------------------------------------------------------------------------
   !> Koren (1993) flux at the face between v0 and v1, upwinded by the sign of vel
-  !> The stencil is selected before phi() is evaluated, so phi() is evaluated once.
+  !> The stencil is selected before phi_dv() is evaluated, so phi_dv() is evaluated once.
   function flux3k_upwind(vel, vn1, v0, v1, v2)
     !$acc routine seq
     implicit none
@@ -2067,7 +2048,7 @@ contains
     vc = merge( v0,  v1, up ) ! upwind cell
     vd = merge( v1,  v0, up ) ! downwind cell
 
-    flux3k_upwind = vc + 0.5_RP * phi(vd, vc, vu) * ( vc - vu )
+    flux3k_upwind = vc + 0.5_RP * phi_dv(vd, vc, vu)
 
   end function flux3k_upwind
 
