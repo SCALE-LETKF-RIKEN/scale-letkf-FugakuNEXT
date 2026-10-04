@@ -2555,6 +2555,7 @@ contains
 #undef Sliq
 #undef Sice
 #undef rho_fact
+#undef rdens
 #undef temc
 #undef N0r
 #undef N0s

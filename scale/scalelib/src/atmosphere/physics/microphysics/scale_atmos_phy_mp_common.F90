@@ -447,7 +447,8 @@ contains
        TEMP, vterm, FDZ, RCDZ, dt,     &
        i, j,                           &
        DENS, RHOQ, CPtot, CVtot, RHOE, &
-       mflx, sflx, esflx               )
+       mflx, sflx, esflx,              &
+       RHOQ0                           )
     !$acc routine vector
     use scale_const, only: &
        GRAV  => CONST_GRAV
@@ -477,6 +478,11 @@ contains
     real(RP), intent(out)   :: sflx (2) !> 1: rain, 2: snow
     real(RP), intent(out)   :: esflx
 
+    ! RHOQ at the entry, in a different array from RHOQ.
+    ! On GPUs, the lane k reads RHOQ(k+1,:), which the lane k+1 updates, so the
+    ! result can depend on the execution order of the lanes without it.
+    real(RP), intent(in), optional :: RHOQ0(KA,QHA)
+
 #ifdef _OPENACC
     ! In this vector routine, the compiler reads the intent(inout) and intent(out)
     ! arrays with volatile loads, which bypass the L1 cache, since the other lanes
@@ -493,6 +499,7 @@ contains
     real(RP) :: rhoq_k, rhoq_kp1
     real(RP) :: mflx_k
     real(RP) :: sflx1, sflx2, esflx_k
+    logical  :: has_RHOQ0
 #define RHOCP_pu(k) RHOCP_pu
 #define RHOCV_pu(k) RHOCV_pu
 #else
@@ -520,6 +527,10 @@ contains
     eflx(KE) = 0.0_RP
 #endif
 
+#ifdef _OPENACC
+    has_RHOQ0 = present(RHOQ0)
+#endif
+
     !$acc loop vector
     do k = KS, KE
 
@@ -544,8 +555,13 @@ contains
 
        !--- mass flux for each tracer, upwind with vel < 0
 #ifdef _OPENACC
-       rhoq_k = RHOQ(k,iq)
-       if ( k < KE ) rhoq_kp1 = RHOQ(k+1,iq)
+       if ( has_RHOQ0 ) then
+          rhoq_k = RHOQ0(k,iq)
+          if ( k < KE ) rhoq_kp1 = RHOQ0(k+1,iq)
+       else
+          rhoq_k = RHOQ(k,iq)
+          if ( k < KE ) rhoq_kp1 = RHOQ(k+1,iq)
+       end if
        if ( k == KS ) then
           qflx0 = vterm(KS,iq) * rhoq_k
        else
