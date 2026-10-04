@@ -89,6 +89,14 @@ module mod_atmos_phy_mp_driver
   real(RP), private :: MP_RNSTEP_SEDIMENTATION
   real(RP), private :: MP_DTSEC_SEDIMENTATION
 
+#ifdef _OPENACC
+  ! RHOQ2 and RHOQ2_crg at the entry of each sedimentation step, passed to
+  ! ATMOS_PHY_MP_precipitation_upwind in another array from the updated one, so
+  ! that the vector lanes do not read the elements updated by the other lanes
+  real(RP), private, allocatable :: RHOQ0_sed    (:,:,:,:)
+  real(RP), private, allocatable :: RHOQ0_sed_crg(:,:,:,:)
+#endif
+
   integer,  private, allocatable :: HIST_hyd_id(:)
   integer,  private, allocatable :: HIST_crg_id(:)
 
@@ -311,7 +319,9 @@ contains
        QS_MP, &
        QE_MP
     use mod_atmos_phy_lt_vars, only: &
-       flg_lt
+       flg_lt, &
+       QS_LT,  &
+       QE_LT
     implicit none
 
     namelist / PARAM_ATMOS_PHY_MP / &
@@ -476,6 +486,17 @@ contains
              call PRC_abort
           end select
 
+#ifdef _OPENACC
+          if ( MP_upwind_scheme_id == I_UPWIND ) then
+             allocate( RHOQ0_sed(KA,QS_MP+1:QE_MP,IA,JA) )
+             !$acc enter data create(RHOQ0_sed)
+             if ( flg_lt ) then
+                allocate( RHOQ0_sed_crg(KA,QS_LT:QE_LT,IA,JA) )
+                !$acc enter data create(RHOQ0_sed_crg)
+             end if
+          end if
+#endif
+
        else
 
           !$acc kernels
@@ -547,6 +568,17 @@ contains
 
     LOG_NEWLINE
     LOG_INFO("ATMOS_PHY_MP_driver_finalize",*) 'Finalize'
+
+#ifdef _OPENACC
+    if ( allocated( RHOQ0_sed ) ) then
+       !$acc exit data delete(RHOQ0_sed)
+       deallocate( RHOQ0_sed )
+    end if
+    if ( allocated( RHOQ0_sed_crg ) ) then
+       !$acc exit data delete(RHOQ0_sed_crg)
+       deallocate( RHOQ0_sed_crg )
+    end if
+#endif
 
     if ( ATMOS_sw_phy_mp ) then
        select case ( ATMOS_PHY_MP_TYPE )
@@ -861,8 +893,6 @@ contains
     real(RP) :: RHOE2    (KA,IA,JA)
     real(RP) :: RHOQ     (KA,QS_MP+1:QE_MP,IA,JA)
     real(RP) :: RHOQ2    (KA,QS_MP+1:QE_MP,IA,JA)
-    real(RP), allocatable :: RHOQ2_0(:,:,:,:) ! RHOQ2 at the entry of the sedimentation step (step > 1)
-    real(RP), allocatable :: RHOQ2_crg_0(:,:,:,:) ! RHOQ2_crg at the entry of the sedimentation step
     real(RP) :: mflux    (KA,IA,JA)
     real(RP) :: sflux    (2,IA,JA)  !> 1: rain, 2: snow
     real(RP) :: eflux_2d (IA,JA)
@@ -1317,16 +1347,6 @@ contains
              vterm_hist(:,:,:,:) = 0.0_RP
              !$acc end kernels
           end if
-#ifdef _OPENACC
-          if ( MP_NSTEP_SEDIMENTATION > 1 .and. MP_upwind_scheme_id == I_UPWIND ) then
-             allocate( RHOQ2_0(KA,QS_MP+1:QE_MP,IA,JA) )
-             !$acc enter data create(RHOQ2_0)
-          end if
-          if ( flg_lt .and. MP_upwind_scheme_id == I_UPWIND ) then
-             allocate( RHOQ2_crg_0(KA,QS_LT:QE_LT,IA,JA) )
-             !$acc enter data create(RHOQ2_crg_0)
-          end if
-#endif
 
 #ifdef _OPENACC
           !$acc parallel loop collapse(3)
@@ -1558,59 +1578,36 @@ contains
                 select case ( MP_upwind_scheme_id )
                 case ( I_UPWIND )
 #ifdef _OPENACC
-                   ! RHOQ2 at the entry is passed in another array, so that the vector
-                   ! lanes do not read the elements updated by the other lanes.
-                   ! RHOQ holds it at the first step.
-                   if ( step == 1 ) then
-                      !$acc parallel loop collapse(2) gang
-                      do j = JS, JE
-                      do i = IS, IE
-                         call ATMOS_PHY_MP_precipitation_upwind( &
-                              KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
-                              TEMP2(:), vterm(:,:),   & ! [IN]
-                              FDZ(:), RCDZ(:),        & ! [IN]
-                              MP_DTSEC_SEDIMENTATION, & ! [IN]
-                              i, j,                   & ! [IN]
-                              DENS2(:), RHOQ2(:,:),   & ! [INOUT]
-                              CPtot2(:), CVtot2(:),   & ! [INOUT]
-                              RHOE2(:),               & ! [INOUT]
-                              mflux(:), sflux(:),     & ! [OUT]
-                              eflux,                  & ! [OUT]
-                              RHOQ0 = RHOQ(:,:)       ) ! [IN]
-                      end do
-                      end do
-                      !$acc end parallel loop
-                   else
-                      !$acc parallel loop collapse(4)
-                      do j = JS, JE
-                      do i = IS, IE
-                      do iq = QS_MP+1, QE_MP
-                      do k = KS, KE
-                         RHOQ2_0(k,iq,i,j) = RHOQ2(k,iq)
-                      end do
-                      end do
-                      end do
-                      end do
-                      !$acc end parallel loop
-                      !$acc parallel loop collapse(2) gang
-                      do j = JS, JE
-                      do i = IS, IE
-                         call ATMOS_PHY_MP_precipitation_upwind( &
-                              KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
-                              TEMP2(:), vterm(:,:),   & ! [IN]
-                              FDZ(:), RCDZ(:),        & ! [IN]
-                              MP_DTSEC_SEDIMENTATION, & ! [IN]
-                              i, j,                   & ! [IN]
-                              DENS2(:), RHOQ2(:,:),   & ! [INOUT]
-                              CPtot2(:), CVtot2(:),   & ! [INOUT]
-                              RHOE2(:),               & ! [INOUT]
-                              mflux(:), sflux(:),     & ! [OUT]
-                              eflux,                  & ! [OUT]
-                              RHOQ0 = RHOQ2_0(:,:,i,j) ) ! [IN]
-                      end do
-                      end do
-                      !$acc end parallel loop
-                   end if
+                   ! RHOQ2 at the entry is passed in another array (RHOQ0_sed)
+                   !$acc parallel loop collapse(4)
+                   do j = JS, JE
+                   do i = IS, IE
+                   do iq = QS_MP+1, QE_MP
+                   do k = KS, KE
+                      RHOQ0_sed(k,iq,i,j) = RHOQ2(k,iq)
+                   end do
+                   end do
+                   end do
+                   end do
+                   !$acc end parallel loop
+                   !$acc parallel loop collapse(2) gang
+                   do j = JS, JE
+                   do i = IS, IE
+                      call ATMOS_PHY_MP_precipitation_upwind( &
+                           KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
+                           TEMP2(:), vterm(:,:),   & ! [IN]
+                           FDZ(:), RCDZ(:),        & ! [IN]
+                           MP_DTSEC_SEDIMENTATION, & ! [IN]
+                           i, j,                   & ! [IN]
+                           DENS2(:), RHOQ2(:,:),   & ! [INOUT]
+                           CPtot2(:), CVtot2(:),   & ! [INOUT]
+                           RHOE2(:),               & ! [INOUT]
+                           mflux(:), sflux(:),     & ! [OUT]
+                           eflux,                  & ! [OUT]
+                           RHOQ0 = RHOQ0_sed(:,:,i,j) ) ! [IN]
+                   end do
+                   end do
+                   !$acc end parallel loop
 #else
                    call ATMOS_PHY_MP_precipitation_upwind( &
                         KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
@@ -1682,7 +1679,7 @@ contains
                    do i = IS, IE
                    do iq = QS_LT, QE_LT
                    do k = KS, KE
-                      RHOQ2_crg_0(k,iq,i,j) = RHOQ2_crg(k,iq)
+                      RHOQ0_sed_crg(k,iq,i,j) = RHOQ2_crg(k,iq)
                    end do
                    end do
                    end do
@@ -1702,7 +1699,7 @@ contains
                            RHOE2(:),                   & ! [INOUT]
                            mflux_crg(:), sflux_crg(:), & ! [OUT] dummy
                            eflux_crg,                  & ! [OUT] dummy
-                           RHOQ0 = RHOQ2_crg_0(:,:,i,j) ) ! [IN]
+                           RHOQ0 = RHOQ0_sed_crg(:,:,i,j) ) ! [IN]
                    end do
                    end do
                    !$acc end parallel loop
@@ -1927,16 +1924,6 @@ contains
              !$acc exit data delete(vterm_hist)
              deallocate( vterm_hist )
           end if
-#ifdef _OPENACC
-          if ( allocated( RHOQ2_0 ) ) then
-             !$acc exit data delete(RHOQ2_0)
-             deallocate( RHOQ2_0 )
-          end if
-          if ( allocated( RHOQ2_crg_0 ) ) then
-             !$acc exit data delete(RHOQ2_crg_0)
-             deallocate( RHOQ2_crg_0 )
-          end if
-#endif
 
           call PROF_rapend  ('MP_Precipitation', 2)
 

@@ -1158,7 +1158,7 @@ contains
     real(RP) :: Ni50                  !< number concentration of ice particle of 50um
 
     !---< Explicit ice generation >---
-    real(RP) :: sw, rhoqi, XNi, XMi, Di, Nig, Qig
+    real(RP) :: sw, rhoqi, XNi, XMi, Di, Qig
 
     logical :: HIST_sw(w_nmax), hist_flag
     real(RP), allocatable :: w3d(:,:,:,:)
@@ -1327,7 +1327,7 @@ contains
     !$omp         qc_crg_t,qr_crg_t,qi_crg_t,qs_crg_t,qg_crg_t,qcrg_c,qcrg_r,qcrg_i,qcrg_s,qcrg_g, &
     !$omp         w_q,w_qcrg,re_qs,dcrg,beta1_crg,alpha,facq_QC,facq_QR,facq_QI,facq_QS,facq_QG,rlambda_qr,rlambda_qs,rlambda_qg, &
     !$omp         sw_bergeron,a1,a2,ma2,rdt1,Ni50, &
-    !$omp         sw,rhoqi,XNi,XMi,Di,Nig,Qig,w)
+    !$omp         sw,rhoqi,XNi,XMi,Di,Qig,w)
     !$acc parallel
     !$acc loop collapse(3) &
     !$acc      private(cvtot, qv, qc, qr, qi, qs, qg, qv_t, qc_t, qr_t, qi_t, qs_t, qg_t, &

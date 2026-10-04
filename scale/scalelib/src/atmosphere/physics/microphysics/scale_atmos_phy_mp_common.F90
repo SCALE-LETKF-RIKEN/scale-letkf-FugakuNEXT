@@ -631,7 +631,11 @@ contains
        ! internal energy flux
 #ifdef _OPENACC
           eflx0 = qflx0 * TEMP(k  ) * CV
-          eflx1 = qflx1 * TEMP(k+1) * CV
+          if ( k < KE ) then
+             eflx1 = qflx1 * TEMP(k+1) * CV
+          else
+             eflx1 = 0.0_RP ! qflx1 = 0; TEMP(KE+1) may be undefined
+          end if
           esflx_k = esflx_k + eflx0
 #else
        end do
