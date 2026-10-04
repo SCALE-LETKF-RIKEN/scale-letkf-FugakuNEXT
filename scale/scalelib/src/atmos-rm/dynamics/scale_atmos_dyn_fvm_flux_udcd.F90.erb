@@ -78,7 +78,7 @@ def flux3(idx1,idx0,idxn1)
 end
 def flux3k(idx1,idx0,idxn1)
                       "( val(#{idx0}) &
-                       + 0.5_RP * phi(val(#{idx1}),val(#{idx0}),val(#{idxn1})) * ( val(#{idx0})-val(#{idxn1}) ) )"
+                       + 0.5_RP * phi_dv(val(#{idx1}),val(#{idx0}),val(#{idxn1})) )"
 end
 def flux4(idx2,idx1,idx0,idxn1)
                       "F41 * ( val(#{idx1})+val(#{idx0}) ) &
@@ -356,13 +356,15 @@ end
 # (UD3 fluxZ_XYZ: 418 -> 598 ms per 2400 calls on GB200).
 # In the fused kernel, the division by 6 is therefore replaced by the multiplication
 # by F6 = 1/6, which changes the boundary fluxes in the last bit, and the fusion is
-# done only if no division remains in the boundary candidates (e.g. phi() of ud3Koren1993).
-# For ud3Koren1993, even with phi() evaluated once per candidate (flux3k_upwind),
-# the fused fluxZ_XYZ was slower (841 -> 1143 ms per 2700 calls).
+# done only if no division remains in the boundary candidates.
+# For ud3Koren1993, the fusion is not done either. With phi() with the division,
+# even evaluated once per candidate (flux3k_upwind), the fused fluxZ_XYZ was slower
+# (841 -> 1143 ms per 2700 calls). With phi_dv() without the division, it is still
+# slower (498 -> 567 ms per 2700 calls).
 def flux_bnd(*args)
   flux(*args).gsub("/ 6.0_RP", "* F6")
 end
-fuse_lu = fuse && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", order_up(order, nh), 0) ) !~ %r{/|phi\(|flux3k_upwind\(}
+fuse_lu = fuse && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", order_up(order, nh), 0) ) !~ %r{/|phi_dv\(|flux3k_upwind\(}
 use_f6  = fuse_lu && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", order_up(order, nh), 0) ).include?("F6")
 %>
 !-------------------------------------------------------------------------------
@@ -1627,13 +1629,16 @@ contains
 
 <% if @scheme == "ud3Koren1993" %>
   !-----------------------------------------------------------------------------
-  function phi(v1, v2, v3)
-    use scale_const, only: &
-       EPS => CONST_EPS
+  !> phi(r) * (v2-v3) of Koren (1993), where r = 2 (v1-v2) / (v2-v3)
+  !> phi(r) = max(0, min(r, (1+r)/3, 2)) is multiplied by v2-v3 before it is evaluated,
+  !> so that no division is needed. With a division, which calls the slow path of
+  !> the IEEE division, the kernels use more registers and are slower
+  !> (fluxX_XYZ: 50 -> 40 registers, 628 -> 397 ms per 2700 calls on GB200).
+  function phi_dv(v1, v2, v3)
     !$acc routine seq
     implicit none
 
-    real(RP)              :: phi
+    real(RP)              :: phi_dv
 #ifdef _OPENACC
     real(RP), intent(in), value :: v1
     real(RP), intent(in), value :: v2
@@ -1644,23 +1649,21 @@ contains
     real(RP), intent(in) :: v3
 #endif
 
-    real(RP) :: r2
-    real(RP) :: zerosw1, zerosw2
+    real(RP) :: sw, a, b
     !---------------------------------------------------------------------------
 
-    ! With merge() instead of sign(), the kernels use more registers and are slower
-    ! (fluxX_XYZ: 80 -> 94 registers, 958 -> 1116 ms per 2700 calls on GB200).
-    zerosw1 = EPS - sign(EPS, abs(v1-v2)-EPS)
-    zerosw2 = EPS - sign(EPS, abs(v2-v3)-EPS)
-    r2 = 2.0_RP * (v1-v2+zerosw1*zerosw2) / (v2-v3+zerosw2)
+    ! a and b are 2 (v1-v2) and v2-v3 multiplied by the sign of v2-v3, so that b >= 0
+    sw = sign( 1.0_RP, v2-v3 )
+    a  = sw * 2.0_RP * ( v1-v2 )
+    b  = sw * ( v2-v3 )
 
-    phi = max(0.0_RP, min(r2, min((1.0_RP+r2)/3.0_RP, 2.0_RP) ) )
+    phi_dv = sw * max( 0.0_RP, min( a, ( a + b ) * ( 1.0_RP / 3.0_RP ), 2.0_RP * b ) )
 
-  end function phi
+  end function phi_dv
 
   !-----------------------------------------------------------------------------
   !> Koren (1993) flux at the face between v0 and v1, upwinded by the sign of vel
-  !> The stencil is selected before phi() is evaluated, so phi() is evaluated once.
+  !> The stencil is selected before phi_dv() is evaluated, so phi_dv() is evaluated once.
   function flux3k_upwind(vel, vn1, v0, v1, v2)
     !$acc routine seq
     implicit none
@@ -1689,7 +1692,7 @@ contains
     vc = merge( v0,  v1, up ) ! upwind cell
     vd = merge( v1,  v0, up ) ! downwind cell
 
-    flux3k_upwind = vc + 0.5_RP * phi(vd, vc, vu) * ( vc - vu )
+    flux3k_upwind = vc + 0.5_RP * phi_dv(vd, vc, vu)
 
   end function flux3k_upwind
 <% end %>
