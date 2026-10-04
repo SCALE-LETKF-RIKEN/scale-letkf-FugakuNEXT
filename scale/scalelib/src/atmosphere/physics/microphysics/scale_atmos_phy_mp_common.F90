@@ -478,12 +478,21 @@ contains
     real(RP), intent(out)   :: esflx
 
 #ifdef _OPENACC
+    ! In this vector routine, the compiler reads the intent(inout) and intent(out)
+    ! arrays with volatile loads, which bypass the L1 cache, since the other lanes
+    ! may write them. Except RHOQ(k+1,:), the lane k reads and writes only the
+    ! elements at k (or k-1 for the fluxes), so they are kept in the scalars below
+    ! during the loop of iq.
     real(RP) :: qflx0
     real(RP) :: qflx1
     real(RP) :: eflx0
     real(RP) :: eflx1
     real(RP) :: RHOCP_pu
     real(RP) :: RHOCV_pu
+    real(RP) :: DENS_k, RHOE_k
+    real(RP) :: rhoq_k, rhoq_kp1
+    real(RP) :: mflx_k
+    real(RP) :: sflx1, sflx2, esflx_k
 #define RHOCP_pu(k) RHOCP_pu
 #define RHOCV_pu(k) RHOCV_pu
 #else
@@ -511,8 +520,19 @@ contains
     eflx(KE) = 0.0_RP
 #endif
 
+    !$acc loop vector
     do k = KS, KE
 
+#ifdef _OPENACC
+       DENS_k = DENS(k)
+       RHOE_k = RHOE(k)
+       mflx_k    = 0.0_RP
+       sflx1   = 0.0_RP
+       sflx2   = 0.0_RP
+       esflx_k = 0.0_RP
+#define DENS(k) DENS_k
+#define RHOE(k) RHOE_k
+#endif
        RHOCP_pu(k) = CPtot(k) * DENS(k)
        RHOCV_pu(k) = CVtot(k) * DENS(k)
 #ifndef _OPENACC
@@ -524,15 +544,17 @@ contains
 
        !--- mass flux for each tracer, upwind with vel < 0
 #ifdef _OPENACC
+       rhoq_k = RHOQ(k,iq)
+       if ( k < KE ) rhoq_kp1 = RHOQ(k+1,iq)
        if ( k == KS ) then
-          qflx0 = vterm(KS,iq) * RHOQ(KS,iq)
+          qflx0 = vterm(KS,iq) * rhoq_k
        else
-          qflx0 = 0.5_RP * ( vterm(k,iq) + vterm(k-1,iq) ) * RHOQ(k,iq)
+          qflx0 = 0.5_RP * ( vterm(k,iq) + vterm(k-1,iq) ) * rhoq_k
        end if
        if ( k == KE ) then
           qflx1 = 0.0_RP
        else
-          qflx1 = 0.5_RP * ( vterm(k+1,iq) + vterm(k,iq) ) * RHOQ(k+1,iq)
+          qflx1 = 0.5_RP * ( vterm(k+1,iq) + vterm(k,iq) ) * rhoq_kp1
        end if
 #else
        qflx(KS-1) = vterm(KS,iq) * RHOQ(KS,iq)
@@ -543,7 +565,7 @@ contains
 
        !--- update falling tracer
 #ifdef _OPENACC
-       rhoq(k,iq) = rhoq(k,iq) - dt * ( qflx1 - qflx0 ) * RCDZ(k)
+       rhoq(k,iq) = rhoq_k - dt * ( qflx1 - qflx0 ) * RCDZ(k)
 #else
        do k = KS, KE
           rhoq(k,iq) = rhoq(k,iq) - dt * ( qflx(k) - qflx(k-1) ) * RCDZ(k)
@@ -554,7 +576,7 @@ contains
        if ( iq > QLA + QIA ) cycle
 
 #ifdef _OPENACC
-       mflx(k-1) = mflx(k-1) + qflx0
+       mflx_k = mflx_k + qflx0
 #else
        do k = KS-1, KE-1
           mflx(k) = mflx(k) + qflx(k)
@@ -565,7 +587,7 @@ contains
           CP = CP_ICE
           CV = CV_ICE
 #ifdef _OPENACC
-          if ( k == KS ) sflx(2) = sflx(2) + qflx0
+          sflx2 = sflx2 + qflx0
 #else
           sflx(2) = sflx(2) + qflx(KS-1)
 #endif
@@ -573,7 +595,7 @@ contains
           CP = CP_WATER
           CV = CV_WATER
 #ifdef _OPENACC
-          if ( k == KS ) sflx(1) = sflx(1) + qflx0
+          sflx1 = sflx1 + qflx0
 #else
           sflx(1) = sflx(1) + qflx(KS-1)
 #endif
@@ -594,7 +616,7 @@ contains
 #ifdef _OPENACC
           eflx0 = qflx0 * TEMP(k  ) * CV
           eflx1 = qflx1 * TEMP(k+1) * CV
-          if ( k == KS ) esflx = esflx + eflx0
+          esflx_k = esflx_k + eflx0
 #else
        end do
 
@@ -624,6 +646,18 @@ contains
 #endif
        CPtot(k) = RHOCP_pu(k) / DENS(k)
        CVtot(k) = RHOCV_pu(k) / DENS(k)
+#ifdef _OPENACC
+#undef DENS
+#undef RHOE
+       DENS(k) = DENS_k
+       RHOE(k) = RHOE_k
+       mflx(k-1) = mflx_k
+       if ( k == KS ) then
+          sflx(1) = sflx1
+          sflx(2) = sflx2
+          esflx   = esflx_k
+       end if
+#endif
 
     end do
 
