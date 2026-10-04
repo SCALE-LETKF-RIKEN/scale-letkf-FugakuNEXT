@@ -1143,8 +1143,8 @@ contains
 
     !---< Bergeron process >---
 #ifdef _OPENACC
-    real(RP), allocatable :: sw_bergeron_3d(:,:,:)
-#define sw_bergeron(k) sw_bergeron_3d(k,i,j)
+    real(RP) :: sw_bergeron
+#define sw_bergeron(k) sw_bergeron
 #else
     real(RP) :: sw_bergeron(KS:KE)           !< if 0C<T<30C, sw=1
 #endif
@@ -1159,7 +1159,8 @@ contains
     logical :: HIST_sw(w_nmax), hist_flag
     real(RP), allocatable :: w3d(:,:,:,:)
 #ifdef _OPENACC
-#define w(k,ip) w3d(k,i,j,ip)
+    real(RP) :: w(w_nmax)
+#define w(k,ip) w(ip)
 #else
     real(RP) :: w(KS:KE,w_nmax)
 #endif
@@ -1257,17 +1258,23 @@ contains
     end do
     !$acc update device(HIST_sw)
 
-#ifndef _OPENACC
-    if ( hist_flag ) then
-#endif
-       allocate( w3d(KA,IA,JA,w_nmax) )
-#ifndef _OPENACC
-    end if
-#endif
+    ! w is stored to w3d for the history output
 #ifdef _OPENACC
-    allocate( sw_bergeron_3d(KS:KE,IA,JA) )
-    !$acc data create(w3d, sw_bergeron_3d)
+    ! and for the lightning, which reads w3d in a separate kernel
+#define W3D_FLAG ( hist_flag .or. flg_lt_l )
+#define W3D_SW(ip) ( HIST_sw(ip) .or. flg_lt_l )
+#else
+#define W3D_FLAG hist_flag
+#define W3D_SW(ip) HIST_sw(ip)
 #endif
+    if ( W3D_FLAG ) then
+       allocate( w3d(KA,IA,JA,w_nmax) )
+#ifdef _OPENACC
+    else
+       allocate( w3d(1,1,1,1) )
+#endif
+    end if
+    !$acc data create(w3d)
     ! only KS:KE of the inner grid points are set below; zero the halo for the history output
     if ( hist_flag ) then
        !$acc kernels
@@ -1315,7 +1322,7 @@ contains
     !$acc              RLMDg_dg, RLMDg_3dg, RLMDg_5dg, RLMDr_7, RLMDr_6dr, &
     !$acc              MOMs_0, MOMs_1, MOMs_2, MOMs_0bs, MOMs_1bs, MOMs_2bs, MOMs_2ds, MOMs_5ds_h, RMOMs_Vt, &
     !$acc              Vti, Vtr, Vts, Vtg, Egs_mod, Nc, Nu, fack, Glv, Giv, Gil, a1, a2, ma2, &
-    !$acc              coef_at, coef_bt)
+    !$acc              coef_at, coef_bt, w, sw_bergeron)
     do j = JS, JE
     do i = IS, IE
 #ifdef _OPENACC
@@ -1765,7 +1772,7 @@ contains
        END_LOOP_K
 
 #ifdef _OPENACC
-
+       ! for the lightning in a separate kernel
        if ( flg_lt_l ) then
           N0r_3d(k,i,j) = N0r(k)
           N0s_3d(k,i,j) = N0s(k)
@@ -1787,16 +1794,6 @@ contains
           qg_org(k,i,j) = qg(k)
        end if
 
-    end do ! k
-    end do ! i
-    end do ! j
-    !$acc end parallel
-
-    !$acc parallel
-    !$acc loop collapse(3)
-    do j = JS, JE
-    do i = IS, IE
-       do k = KS, KE
 #endif
 
        LOOP_K
@@ -2054,19 +2051,6 @@ contains
           w(k,I_Pgmlt  ) = w(k,I_Pgmlt  ) * fack(k)
        END_LOOP_K
 
-#ifdef _OPENACC
-       end do ! k
-    end do ! i
-    end do ! j
-    !$acc end parallel
-
-    !$acc parallel
-    !$acc loop collapse(3)
-    do j = JS, JE
-    do i = IS, IE
-       do k = KS, KE
-#endif
-
        LOOP_K
           qc_t(k) = + w(k,I_Pimlt  ) & ! [prod] i->c
                     - w(k,I_Praut  ) & ! [loss] c->r
@@ -2192,8 +2176,19 @@ contains
           CPtot0(k,i,j) = CPtot0(k,i,j) + cp_t * dt
        END_LOOP_K
 
+       if ( W3D_FLAG ) then
+          !$acc loop seq
+          do ip = 1, w_nmax
+             if ( W3D_SW(ip) ) then
+                LOOP_K
+                   w3d(k,i,j,ip) = w(k,ip)
+                END_LOOP_K
+             end if
+          enddo
+       end if
+
 #ifdef _OPENACC
-       end do ! k
+    end do ! k
     end do ! i
     end do ! j
     !$acc end parallel
@@ -2227,6 +2222,8 @@ contains
 #define RLMDg_3dg(k) RLMDg_3dg_3d(k,i,j)
 #define RLMDs(k) RLMDs_3d(k,i,j)
 #define Egs_mod(k) Egs_mod_3d(k,i,j)
+#undef w
+#define w(k,ip) w3d(k,i,j,ip)
 
        !$acc data copyin(dqcrg, beta_crg) &
        !$acc      copy(QTRC_crg0) &
@@ -2496,18 +2493,6 @@ contains
        end if ! flg_lt_l
 
 #ifndef _OPENACC
-       ! w3d is used instead of w with OpenACC
-       if ( hist_flag ) then
-          !$acc loop seq
-          do ip = 1, w_nmax
-             if ( HIST_sw(ip) ) then
-                do k = KS, KE
-                   w3d(k,i,j,ip) = w(k,ip)
-                enddo
-             end if
-          enddo
-       end if
-
     enddo
     enddo
 #endif
@@ -2520,15 +2505,8 @@ contains
     !$acc end data
     !$acc end data
 
-#ifndef _OPENACC
-    if ( hist_flag ) then
-#endif
-       deallocate( w3d )
-#ifndef _OPENACC
-    end if
-#endif
+    if ( allocated(w3d) ) deallocate( w3d )
 #ifdef _OPENACC
-    deallocate( sw_bergeron_3d )
     if ( flg_lt_l ) then
       deallocate( N0r_3d, N0s_3d, N0g_3d )
       deallocate( rho_fact_3d )
@@ -2600,6 +2578,8 @@ contains
 #undef fack
 #undef sw_bergeron
 #undef w
+#undef W3D_FLAG
+#undef W3D_SW
 #undef qcrg_c
 #undef qcrg_r
 #undef qcrg_i
