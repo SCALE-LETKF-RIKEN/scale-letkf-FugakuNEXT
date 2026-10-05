@@ -1162,6 +1162,8 @@ contains
 
     logical :: HIST_sw(w_nmax), hist_flag
     real(RP), allocatable :: w3d(:,:,:,:)
+    integer :: w3d_idx(w_nmax) ! index of w3d where each term is stored (0: not stored)
+    integer :: w3d_n           ! number of the terms stored to w3d
 #ifdef _OPENACC
     real(RP) :: w(w_nmax)
 #define w(k,ip) w(ip)
@@ -1245,7 +1247,7 @@ contains
     !$acc data copy(TEMP, QTRC, CPtot0, CVtot0) &
     !$acc      copyin(DENS, PRES, CCN) &
     !$acc      copyout(RHOE_t) &
-    !$acc      create(HIST_sw)
+    !$acc      create(w3d_idx)
 
     !$acc data create(Re) &
     !$acc create(N0r_3d, N0s_3d, N0g_3d, rho_fact_3d, Vtr_3d, Vts_3d, Vtg_3d, RLMDg_3d, RLMDg_2_3d, RLMDg_3_3d, RLMDg_3dg_3d, RLMDs_3d, Egs_mod_3d, qc_org, qr_org, qi_org, qs_org, qg_org) &
@@ -1262,7 +1264,6 @@ contains
        call FILE_HISTORY_query( HIST_id(ip), HIST_sw(ip) )
        hist_flag = hist_flag .or. HIST_sw(ip)
     end do
-    !$acc update device(HIST_sw)
 
     ! w is stored to w3d for the history output
 #ifdef _OPENACC
@@ -1273,8 +1274,21 @@ contains
 #define W3D_FLAG hist_flag
 #define W3D_SW(ip) HIST_sw(ip)
 #endif
+    ! Only the terms to be stored are allocated, since all the w_nmax terms of
+    ! the whole domain are large. With the lightning, all the terms are stored
+    ! and w3d_idx(ip) = ip, which the lightning kernel below relies on.
+    w3d_n = 0
+    do ip = 1, w_nmax
+       if ( W3D_SW(ip) ) then
+          w3d_n = w3d_n + 1
+          w3d_idx(ip) = w3d_n
+       else
+          w3d_idx(ip) = 0
+       end if
+    end do
+    !$acc update device(w3d_idx)
     if ( W3D_FLAG ) then
-       allocate( w3d(KA,IA,JA,w_nmax) )
+       allocate( w3d(KA,IA,JA,w3d_n) )
 #ifdef _OPENACC
     else
        allocate( w3d(1,1,1,1) )
@@ -1310,7 +1324,7 @@ contains
     !$omp        QTRC_crg0,QSPLT_in,Sarea,Re,beta_crg,dqcrg, &
     !$omp        re_qc,re_qi,d0_crg,v0_crg,rdens_i,Ecoal_Gi,Ecoal_GS, &
     !$omp        flg_lt_l,flg_ecoali,flg_ecoals, &
-    !$omp        w3d,HIST_sw,hist_flag) &
+    !$omp        w3d,w3d_idx,hist_flag) &
     !$omp private(cvtot,qv,qc,qr,qi,qs,qg,qv_t,qc_t,qr_t,qi_t,qs_t,qg_t,e_t,cp_t,cv_t, &
     !$omp         QSATL,QSATI,Sliq,Sice,rho_fact,rdens,temc,N0r,N0s,N0g, &
     !$omp         RLMDr,RLMDr_2,RLMDr_3,RLMDs,RLMDs_2,RLMDs_3,RLMDg,RLMDg_2,RLMDg_3, &
@@ -2196,9 +2210,9 @@ contains
        if ( W3D_FLAG ) then
           !$acc loop seq
           do ip = 1, w_nmax
-             if ( W3D_SW(ip) ) then
+             if ( w3d_idx(ip) > 0 ) then
                 LOOP_K
-                   w3d(k,i,j,ip) = w(k,ip)
+                   w3d(k,i,j,w3d_idx(ip)) = w(k,ip)
                 END_LOOP_K
              end if
           enddo
@@ -2515,7 +2529,7 @@ contains
 #endif
 
     do ip = 1, w_nmax
-       if ( HIST_sw(ip) ) call FILE_HISTORY_put( HIST_id(ip), w3d(:,:,:,ip) )
+       if ( HIST_sw(ip) ) call FILE_HISTORY_put( HIST_id(ip), w3d(:,:,:,w3d_idx(ip)) )
     enddo
 
     !$acc end data
