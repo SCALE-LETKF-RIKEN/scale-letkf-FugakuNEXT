@@ -438,6 +438,10 @@ atmos-rm/dynamics/scale_atmos_dyn_fvm_flux_cd8.F90 : scale_atmos_dyn_fvm_flux_ud
 $(BUILD_DIR)/scale_atmos_dyn_tstep_large_fvm_heve.o: scale_atmos_dyn_tstep_large_fvm_heve.F90
 $(BUILD_DIR)/scale_atmos_dyn_tstep_tracer_fvm_heve.o: scale_atmos_dyn_tstep_tracer_fvm_heve.F90
 
+# include files of code, which makedepend does not track
+$(BUILD_DIR)/scale_atmos_dyn_tstep_short_fvm_hevi.o $(BUILD_DIR)/scale_atmos_phy_bl_common.o: \
+	$(SCALELIBDIR)/include/matrix_solver_tridiagonal_pm.h $(SCALELIBDIR)/include/matrix_solver_tridiagonal_pm_decl.h
+
 $(BUILD_DIR)/%.o : %.F90
 	$(FC) $(FFLAGS)     $(ADDITIONAL_FFLAGS) -DVERSION_MACRO=\"$(LIBVERSION)\" -I$(SCALELIBDIR)/include -I$(BUILD_DIR) $(SCALE_PAPI_INCLUDE) $(SCALE_NETCDF_INCLUDE) $(CONTRIB_INCLUDE) $(MODDIROPT) $(BUILD_DIR) -o $@ -c $<
 $(OBJS_FOR_DYN) : $(BUILD_DIR)/%.o : %.F90

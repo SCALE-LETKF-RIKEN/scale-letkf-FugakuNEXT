@@ -281,6 +281,8 @@ contains
        do IIS = IS, IE, IBLOCK
        IIE = IIS+IBLOCK-1
 
+          ! The divisions by GSQRT and DENS are merged into one, since a division
+          ! costs more than ten multiplications on GPUs.
           if ( TwoD ) then
              !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ &
              !$omp shared(JJS,JJE,IS,KS,KE,QTRCo,QTRC0,DENS0,dtl,qflx_hi,RCDZ,RCDY,MAPF) &
@@ -288,11 +290,11 @@ contains
              !$acc kernels
              do j = JJS, JJE
              do k = KS, KE
-                QTRCo(k,IS,j) = ( QTRC0(k,IS,j) * DENS0(k,IS,j) &
+                QTRCo(k,IS,j) = ( QTRC0(k,IS,j) * DENS0(k,IS,j) * GSQRT(k,IS,j,I_XYZ) &
                                 + dtl * ( - ( ( qflx_hi(k,IS,j,ZDIR) - qflx_hi(k-1,IS,j  ,ZDIR)  ) * RCDZ(k) &
                                             + ( qflx_hi(k,IS,j,YDIR) - qflx_hi(k  ,IS,j-1,YDIR)  ) * RCDY(j) &
-                                           ) * MAPF(IS,j,2) / GSQRT(k,IS,j,I_XYZ) &
-                               + RHOQ_t(k,IS,j) ) ) / DENS(k,IS,j)
+                                           ) * MAPF(IS,j,2) &
+                               + RHOQ_t(k,IS,j) * GSQRT(k,IS,j,I_XYZ) ) ) / ( DENS(k,IS,j) * GSQRT(k,IS,j,I_XYZ) )
              enddo
              enddo
              !$acc end kernels
@@ -304,12 +306,12 @@ contains
              do j = JJS, JJE
              do i = IIS, IIE
              do k = KS, KE
-                QTRCo(k,i,j) = ( QTRC0(k,i,j) * DENS0(k,i,j) &
+                QTRCo(k,i,j) = ( QTRC0(k,i,j) * DENS0(k,i,j) * GSQRT(k,i,j,I_XYZ) &
                                + dtl * ( - ( ( qflx_hi(k,i,j,ZDIR) - qflx_hi(k-1,i  ,j  ,ZDIR)  ) * RCDZ(k) &
                                            + ( qflx_hi(k,i,j,XDIR) - qflx_hi(k  ,i-1,j  ,XDIR)  ) * RCDX(i) &
                                            + ( qflx_hi(k,i,j,YDIR) - qflx_hi(k  ,i  ,j-1,YDIR)  ) * RCDY(j) &
-                                           ) * MAPF(i,j,1) * MAPF(i,j,2) / GSQRT(k,i,j,I_XYZ) &
-                               + RHOQ_t(k,i,j) ) ) / DENS(k,i,j)
+                                           ) * MAPF(i,j,1) * MAPF(i,j,2) &
+                               + RHOQ_t(k,i,j) * GSQRT(k,i,j,I_XYZ) ) ) / ( DENS(k,i,j) * GSQRT(k,i,j,I_XYZ) )
              enddo
              enddo
              enddo

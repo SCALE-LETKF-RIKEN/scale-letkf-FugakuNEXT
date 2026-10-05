@@ -52,6 +52,16 @@
 #define HEVI_NCOL LSIZE
 #endif
 
+#ifdef KAMAX
+! upper limit of the number of the chunks into which each tridiagonal system is
+! partitioned in the implicit solver; a lane handles a chunk. With HEVI_NCOL = 2
+! and KMAX = 90, 8 chunks per column (16 of the 32 lanes) are faster than 4 and 16
+! on GB200.
+#ifndef HEVI_NPART
+#define HEVI_NPART (16/HEVI_NCOL)
+#endif
+#endif
+
 module scale_atmos_dyn_tstep_short_fvm_hevi
   !-----------------------------------------------------------------------------
   !
@@ -370,6 +380,8 @@ contains
     real(RP) :: F2(KAMAX,HEVI_NCOL)
     real(RP) :: F3(KAMAX,HEVI_NCOL)
 #define Ci Co
+    ! for the partition method
+#include "matrix_solver_tridiagonal_pm_decl.h"
 #else
     real(RP) :: PT(KA,LSIZE)
     real(RP) :: Ci(KS:KE-1,LSIZE)
@@ -1048,9 +1060,9 @@ contains
        ! private to the gang and have the fixed size KAMAX, so that they are placed
        ! in the shared memory. The coefficients and the results are computed for one
        ! column after another with the vector lanes along k, while the tridiagonal
-       ! systems are solved with one column on each lane. In the latter, the lanes
-       ! access the work arrays with the stride KAMAX, which is odd to avoid bank
-       ! conflicts.
+       ! systems are solved with one chunk of rows on each lane (partition method).
+       ! In the latter, the lanes for the different columns access the work arrays
+       ! with the stride KAMAX, which is odd to avoid bank conflicts.
        !$acc parallel vector_length(32)
        !$acc loop gang collapse(2) private(i,PT,Co,F1,F2,F3)
 #else
@@ -1167,23 +1179,16 @@ contains
 #ifdef KAMAX
           end do
 
-          ! Thomas algorithm in place, with one column on each lane
-          !$acc loop vector private(k,tmp)
-          do l = 1, min( HEVI_NCOL, IIE-ii+1 )
-             tmp = 1.0_RP / F2(KS,l)
-             F1(KS,l) = F1(KS,l) * tmp
-             Co(KS,l) = Co(KS,l) * tmp
-             !$acc loop seq
-             do k = KS+1, KE-1
-                tmp = 1.0_RP / ( F2(k,l) - F3(k,l) * F1(k-1,l) )
-                if ( k < KE-1 ) F1(k,l) = F1(k,l) * tmp
-                Co(k,l) = ( Co(k,l) - F3(k,l) * Co(k-1,l) ) * tmp
-             end do
-             !$acc loop seq
-             do k = KE-2, KS, -1
-                Co(k,l) = Co(k,l) - F1(k,l) * Co(k+1,l)
-             end do
-          end do
+          ! The tridiagonal systems are solved in place by the partition method.
+#define TDPM_UD(k,l) F1(k,l)
+#define TDPM_MD(k,l) F2(k,l)
+#define TDPM_LD(k,l) F3(k,l)
+#define TDPM_X(k,l)  Co(k,l)
+#define TDPM_KS      KS
+#define TDPM_KE      (KE-1)
+#define TDPM_NC      min( HEVI_NCOL, IIE-ii+1 )
+#define TDPM_NPART   HEVI_NPART
+#include "matrix_solver_tridiagonal_pm.h"
 
           !$acc loop seq
           do l = 1, min( HEVI_NCOL, IIE-ii+1 )

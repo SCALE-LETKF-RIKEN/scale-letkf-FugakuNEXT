@@ -102,7 +102,7 @@ contains
     integer :: k, i, j
 
 #ifdef _OPENACC
-    real(RP) :: work(KS:KE,4)
+#include "matrix_solver_tridiagonal_pm_decl.h"
 #endif
     dt = real( DDT, kind=RP )
 
@@ -114,11 +114,11 @@ contains
     !$omp shared(RHOQ_t,DENS,QTRC,SFLX_Q,Kh,MASS,CZ,FZ,F2H,DT,flx) &
     !$omp private(QTRC_n,RHO,RHOKh,rho_h,a,b,c,d,ap,sf_t,CDZ,FDZ) &
     !$omp private(KE_PBL,k,i,j)
-    !$acc kernels
+    !$acc kernels vector_length(32)
     !$acc loop independent collapse(2) &
     !$acc private(QTRC_n,RHO,RHOKh,rho_h,a,b,c,d,ap,sf_t,CDZ,FDZ, &
     !$acc         KE_PBL, &
-    !$acc         work)
+    !$acc         tdpm_npart, tdpm_nbase, tdpm_nrem)
     do j = JS, JE
     do i = IS, IE
 
@@ -132,6 +132,7 @@ contains
           end if
        end do
 
+       !$acc loop vector
        do k = KS, KE_PBL
           CDZ(k) = FZ(k  ,i,j) - FZ(k-1,i,j)
           FDZ(k) = CZ(k+1,i,j) - CZ(k  ,i,j)
@@ -140,22 +141,26 @@ contains
        sf_t = SFLX_Q(i,j) / CDZ(KS)
 
        RHO(KS) = DENS(KS,i,j) + dt * sf_t * MASS
+       !$acc loop vector
        do k = KS+1, KE_PBL
           RHO(k) = DENS(k,i,j)
        end do
 
        ! dens * coefficient at the half level
+       !$acc loop vector private(rho_h)
        do k = KS, KE_PBL-1
           rho_h = F2H(k,1,i,j) * DENS(k+1,i,j) + F2H(k,2,i,j) * DENS(k,i,j)
           RHOKh(k) = rho_h * Kh(k,i,j)
        end do
 
        d(KS) = ( QTRC(KS,i,j) * DENS(KS,i,j) + dt * sf_t ) / RHO(KS)
+       !$acc loop vector
        do k = KS+1, KE_PBL
           d(k) = QTRC(k,i,j)
        end do
 
        c(KS) = 0.0_RP
+       !$acc loop vector private(ap)
        do k = KS, KE_PBL-1
           ap = - dt * RHOKh(k) / FDZ(k)
           a(k) = ap / ( RHO(k) * CDZ(k) )
@@ -173,22 +178,39 @@ contains
        a(KE_PBL) = 0.0_RP
        b(KE_PBL) = - c(KE_PBL) + 1.0_RP
 
+#ifdef _OPENACC
+       ! solved in place in d by the partition method; a and c are overwritten
+#define TDPM_UD(k,l) a(k)
+#define TDPM_MD(k,l) b(k)
+#define TDPM_LD(k,l) c(k)
+#define TDPM_X(k,l)  d(k)
+#define TDPM_KS      KS
+#define TDPM_KE      KE_PBL
+#define TDPM_NC      1
+#define TDPM_NPART   16
+#include "matrix_solver_tridiagonal_pm.h"
+       !$acc loop vector
+       do k = KS, KE_PBL
+          QTRC_n(k) = d(k)
+       end do
+#else
        call MATRIX_SOLVER_tridiagonal( &
                KA, KS, KE_PBL, &
-#ifdef _OPENACC
-               work(:,:), & ! (wrok)
-#endif
                a(:), b(:), c(:), d(:), & ! (in)
                QTRC_n(:)               ) ! (out)
+#endif
 
        RHOQ_t(KS,i,j) = ( QTRC_n(KS) * RHO(KS) - QTRC(KS,i,j) * DENS(KS,i,j) ) / dt - sf_t
+       !$acc loop vector
        do k = KS+1, KE_PBL
           RHOQ_t(k,i,j) = ( QTRC_n(k) - QTRC(k,i,j) ) * RHO(k) / dt
        end do
+       !$acc loop vector
        do k = KE_PBL+1, KE
           RHOQ_t(k,i,j) = 0.0_RP
        end do
 
+       !$acc loop vector
        do k = KS, KE_PBL-1
           flx(k,i,j) = - RHOKh(k) * ( QTRC_n(k+1) - QTRC_n(k) ) / FDZ(k)
        end do
