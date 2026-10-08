@@ -102,7 +102,7 @@ typedef struct {
   int defmode;
 #endif
   int shared_mode;
-  char fname[256];  // used for debugging, to be deleted
+  char fname[File_HLONG+4];  // used for debugging, to be deleted
 } fileinfo_t;
 
 typedef struct {
