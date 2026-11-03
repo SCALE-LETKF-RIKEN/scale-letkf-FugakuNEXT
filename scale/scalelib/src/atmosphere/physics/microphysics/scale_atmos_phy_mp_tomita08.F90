@@ -805,7 +805,7 @@ contains
 
     ! save value before saturation adjustment
     !$omp parallel do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -816,6 +816,7 @@ contains
     enddo
     !$acc end kernels
 
+    !$acc wait
     call MP_saturation_adjustment( &
          KA, KS, KE, IA, IS, IE, JA, JS, JE, &
          DENS(:,:,:),                        & ! [IN]
@@ -827,7 +828,7 @@ contains
          RHOE_d_sat(:,:,:)                   ) ! [OUT]
 
     !$omp parallel do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -838,7 +839,7 @@ contains
     !$acc end kernels
 
     !$omp parallel do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -853,6 +854,7 @@ contains
 
     call FILE_HISTORY_query( HIST_Pcsat, hist_flag )
     if ( hist_flag ) then
+       !$acc wait
        call FILE_HISTORY_put( HIST_Pcsat, QC_t_sat(:,:,:) )
     end if
 
@@ -860,7 +862,7 @@ contains
     call FILE_HISTORY_query( HIST_Pisat, hist_flag )
     if ( hist_flag ) then
        !$omp parallel do collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -869,10 +871,12 @@ contains
        enddo
        enddo
        !$acc end kernels
+       !$acc wait
        call FILE_HISTORY_put( HIST_Pisat, QI_t_sat(:,:,:) )
     end if
 
 
+    !$acc wait
     !$acc end data
 
     !##### END MP Main #####
@@ -1254,6 +1258,7 @@ contains
     !$acc if( flg_lt_l )
 
     if( flg_lt_l ) then
+       !$acc wait
        call ATMOS_PHY_MP_tomita08_effective_radius( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                                                     DENS, TEMP, QTRC, & ! [IN]
                                                     Re                ) ! [OUT]
@@ -1286,6 +1291,7 @@ contains
           w3d_idx(ip) = 0
        end if
     end do
+    !$acc wait
     !$acc update device(w3d_idx)
     if ( W3D_FLAG ) then
        allocate( w3d(KA,IA,JA,w3d_n) )
@@ -1297,7 +1303,7 @@ contains
     !$acc data create(w3d)
     ! only KS:KE of the inner grid points are set below; zero the halo for the history output
     if ( hist_flag ) then
-       !$acc kernels
+       !$acc kernels async
        w3d(:,:,:,:) = 0.0_RP
        !$acc end kernels
     end if
@@ -1342,7 +1348,7 @@ contains
     !$omp         w_q,w_qcrg,re_qs,dcrg,beta1_crg,alpha,facq_QC,facq_QR,facq_QI,facq_QS,facq_QG,rlambda_qr,rlambda_qs,rlambda_qg, &
     !$omp         sw_bergeron,a1,a2,ma2,rdt1,Ni50, &
     !$omp         sw,rhoqi,XNi,XMi,Di,Qig,w)
-    !$acc parallel
+    !$acc parallel async
     !$acc loop collapse(3) &
     !$acc      private(cvtot, qv, qc, qr, qi, qs, qg, qv_t, qc_t, qr_t, qi_t, qs_t, qg_t, &
     !$acc              QSATL, QSATI, Sliq, Sice, rho_fact, rdens, temc, N0r, N0s, N0g, &
@@ -2260,7 +2266,7 @@ contains
        !$acc      copy(QTRC_crg0) &
        !$acc      copyout(QSPLT_in, Sarea)
 
-       !$acc parallel
+       !$acc parallel async
        !$acc loop collapse(3) private(w_q, w_qcrg)
        do j = JS, JE
        do i = IS, IE
@@ -2528,6 +2534,7 @@ contains
     enddo
 #endif
 
+    !$acc wait
     do ip = 1, w_nmax
        if ( HIST_sw(ip) ) call FILE_HISTORY_put( HIST_id(ip), w3d(:,:,:,w3d_idx(ip)) )
     enddo
