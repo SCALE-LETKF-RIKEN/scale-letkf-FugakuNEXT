@@ -223,7 +223,7 @@ contains
     !$acc data copy(QTRC) create(QTRC0)
 
     !$omp workshare
-    !$acc kernels
+    !$acc kernels async
     QTRC0(:,:,:,:) = QTRC(:,:,:,:)
     !$acc end kernels
     !$omp end workshare
@@ -259,6 +259,7 @@ contains
          I_QV,                                                 & ! (in)
          DTL, DTS, .true.                                      ) ! (in)
 
+    !$acc wait
     !$acc end data
 
     return

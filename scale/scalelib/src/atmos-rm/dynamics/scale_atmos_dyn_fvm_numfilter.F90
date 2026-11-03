@@ -493,25 +493,25 @@ contains
     nd_order = ND_LAPLACIAN_NUM * 2
     diff_coef_tmp = - (-1)**(mod(ND_LAPLACIAN_NUM+1,2)) &
                     * ND_COEF / ( 2**(nd_order) * DT )
-    !$acc kernels
+    !$acc kernels async
     do k = KS-1, KE
        nd_coef_cdz(k) = diff_coef_tmp * CDZ(k)**nd_order
     end do
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
     do k = KS+1, KE-1
        nd_coef_fdz(k) = diff_coef_tmp * FDZ(k)**nd_order
     end do
     !$acc end kernels
     if ( .not. TwoD ) then
-       !$acc kernels
+       !$acc kernels async
        do i = IS, IE
           nd_coef_cdx(i) = diff_coef_tmp * CDX(i)**nd_order
           nd_coef_fdx(i) = diff_coef_tmp * FDX(i)**nd_order
        end do
        !$acc end kernels
     end if
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
        nd_coef_cdy(j) = diff_coef_tmp * CDY(j)**nd_order
        nd_coef_fdy(j) = diff_coef_tmp * FDY(j)**nd_order
@@ -526,7 +526,7 @@ contains
 
        call PROF_rapstart("NumFilter_Main", 3)
 
-       !$acc kernels
+       !$acc kernels async
        do j = JS-2, JE+2
        do i = max(IS-2,1), min(IE+2,IA)
        do k = KS, KE
@@ -538,7 +538,7 @@ contains
 
        if ( TwoD ) then
           !$omp parallel do private(j,k) OMP_SCHEDULE_
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do k = KS+1, KE-1
              dens_diff(k,IS,j) = ( ( DENS(k,IS,j)                  ) * 3.0_RP &
@@ -557,7 +557,7 @@ contains
           !$acc end kernels
 
           !$omp parallel do
-          !$acc kernels
+          !$acc kernels async
           do j  = JS, JE
              dens_diff(KS,IS,j) = ( ( DENS(KS,IS,j)                   ) * 3.0_RP &
                                   + ( DENS(KS,IS,j+1)+DENS(KS,IS,j-1) ) * 2.0_RP &
@@ -584,7 +584,7 @@ contains
           !$acc end kernels
        else
           !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = KS+1, KE-1
@@ -605,7 +605,7 @@ contains
           !$acc end kernels
 
           !$omp parallel do
-          !$acc kernels
+          !$acc kernels async
           do j  = JS, JE
           do i  = IS, IE
              dens_diff(KS,i,j) = ( ( DENS(KS,i,j)                                                ) * 3.0_RP &
@@ -656,7 +656,7 @@ contains
        call PROF_rapstart("NumFilter_Main", 3)
 
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS-1, JE+2
        do i = max(IS-1,1), min(IE+2,IA)
        do k = KS, KE
@@ -682,7 +682,7 @@ contains
 
     !$omp parallel private(i,j,k) 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS-1, KE
@@ -693,7 +693,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff(   1:KS-2,i,j,I_DENS,ZDIR) = 0.0_RP
@@ -704,7 +704,7 @@ contains
     !$omp end do nowait
     if ( .not. TwoD ) then
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -715,7 +715,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
           num_diff(   1:KS-1,i,j,I_DENS,XDIR) = 0.0_RP
@@ -728,7 +728,7 @@ contains
        !$omp end do nowait
     end if
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -739,7 +739,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff(   1:KS-1,i,j,I_DENS,YDIR) = 0.0_RP
@@ -768,7 +768,7 @@ contains
     call PROF_rapstart("NumFilter_Main", 3)
 
     !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS-2, JE+2
     do i = max(IS-2,1), min(IE+2,IA)
     do k = KS, KE-1
@@ -791,7 +791,7 @@ contains
     !$omp parallel private(i,j,k)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS+1, KE-1
@@ -803,7 +803,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff( 1:KS,i,j,I_MOMZ,ZDIR) = 0.0_RP
@@ -815,7 +815,7 @@ contains
 
     if ( .not. TwoD ) then
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE-1
@@ -827,7 +827,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)    
-       !$acc kernels copy(num_diff)
+       !$acc kernels copy(num_diff) async
        do j = JS, JE
        do i = IS, IE
           num_diff( 1:KS-1,i,j,I_MOMZ,XDIR) = 0.0_RP
@@ -841,7 +841,7 @@ contains
     end if
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -853,7 +853,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)    
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff( 1:KS-1,i,j,I_MOMZ,YDIR) = 0.0_RP
@@ -885,7 +885,7 @@ contains
 
     if ( TwoD ) then
        !$omp parallel do private(j,k) OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do j = JS-2, JE+2
        do k = KS, KE
           VELX(k,IS,j) = MOMX(k,IS,j) / DENS(k,IS,j)
@@ -894,7 +894,7 @@ contains
        !$acc end kernels
     else
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS-2, JE+2
        do i = IS-2, IE+1
        do k = KS, KE
@@ -920,7 +920,7 @@ contains
 
     if ( TwoD ) then
        !$omp do OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do k = KS, KE-1
           num_diff(k,IS,j,I_MOMX,ZDIR) = work(k,IS,j,ZDIR,iwork) * nd_coef_cdz(k) &
@@ -931,7 +931,7 @@ contains
        !$omp end do nowait
     else
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE-1
@@ -944,7 +944,7 @@ contains
        !$omp end do nowait
     end if
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff( 1:KS-1,i,j,I_MOMX,ZDIR) = 0.0_RP
@@ -956,7 +956,7 @@ contains
 
     if ( .not. TwoD ) then
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -968,7 +968,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels copy(num_diff)
+       !$acc kernels copy(num_diff) async
        do j = JS, JE
        do i = IS, IE
           num_diff(   1:KS-1,i,j,I_MOMX,XDIR) = 0.0_RP
@@ -983,7 +983,7 @@ contains
 
     if ( TwoD ) then
        !$omp do OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do k = KS, KE
           num_diff(k,IS,j,I_MOMX,YDIR) = work(k,IS,j,YDIR,iwork) * nd_coef_cdy(j) &
@@ -994,7 +994,7 @@ contains
        !$omp end do nowait
     else
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -1007,7 +1007,7 @@ contains
        !$omp end do nowait
     end if
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff(   1:KS-1,i,j,I_MOMX,YDIR) = 0.0_RP
@@ -1037,7 +1037,7 @@ contains
     call PROF_rapstart("NumFilter_Main", 3)
 
     !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS-2, JE+1
     do i = max(IS-2,1), min(IE+2,IA)
     do k = KS, KE
@@ -1060,7 +1060,7 @@ contains
     !$omp parallel private(i,j,k) 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -1072,7 +1072,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)    
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff( 1:KS-1,i,j,I_MOMY,ZDIR) = 0.0_RP
@@ -1084,7 +1084,7 @@ contains
 
     if ( .not. TwoD ) then
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -1096,7 +1096,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels copy(num_diff)
+       !$acc kernels copy(num_diff) async
        do j = JS, JE
        do i = IS, IE
           num_diff(   1:KS-1,i,j,I_MOMY,XDIR) = 0.0_RP
@@ -1110,7 +1110,7 @@ contains
     end if
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -1122,7 +1122,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff(   1:KS-1,i,j,I_MOMY,YDIR) = 0.0_RP
@@ -1152,7 +1152,7 @@ contains
 
     if ( ND_USE_RS ) then
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS-1, JE+2
        do i = max(IS-1,1), min(IE+2,IA)
        do k = KS, KE
@@ -1176,7 +1176,7 @@ contains
     !$omp parallel private(i,j,k) 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -1188,7 +1188,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff(   1:KS-2,i,j,I_RHOT,ZDIR) = 0.0_RP
@@ -1204,7 +1204,7 @@ contains
 
     if ( .not. TwoD ) then
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -1216,7 +1216,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels copy(num_diff)
+       !$acc kernels copy(num_diff) async
        do j = JS, JE
        do i = IS, IE
           num_diff(   1:KS-1,i,j,I_RHOT,XDIR) = 0.0_RP
@@ -1230,7 +1230,7 @@ contains
     end if
 
     !$omp do OMP_SCHEDULE_ collapse(2)    
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -1242,7 +1242,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)    
-    !$acc kernels copy(num_diff)
+    !$acc kernels copy(num_diff) async
     do j = JS, JE
     do i = IS, IE
        num_diff(   1:KS-1,i,j,I_RHOT,YDIR) = 0.0_RP
@@ -1286,6 +1286,7 @@ contains
 
     call PROF_rapend  ("NumFilter_Comm", 3)
 
+    !$acc wait
     !$acc end data
 
     return
@@ -1351,19 +1352,19 @@ contains
     diff_coef_tmp = - (-1)**(mod(ND_LAPLACIAN_NUM+1,2)) &
                     * ND_COEF / ( 2**(nd_order) * DT )
 
-    !$acc kernels
+    !$acc kernels async
     do k = KS-1, KE
        nd_coef_cdz(k) = diff_coef_tmp * CDZ(k)**nd_order
     end do
     !$acc end kernels
     if ( .not. TwoD ) then
-    !$acc kernels
+    !$acc kernels async
     do i = IS, IE
        nd_coef_cdx(i) = diff_coef_tmp * CDX(i)**nd_order
     end do
     !$acc end kernels
     end if
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
        nd_coef_cdy(j) = diff_coef_tmp * CDY(j)**nd_order
     end do
@@ -1375,7 +1376,7 @@ contains
 
        if ( TwoD ) then
           !$omp parallel do private(j,k) OMP_SCHEDULE_
-          !$acc kernels
+          !$acc kernels async
           do j = JS-1, JE+2
           do k = KS+1, KE-1
              qv_diff(k,IS,j) = ( ( QTRC(k,IS,j)                  ) * 3.0_RP &
@@ -1388,7 +1389,7 @@ contains
           !$acc end kernels
 
           !$omp parallel do private(j,k) OMP_SCHEDULE_
-          !$acc kernels
+          !$acc kernels async
           do j  = JS-1, JE+2
              qv_diff(KS,IS,j) = ( ( QTRC(KS,IS,j)                   ) * 3.0_RP &
                                 + ( QTRC(KS,IS,j+1)+QTRC(KS,IS,j-1) ) * 2.0_RP &
@@ -1405,7 +1406,7 @@ contains
 
        else
           !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JS-1, JE+2
           do i = IS-1, IE+2
           do k = KS+1, KE-1
@@ -1420,7 +1421,7 @@ contains
           !$acc end kernels
 
           !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j  = JS-1, JE+2
           do i  = IS-1, IE+2
              qv_diff(KS,i,j) = ( ( QTRC(KS,i,j)                                                ) * 3.0_RP &
@@ -1457,7 +1458,7 @@ contains
           call PROF_rapstart("NumFilter_Main", 3)
 
           !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JS-1, JE+2
           do i = max(IS-1,1), min(IE+2,IA)
           do k = KS, KE
@@ -1494,7 +1495,7 @@ contains
     !$omp parallel private(i,j,k)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -1506,7 +1507,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
        num_diff_q(1:KS-2,i,j,ZDIR) = 0.0_RP
@@ -1522,7 +1523,7 @@ contains
 
     if ( .not. TwoD ) then
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -1534,7 +1535,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
           num_diff_q(1:KS-1,i,j,XDIR) = 0.0_RP
@@ -1548,7 +1549,7 @@ contains
     end if
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -1560,7 +1561,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
        num_diff_q(1:KS-1,i,j,YDIR) = 0.0_RP
@@ -1589,6 +1590,7 @@ contains
 
     call PROF_rapend  ("NumFilter_Comm", 3)
 
+    !$acc wait
     !$acc end data
 
     return
@@ -1635,7 +1637,7 @@ contains
 
     if ( TwoD ) then
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do k = KS, KE
           phi_t(k,IS,j) = ( flux(k+KO,IS,j,ZDIR) - flux(k-1+KO,IS,j,ZDIR) ) * RDZ(k) &
@@ -1645,7 +1647,7 @@ contains
        !$acc end kernels
     else
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -1658,6 +1660,7 @@ contains
        !$acc end kernels
     end if
 
+    !$acc wait
     !$acc end data
 
     return
@@ -1864,7 +1867,7 @@ contains
       !$omp shared(JS,JE,IS,IE,KS,KE,phi,diff,CNZ1)
 
       !$omp do OMP_SCHEDULE_ collapse(2)
-      !$acc kernels
+      !$acc kernels async
       do j = JS, JE
       do i = IS, IE
       do k = KS, KE-1
@@ -1879,7 +1882,7 @@ contains
       !$acc end kernels
       !$omp end do nowait
       !$omp do OMP_SCHEDULE_ collapse(2)
-      !$acc kernels
+      !$acc kernels async
       do j = JS, JE
       do i = IS, IE
          diff(KS-1,i,j,ZDIR) = - diff(KS  ,i,j,ZDIR)
@@ -1898,7 +1901,7 @@ contains
       !$omp shared(JS,JE,IS,IE,KS,KE,phi,diff,CNZ1)
 
       !$omp do OMP_SCHEDULE_ collapse(2) 
-      !$acc kernels
+      !$acc kernels async
       do j = JS, JE
       do i = IS, IE
       do k = KS+1, KE-1
@@ -1913,7 +1916,7 @@ contains
       !$acc end kernels
       !$omp end do nowait
       !$omp do OMP_SCHEDULE_ collapse(2)
-      !$acc kernels
+      !$acc kernels async
       do j = JS, JE
       do i = IS, IE
          diff(KS  ,i,j,ZDIR) = CNZ1(KS,2) * ( phi(KS,i,j) - phi(KS+1,i,j) )
@@ -1936,7 +1939,7 @@ contains
     if ( .not. TwoD ) then
 
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KEE
@@ -1951,7 +1954,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
           diff(   1:KS-1,i,j,XDIR) = 0.0_RP
@@ -1964,7 +1967,7 @@ contains
     end if
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KEE
@@ -1979,7 +1982,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
       diff(   1:KS-1,i,j,YDIR) = 0.0_RP
@@ -2025,7 +2028,7 @@ contains
        !$omp shared(JS,JE,IS,IE,KS,KE,phi,diff,CNZ3)
 
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS+1, KE-2
@@ -2045,7 +2048,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
 #ifdef DEBUG
@@ -2080,7 +2083,7 @@ contains
        !$omp shared(JS,JE,IS,IE,KS,KE,phi,diff,CNZ3)
 
        !$omp do OMP_SCHEDULE_ collapse(2) 
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS+2, KE-2
@@ -2100,7 +2103,7 @@ contains
        !$acc end kernels
        !$omp end do nowait
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
 #ifdef DEBUG
@@ -2139,7 +2142,7 @@ contains
        if ( IO == 0 ) then
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
           !$omp shared(JS,JE,IS,IE,KS,KEE,phi,diff,CNX3)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = KS, KEE
@@ -2160,7 +2163,7 @@ contains
        else
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
           !$omp shared(JS,JE,IS,IE,KS,KEE,phi,diff,CNX3)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = KS, KEE
@@ -2181,7 +2184,7 @@ contains
        end if
 
        !$omp parallel do private(i,j) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
           diff(   1:KS-1,i,j,XDIR) = 0.0_RP
@@ -2194,7 +2197,7 @@ contains
     if ( JO == 0 ) then
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ &
        !$omp shared(JS,JE,IS,IE,KS,KEE,phi,diff,CNY3)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KEE
@@ -2215,7 +2218,7 @@ contains
     else
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ &
        !$omp shared(JS,JE,IS,IE,KS,KEE,phi,diff,CNY3)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KEE
@@ -2236,7 +2239,7 @@ contains
     end if
 
     !$omp parallel do private(i,j) OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
        diff(   1:KS-1,i,j,YDIR) = 0.0_RP
@@ -2277,7 +2280,7 @@ contains
     !$omp parallel private(i,j,k) 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -2305,7 +2308,7 @@ contains
     !$acc end kernels
     !$omp end do nowait
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
        num_diff_pt1(KS-1,i,j,ZDIR) = - num_diff_pt1(KS  ,i,j,ZDIR)
@@ -2319,7 +2322,7 @@ contains
 
     if ( .not. TwoD ) then
        !$omp do OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, K1
@@ -2349,7 +2352,7 @@ contains
     end if
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, K1
@@ -2411,7 +2414,7 @@ contains
     !$omp parallel private(i,j,k,tend_h,tend_v)
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -2421,16 +2424,16 @@ contains
     enddo
     !$acc end kernels
     !$omp workshare
-    !$acc kernels
+    !$acc kernels async
     flux_tmp(KS-1,:,:,ZDIR) = 0.0_RP
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
     flux_tmp(KE  ,:,:,ZDIR) = 0.0_RP
     !$acc end kernels
     !$omp end workshare
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS-1, IE
     do k = KS, KE
@@ -2440,7 +2443,7 @@ contains
     enddo
     !$acc end kernels
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE
     do i = IS, IE
     do k = KS, KE
@@ -2451,7 +2454,7 @@ contains
     !$acc end kernels
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -2466,6 +2469,7 @@ contains
 
     !$omp end parallel
 
+    !$acc wait
     !$acc end data
 
     return
@@ -2494,7 +2498,7 @@ contains
     !$omp parallel private(i,j,k,tend_h,tend_v)
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS+1, KE-1
@@ -2504,16 +2508,16 @@ contains
     enddo
     !$acc end kernels
     !$omp workshare
-    !$acc kernels
+    !$acc kernels async
     flux_tmp(KS-1,:,:,ZDIR) = 0.0_RP
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
     flux_tmp(KE-1,:,:,ZDIR) = 0.0_RP
     !$acc end kernels
     !$omp end workshare
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS-1, IE
     do k = KS, KE-1
@@ -2523,7 +2527,7 @@ contains
     enddo
     !$acc end kernels
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -2533,7 +2537,7 @@ contains
     enddo
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -2548,6 +2552,7 @@ contains
 
     !$omp end parallel
 
+    !$acc wait
     !$acc end data
 
     return
@@ -2577,7 +2582,7 @@ contains
     !$omp parallel private(i,j,k,tend_h,tend_v)
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -2587,16 +2592,16 @@ contains
     enddo
     !$acc end kernels
     !$omp workshare
-    !$acc kernels
+    !$acc kernels async
     flux_tmp(KS-1,:,:,ZDIR) = 0.0_RP
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
     flux_tmp(KE  ,:,:,ZDIR) = 0.0_RP
     !$acc end kernels
     !$omp end workshare
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE+1
     do k = KS, KE
@@ -2606,7 +2611,7 @@ contains
     enddo
     !$acc end kernels
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE
     do i = IS, IE
     do k = KS, KE
@@ -2617,7 +2622,7 @@ contains
     !$acc end kernels
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j= JS, JE
     do i= IS, min(IE,IEH)
     do k= KS, KE
@@ -2632,6 +2637,7 @@ contains
 
     !$omp end parallel
 
+    !$acc wait
     !$acc end data
 
     return
@@ -2660,7 +2666,7 @@ contains
     !$omp parallel private(i,j,k,tend_h,tend_v)
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -2670,16 +2676,16 @@ contains
     enddo
     !$acc end kernels
     !$omp workshare
-    !$acc kernels
+    !$acc kernels async
     flux_tmp(KS-1,:,:,ZDIR) = 0.0_RP
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
     flux_tmp(KE  ,:,:,ZDIR) = 0.0_RP
     !$acc end kernels
     !$omp end workshare
 
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS-1, IE
     do k = KS, KE
@@ -2689,7 +2695,7 @@ contains
     enddo
     !$acc end kernels
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE+1
     do i = IS, IE
     do k = KS, KE
@@ -2699,7 +2705,7 @@ contains
     enddo
     !$acc end kernels
     !$omp do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, min(JE,JEH)
     do i = IS, IE
     do k = KS, KE
@@ -2715,6 +2721,7 @@ contains
 
     !$omp end parallel
 
+    !$acc wait
     !$acc end data
 
     return

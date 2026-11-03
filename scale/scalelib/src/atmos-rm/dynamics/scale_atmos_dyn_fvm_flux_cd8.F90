@@ -221,7 +221,7 @@ contains
     !$acc data copy(flux) copyin(mflx, val, GSQRT, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -257,7 +257,7 @@ contains
 #endif
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
 #ifdef DEBUG
@@ -360,7 +360,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE
@@ -422,7 +422,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mflx,val,flux,GSQRT,num_diff)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE
@@ -496,7 +496,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, num_diff, CDZ, FDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+4, KE-3
@@ -535,7 +535,7 @@ contains
 #endif
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
 #ifdef DEBUG
@@ -649,7 +649,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J13G, RMAPF, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-3
@@ -667,7 +667,7 @@ contains
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
        ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS.
@@ -749,7 +749,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, J23G, RMAPF, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-3
@@ -767,7 +767,7 @@ contains
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
        ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS.
@@ -854,7 +854,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE-1
@@ -896,7 +896,7 @@ contains
 #endif
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS-1, IIE
        flux(KE,i,j) = 0.0_RP
@@ -950,7 +950,7 @@ contains
     !$acc data copy(flux) copyin(mom, val, DENS, GSQRT, RMAPF, num_diff, CDZ)
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE-1
@@ -992,7 +992,7 @@ contains
 #endif
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS-1, JJE
     do i = IIS, IIE
        flux(KE,i,j) = 0.0_RP
@@ -1069,7 +1069,7 @@ contains
     if ( TwoD ) then
 
     !$omp do OMP_SCHEDULE_
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do k = KS+3, KE-4
        i = IIS
@@ -1109,7 +1109,7 @@ contains
 #endif
 
     !$omp do OMP_SCHEDULE_
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
        i = IIS
 #ifdef DEBUG
@@ -1198,7 +1198,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -1239,7 +1239,7 @@ contains
 #endif
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
 #ifdef DEBUG
@@ -1386,7 +1386,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -1408,7 +1408,7 @@ contains
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
        ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
@@ -1552,7 +1552,7 @@ contains
     if ( TwoD ) then
 
     !$omp do OMP_SCHEDULE_
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do k = KS+3, KE-4
        i = IIS
@@ -1573,7 +1573,7 @@ contains
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
        i = IIS
        ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
@@ -1656,7 +1656,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -1678,7 +1678,7 @@ contains
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
        ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
@@ -1801,7 +1801,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE+1
     do k = KS, KE
@@ -1875,7 +1875,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff,TwoD)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS-1, JJE
     do k = KS, KE
        i = IIS
@@ -1916,7 +1916,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS-1, JJE
     do i = IIS, IIE
     do k = KS, KE
@@ -2006,7 +2006,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -2047,7 +2047,7 @@ contains
 #endif
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
 #ifdef DEBUG
@@ -2192,7 +2192,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -2214,7 +2214,7 @@ contains
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
        ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
@@ -2347,7 +2347,7 @@ contains
 
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS, IIE
     do k = KS+3, KE-4
@@ -2369,7 +2369,7 @@ contains
     !$omp end do nowait
 
     !$omp do OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
        ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
@@ -2488,7 +2488,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE
     do i = IIS-1, IIE
     do k = KS, KE
@@ -2562,7 +2562,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp private(vel) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,mom,val,DENS,flux,GSQRT,RMAPF,num_diff)
-    !$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) async
     do j = JJS, JJE+1
     do i = IIS, IIE
     do k = KS, KE

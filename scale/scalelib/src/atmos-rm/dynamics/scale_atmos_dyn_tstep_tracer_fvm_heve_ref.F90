@@ -109,14 +109,14 @@ contains
     !$acc      create(QTRC_N)
 
 #ifdef DEBUG
-    !$acc kernels
+    !$acc kernels async
     qflx_hi(:,:,:,:) = UNDEF
     !$acc end kernels
 #endif
 
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(IA,JA,KA,QTRC_N,QTRC0,QTRC_ref,EPS)
-    !$acc kernels
+    !$acc kernels async
     do j = 1, JA
     do i = 1, IA
     do k = 1, KA
@@ -168,7 +168,7 @@ contains
           !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ &
           !$omp shared(JJS,JJE,IS,KS,KE,QTRCo,QTRC0,DENS0,dtl,qflx_hi,RCDZ,RCDY,MAPF) &
           !$omp shared(GSQRT,RHOQ_t,DENS)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do k = KS, KE
              QTRCo(k,IS,j) = ( QTRC0(k,IS,j) * DENS0(k,IS,j) &
@@ -183,7 +183,7 @@ contains
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE,QTRCo,QTRC0,DENS0,dtl,qflx_hi,RCDZ,RCDX,RCDY,MAPF) &
           !$omp shared(GSQRT,RHOQ_t,DENS)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -202,6 +202,7 @@ contains
     enddo
     enddo
 
+    !$acc wait
     !$acc end data
     return
   end subroutine ATMOS_DYN_Tstep_tracer_fvm_heve_ref

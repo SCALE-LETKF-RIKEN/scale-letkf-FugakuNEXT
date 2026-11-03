@@ -241,6 +241,10 @@ contains
     use scale_matrix, only: &
        MATRIX_SOLVER_TRIDIAGONAL, &
        MATRIX_SOLVER_TRIDIAGONAL_1D_CR
+#if defined(_OPENACC) && defined(HEVI_FISSION)
+    use openacc, only: &
+       acc_async_noval
+#endif
     implicit none
 
     real(RP), intent(out) :: DENS_RK(KA,IA,JA)   ! prognostic variables
@@ -452,11 +456,9 @@ contains
     !$acc copyin(DENS0,MOMZ0,MOMX0,MOMY0,RHOT0, &
     !$acc        DENS,MOMZ,MOMX,MOMY,RHOT,DENS_t,MOMZ_t,MOMX_t,MOMY_t,RHOT_t, &
     !$acc        PROG0,PROG, &
-    !$acc        DPRES0,RT2P,CORIOLI,num_diff,wdamp_coef,divdmp_coef,DDIV, &
-    !$acc        FLAG_FCT_MOMENTUM,FLAG_FCT_T,FLAG_FCT_ALONG_STREAM, &
+    !$acc        DPRES0,RT2P,CORIOLI,num_diff,wdamp_coef,DDIV, &
     !$acc        CDZ,FDZ,FDX,FDY,RCDZ,RCDX,RCDY,RFDZ,RFDX,RFDY, &
-    !$acc        PHI,GSQRT,J13G,J23G,J33G,MAPF,REF_dens,REF_rhot, &
-    !$acc        BND_W,BND_E,BND_S,BND_N,TwoD,dtrk,last) &
+    !$acc        PHI,GSQRT,J13G,J23G,MAPF,REF_dens,REF_rhot) &
     !$acc present(COEF_CF_U,COEF_CF_V,RMAPF,MAPF_M12,MAPF_R12) &
     !$acc present(RGSQRT_XYZ,RGSQRT_XYW,RGSQRT_UYZ,RGSQRT_XVZ,F2H_UYZ,F2H_XVZ) &
     !$acc create(POTT,DPRES, &
@@ -471,7 +473,7 @@ contains
     !       while the kernels that fill it are skipped when the divergence
     !       damping is disabled. Zero it once here for that case.
     if ( divdmp_coef .le. 0.0_RP ) then
-       !$acc kernels
+       !$acc kernels async
        div_work(:,:,:) = 0.0_RP
        !$acc end kernels
     end if
@@ -483,12 +485,16 @@ contains
     IIE = IIS+IBLOCK-1
 
        PROFILE_START("hevi_pres")
+#ifdef HEVI_FISSION
+       ! queue 1 starts after the work already queued on the default queue
+       !$acc wait(acc_async_noval) async(1)
+#endif
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JJS,JJE,IIS,IIE,IA,KS,KE,DPRES0,RT2P,RHOT,REF_rhot,DPRES,DENS,PHI)
 #ifdef HEVI_FISSION
-       !$acc kernels async(0)
+       !$acc kernels async
 #else
-       !$acc kernels
+       !$acc kernels async
 #endif
        do j = JJS, JJE+1
        do i = IIS, min(IIE+1,IA)
@@ -527,7 +533,7 @@ contains
           !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ &
           !$omp shared(JJS,JJE,IS,KS,KE,GSQRT,MOMY,J23G,mflx_hi,MAPF,num_diff) &
           !$omp shared(RMAPF)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
              mflx_hi(KS-1,IS,j,ZDIR) = 0.0_RP
              do k = KS, KE-1
@@ -550,9 +556,9 @@ contains
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE,GSQRT,MOMX,MOMY,J13G,J23G,mflx_hi,MAPF,num_diff) &
           !$omp shared(RMAPF,MAPF_R12)
 #ifdef HEVI_FISSION
-          !$acc kernels async(0)
+          !$acc kernels async
 #else
-          !$acc kernels
+          !$acc kernels async
 #endif
           do j = JJS, JJE
           do i = IIS-1, IIE
@@ -605,7 +611,7 @@ contains
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
           !$omp shared(JJS,JJE,iss,iee,KS,KE,GSQRT,I_UYZ,MOMX,num_diff,mflx_hi,MAPF,I_UY) &
           !$omp shared(RMAPF)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = iss, iee
           do k = KS, KE
@@ -630,7 +636,7 @@ contains
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JJS,JS,JFS_OFF,JJE,JEH,IIS,IIE,KS,KE,GSQRT,MOMY,num_diff,mflx_hi,MAPF) &
        !$omp shared(RMAPF)
-       !$acc kernels
+       !$acc kernels async
        do j = max(JJS-1,JS-JFS_OFF), min(JJE,JEH)
        do i = IIS, IIE
        do k = KS, KE
@@ -652,8 +658,8 @@ contains
        !--- update density
        PROFILE_START("hevi_sr")
 #ifdef HEVI_FISSION
-       ! mflx_hi(:,:,:,ZDIR) is computed asynchronously
-       !$acc wait
+       ! DPRES and mflx_hi(:,:,:,ZDIR) boundaries are computed on queue 1
+       !$acc wait(1) async
 #endif
        if ( TwoD ) then
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
@@ -665,7 +671,7 @@ contains
           !$omp shared(DENS0,Sr,mflx_hi,DENS_t) &
           !$omp shared(RCDZ,RCDY,MAPF,GSQRT) &
           !$omp shared(RGSQRT_XYZ)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do k = KS, KE
 #ifdef DEBUG
@@ -696,7 +702,7 @@ contains
           !$omp shared(DENS0,Sr,mflx_hi,DENS_t) &
           !$omp shared(RCDZ,RCDX,RCDY,MAPF,GSQRT) &
           !$omp shared(MAPF_M12,RGSQRT_XYZ)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -790,7 +796,7 @@ contains
           !$omp shared(RFDZ,RCDY,FDZ,dtrk,wdamp_coef,divdmp_coef) &
           !$omp shared(MAPF,GSQRT) &
           !$omp shared(RGSQRT_XYW)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
 !OCL NORECURRENCE
           do k = KS, KE-1
@@ -833,7 +839,7 @@ contains
           if ( divdmp_coef > 0.0_RP ) then
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,div)
-          !$acc kernels async(0)
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE-1
@@ -860,9 +866,9 @@ contains
 #ifdef HEVI_FISSION
           ! same queue as the kernel above, so that div_work is ready here
           ! without a synchronization with the host in between
-          !$acc kernels async(0)
+          !$acc kernels async
 #else
-          !$acc kernels
+          !$acc kernels async
 #endif
           do j = JJS, JJE
           do i = IIS, IIE
@@ -913,10 +919,6 @@ contains
           enddo
           enddo
           !$acc end kernels
-#ifdef HEVI_FISSION
-          ! wait for Sw; it is read by the Ci kernel on another queue
-          !$acc wait
-#endif
        end if
        PROFILE_STOP("hevi_sw")
 #ifdef DEBUG
@@ -928,7 +930,7 @@ contains
 
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JJS,JJE,IIS,IIE,KS,KE,JHALO,IHALO,RHOT,DENS,POTT)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-JHALO, JJE+JHALO
        do i = IIS-IHALO, IIE+IHALO
        do k = KS, KE
@@ -979,7 +981,7 @@ contains
           !$omp shared(tflx_hi,RHOT_t,St,RCDZ,RCDY) &
           !$omp shared(MAPF,GSQRT) &
           !$omp shared(RGSQRT_XYZ)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do k = KS, KE
 #ifdef DEBUG
@@ -1011,7 +1013,7 @@ contains
           !$omp shared(tflx_hi,RHOT_t,St,RCDZ,RCDX,RCDY) &
           !$omp shared(MAPF,GSQRT) &
           !$omp shared(MAPF_M12,RGSQRT_XYZ)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -1063,7 +1065,7 @@ contains
        ! systems are solved with one chunk of rows on each lane (partition method).
        ! In the latter, the lanes for the different columns access the work arrays
        ! with the stride KAMAX, which is odd to avoid bank conflicts.
-       !$acc parallel vector_length(32)
+       !$acc parallel vector_length(32) async
        !$acc loop gang collapse(2) private(i,PT,Co,F1,F2,F3)
 #else
 #ifndef __GFORTRAN__
@@ -1341,7 +1343,7 @@ contains
           !$omp shared(MAPF,GSQRT,I_UY,I_UYZ) &
           !$omp shared(dtrk,CORIOLI) &
           !$omp shared(RGSQRT_UYZ)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
 !OCL NORECURRENCE
           do k = KS, KE
@@ -1393,9 +1395,13 @@ contains
           !$omp shared(dtrk,CORIOLI,COEF_CF_U,RMAPF,MAPF_M12,divdmp_coef) &
           !$omp shared(RGSQRT_UYZ,F2H_UYZ)
 #ifdef HEVI_FISSION
-          !$acc kernels async(0)
+          ! queues 1-3 start after the work already queued on the default queue
+          !$acc wait(acc_async_noval) async(1)
+          !$acc wait(acc_async_noval) async(2)
+          !$acc wait(acc_async_noval) async(3)
+          !$acc kernels async
 #else
-          !$acc kernels
+          !$acc kernels async
 #endif
           do j = JJS, JJE
           do i = IIS, iee
@@ -1512,11 +1518,11 @@ contains
           end if
 
           ! wait for pg_work (async(0)), cf_work (async(1)), advc_work (async(2)), and div_work (async(3))
-          !$acc wait
+          !$acc wait(1,2,3) async
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,pg,cf,advc,div)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, iee
           do k = KS, KE
@@ -1598,7 +1604,7 @@ contains
           !$omp shared(MAPF,GSQRT,J23G) &
           !$omp shared(dtrk,CORIOLI,divdmp_coef) &
           !$omp shared(RGSQRT_XVZ,F2H_XVZ)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, min(JJE,JEH)
 !OCL NORECURRENCE
           do k = KS, KE
@@ -1674,9 +1680,13 @@ contains
           !$omp shared(dtrk,CORIOLI,COEF_CF_V,RMAPF,MAPF_M12,divdmp_coef) &
           !$omp shared(RGSQRT_XVZ,F2H_XVZ)
 #ifdef HEVI_FISSION
-          !$acc kernels async(0)
+          ! queues 1-3 start after the work already queued on the default queue
+          !$acc wait(acc_async_noval) async(1)
+          !$acc wait(acc_async_noval) async(2)
+          !$acc wait(acc_async_noval) async(3)
+          !$acc kernels async
 #else
-          !$acc kernels
+          !$acc kernels async
 #endif
           do j = JJS, min(JJE,JEH)
           do i = IIS, IIE
@@ -1792,11 +1802,11 @@ contains
           end if
 
           ! wait for pg_work (async(0)), cf_work (async(1)), advc_work (async(2)), and div_work (async(3))
-          !$acc wait
+          !$acc wait(1,2,3) async
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
           !$omp private(i,j,k,advc,div,pg,cf)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, min(JJE,JEH)
           do i = IIS, IIE
           do k = KS, KE
@@ -1830,6 +1840,8 @@ contains
 #ifdef PROFILE_FIPP
        call fipp_stop()
 #endif
+
+    !$acc wait
 
 #ifdef HIST_TEND
     if ( lhist ) then

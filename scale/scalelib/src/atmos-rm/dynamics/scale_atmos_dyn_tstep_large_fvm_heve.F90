@@ -533,6 +533,9 @@ contains
        DFT_g2g
 #ifdef USE_CUDALIB
     use cudafor
+    use openacc, only: &
+       acc_get_cuda_stream, &
+       acc_async_noval
 #endif
     implicit none
 
@@ -730,19 +733,19 @@ contains
     LOG_INFO_CONT('(1x,A,F0.2,A,F0.2,A,I0)') &
     '-> DT_large, DT_small, DT_large/DT_small : ', dtl, ', ', dts, ', ', nstep
 
-    !$acc kernels
+    !$acc kernels async
     DENS00  (:,:,:) = UNDEF
     !$acc end kernels
 #endif
 
 !OCL XFILL
-    !$acc kernels
+    !$acc kernels async
     DENS00(:,:,:) = DENS(:,:,:)
     !$acc end kernels
 
     if ( USE_AVERAGE ) then
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = JSB, JEB
        do i = ISB, IEB
@@ -759,7 +762,7 @@ contains
     endif
 
     !$omp parallel workshare
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     mflx_av(:,:,:,:) = 0.0_RP
     !$acc end kernels
@@ -767,7 +770,7 @@ contains
 
 
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     do j = JS, JE
     do k = KS, KE
@@ -777,7 +780,7 @@ contains
     end do
     !$acc end kernels
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     do i = IS, IE
     do k = KS, KE
@@ -801,7 +804,7 @@ contains
     call PROF_rapstart("DYN_Large_Tendency", 2)
 
     !$omp parallel workshare
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     DENS_tq(:,:,:) = 0.0_RP
     !$acc end kernels
@@ -814,7 +817,7 @@ contains
        if ( iqb > 0 ) then
 
           !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = JS-1, JE+1
           do i = max(IS-1,1), min(IE+1,IA)
@@ -832,7 +835,7 @@ contains
              !$omp shared(IS,JS,JE,KS,KE,iq,iqb) &
              !$omp shared(RHOQ_t,RHOQ_tp,DENS_tq,DAMP_alpha_QTRC,diff,BND_SMOOTHER_FACT,DENS00,TRACER_MASS,I_QV) &
              !$omp shared(damp_t_QTRC,do_put)
-             !$acc kernels
+             !$acc kernels async
 !OCL XFILL
              do j = JS, JE
              do k = KS, KE
@@ -851,7 +854,7 @@ contains
              if( iq == I_QV .and. SPNUDGE_qv ) then
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -862,12 +865,13 @@ contains
                 enddo
                 !$acc end kernels
 
+                !$acc wait
                 call DFT_g2g(KA,KS,KE,IA,IS,IE,JA,JS,JE,SPNUDGE_qv_lm,SPNUDGE_qv_mm,diff2)
 
              else
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -885,7 +889,7 @@ contains
              !$omp shared(JS,JE,IS,IE,KS,KE,iq,iqb) &
              !$omp shared(RHOQ_t,RHOQ_tp,DENS_tq,DAMP_alpha_QTRC,diff,diff2,BND_SMOOTHER_FACT,SPNUDGE_qv_alpha,DENS00,TRACER_MASS) &
              !$omp shared(damp_t_QTRC,do_put)
-             !$acc kernels
+             !$acc kernels async
 !OCL XFILL
              do j = JS, JE
              do i = IS, IE
@@ -906,6 +910,7 @@ contains
           end if
 
           if ( Llast ) then
+             !$acc wait
              if ( do_put ) call FILE_HISTORY_put( HIST_damp_QTRC(iq), damp_t_QTRC(:,:,:) )
           end if
 
@@ -916,7 +921,7 @@ contains
        else
 
           !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = 1, JA
           do i = 1, IA
@@ -930,6 +935,7 @@ contains
        end if
 
        if ( Llast ) then
+          !$acc wait
           call FILE_HISTORY_put( HIST_phys_QTRC(iq), RHOQ_tp(:,:,:,iq) )
        end if
 
@@ -941,7 +947,7 @@ contains
 
     if ( BND_W .and. (.not. TwoD) ) then
        !$omp parallel do private(j,k) OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do k = KS, KE
           mflx(k,IS-1,j,XDIR) = ( MOMX(k,IS-1,j) + MFLUX_OFFSET_X(k,j,1) ) &
@@ -952,7 +958,7 @@ contains
     end if
     if ( BND_E .and. (.not. TwoD) ) then
        !$omp parallel do private(j,k) OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do k = KS, KE
           mflx(k,IE,j,XDIR) = ( MOMX(k,IE,j) + MFLUX_OFFSET_X(k,j,2) ) &
@@ -963,7 +969,7 @@ contains
     end if
     if ( BND_S ) then
        !$omp parallel do private(i,k) OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do i = IS, IE
        do k = KS, KE
           mflx(k,i,JS-1,YDIR) = ( MOMY(k,i,JS-1) + MFLUX_OFFSET_Y(k,i,1) ) &
@@ -974,7 +980,7 @@ contains
     end if
     if ( BND_N ) then
        !$omp parallel do private(i,k) OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do i = IS, IE
        do k = KS, KE
           mflx(k,i,JE,YDIR) = ( MOMY(k,i,JE) + MFLUX_OFFSET_Y(k,i,2) ) &
@@ -988,7 +994,7 @@ contains
 
 !OCL XFILL
     !$omp parallel do collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = 1, JA
     do i = 1, IA
     do k = 1, KA
@@ -1013,7 +1019,7 @@ contains
 
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
 !OCL XFILL
-       !$acc kernels
+       !$acc kernels async
        do j = JS-1, JE+1
        do i = max(IS-1,1), min(IE+1,IA)
        do k = KS, KE
@@ -1030,7 +1036,7 @@ contains
           !$omp shared(IS,JS,JE,KS,KE) &
           !$omp shared(DAMP_alpha_DENS,diff,DENS_tq,DENS_t,DENS_tp,BND_SMOOTHER_FACT,EPS) &
           !$omp shared(damp_t_DENS,DENS_damp,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = JS, JE
           do k = KS, KE
@@ -1051,7 +1057,7 @@ contains
           !$omp shared(JS,JE,IS,IE,KS,KE) &
           !$omp shared(DAMP_alpha_DENS,diff,DENS_tq,DENS_t,DENS_tp,BND_SMOOTHER_FACT,EPS) &
           !$omp shared(damp_t_DENS,DENS_damp,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = JS, JE
           do i = IS, IE
@@ -1074,7 +1080,7 @@ contains
        call COMM_vars8( DENS_t(:,:,:), I_COMM_DENS_t )
 
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = JS-1, JE+1
        do i = max(IS-1,1), min(IE+1,IA)
@@ -1093,7 +1099,7 @@ contains
           !$omp shared(DENS_damp,DENS,MOMZ) &
           !$omp shared(DAMP_alpha_VELZ,diff,BND_SMOOTHER_FACT,MOMZ_t,MOMZ_tp) &
           !$omp shared(damp_t_MOMZ,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = JS, JE
           do k = KS, KE-1
@@ -1114,7 +1120,7 @@ contains
           ! MOMZ_t at 1:KS-1 and KE:KA are set to zero in this kernel with merge(),
           ! instead of in a separate kernel over (i,j), in which the accesses are strided.
           ! kk is the level clamped to KS:KE-1.
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = 1, KA
@@ -1140,7 +1146,7 @@ contains
           !$omp shared(DENS_damp,DENS,MOMZ) &
           !$omp shared(DAMP_alpha_VELZ,diff,BND_SMOOTHER_FACT,MOMZ_t,MOMZ_tp) &
           !$omp shared(damp_t_MOMZ,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = JS, JE
           do i = IS, IE
@@ -1164,7 +1170,7 @@ contains
        if ( TwoD ) then
 #endif
        !$omp parallel do
-       !$acc kernels copy(momz_t)
+       !$acc kernels copy(momz_t) async
 !OCL XFILL
        do j = JS, JE
        do i = IS, IE
@@ -1182,7 +1188,7 @@ contains
 
        if ( TwoD ) then
           !$omp parallel do private(j,k) OMP_SCHEDULE_
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = JS-1, JE+1
           do k = KS, KE
@@ -1192,7 +1198,7 @@ contains
           !$acc end kernels
        else
           !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = JS-1, JE+1
           do i = IS-1, IE+1
@@ -1214,7 +1220,7 @@ contains
           !$omp shared(DENS_damp,DENS,MOMX) &
           !$omp shared(DAMP_alpha_VELX,diff,BND_SMOOTHER_FACT,MOMX_tp,MOMX_t) &
           !$omp shared(damp_t_MOMX,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do k = KS, KE
              damp = - DAMP_alpha_VELX(k,IS,j) &
@@ -1233,7 +1239,7 @@ contains
              if( SPNUDGE_uv_divfree ) then
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS-1, JE+1
                 do i = IS-1, IE+1
@@ -1245,7 +1251,7 @@ contains
                 !$acc end kernels
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -1257,7 +1263,7 @@ contains
                 !$acc end kernels
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -1268,10 +1274,11 @@ contains
                 enddo
                 !$acc end kernels
 
+                !$acc wait
                 call DFT_g2g_divfree(KA,KS,KE,IA,IS,IE,JA,JS,JE,SPNUDGE_uv_lm,SPNUDGE_uv_mm,diff2,diff3)
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -1285,7 +1292,7 @@ contains
              else
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -1296,10 +1303,11 @@ contains
                 enddo
                 !$acc end kernels
 
+                !$acc wait
                 call DFT_g2g(KA,KS,KE,IA,IS,IE,JA,JS,JE,SPNUDGE_uv_lm,SPNUDGE_uv_mm,diff2)
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
                 do j = JS, JE
                 do i = IS, IE
                 do k = KS, KE
@@ -1313,7 +1321,7 @@ contains
           else
 
              !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-             !$acc kernels
+             !$acc kernels async
 !OCL XFILL
              do j = JS, JE
              do i = IS, IE
@@ -1333,7 +1341,7 @@ contains
           !$omp shared(DENS_damp,DENS,MOMX) &
           !$omp shared(DAMP_alpha_VELX,diff,diff2,BND_SMOOTHER_FACT,SPNUDGE_u_alpha,MOMX_tp,MOMX_t) &
           !$omp shared(damp_t_MOMX,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = KS, KE
@@ -1356,7 +1364,7 @@ contains
        call COMM_vars8( MOMX_t(:,:,:), I_COMM_MOMX_t )
 
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = JS-1, JE+1
        do i = max(IS-1,1), min(IE+1,IA)
@@ -1376,7 +1384,7 @@ contains
           !$omp shared(DENS_damp,DENS,MOMY) &
           !$omp shared(DAMP_alpha_VELY,diff,BND_SMOOTHER_FACT,MOMY_tp,MOMY_t) &
           !$omp shared(damp_t_MOMY,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do k = KS, KE
              damp = - DAMP_alpha_VELY(k,IS,j) &
@@ -1395,7 +1403,7 @@ contains
              if( SPNUDGE_uv_divfree ) then
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -1408,7 +1416,7 @@ contains
 
              else
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -1419,10 +1427,11 @@ contains
                 enddo
                 !$acc end kernels
 
+                !$acc wait
                 call DFT_g2g(KA,KS,KE,IA,IS,IE,JA,JS,JE,SPNUDGE_uv_lm,SPNUDGE_uv_mm,diff2)
 
                 !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-                !$acc kernels
+                !$acc kernels async
 !OCL XFILL
                 do j = JS, JE
                 do i = IS, IE
@@ -1442,7 +1451,7 @@ contains
           !$omp shared(DENS_damp,DENS,MOMY) &
           !$omp shared(DAMP_alpha_VELY,diff,diff2,BND_SMOOTHER_FACT,SPNUDGE_v_alpha,MOMY_tp,MOMY_t) &
           !$omp shared(damp_t_MOMY,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = KS, KE
@@ -1465,7 +1474,7 @@ contains
        call COMM_vars8( MOMY_t(:,:,:), I_COMM_MOMY_t )
 
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = JS-1, JE+2
        do i = max(IS-1,1), min(IE+2,IA)
@@ -1485,7 +1494,7 @@ contains
           !$omp shared(DENS_damp,DENS,RHOT) &
           !$omp shared(DAMP_alpha_POTT,diff,BND_SMOOTHER_FACT,RHOT_t,RHOT_tp) &
           !$omp shared(damp_t_RHOT,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do k = KS, KE
              damp = - DAMP_alpha_POTT(k,IS,j) &
@@ -1503,7 +1512,7 @@ contains
           if( SPNUDGE_pt ) then
 
              !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-             !$acc kernels
+             !$acc kernels async
 !OCL XFILL
              do j = JS, JE
              do i = IS, IE
@@ -1514,10 +1523,11 @@ contains
              enddo
              !$acc end kernels
 
+             !$acc wait
              call DFT_g2g(KA,KS,KE,IA,IS,IE,JA,JS,JE,SPNUDGE_pt_lm,SPNUDGE_pt_mm,diff2)
 
              !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-             !$acc kernels
+             !$acc kernels async
 !OCL XFILL
              do j = JS, JE
              do i = IS, IE
@@ -1531,7 +1541,7 @@ contains
           else
 
              !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-             !$acc kernels
+             !$acc kernels async
 !OCL XFILL
              do j = JS, JE
              do i = IS, IE
@@ -1551,7 +1561,7 @@ contains
           !$omp shared(DENS_damp,DENS,RHOT) &
           !$omp shared(DAMP_alpha_POTT,diff,diff2,BND_SMOOTHER_FACT,SPNUDGE_pt_alpha,RHOT_t,RHOT_tp) &
           !$omp shared(damp_t_RHOT,do_put,tavg_coef)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = KS, KE
@@ -1590,17 +1600,19 @@ contains
 #ifdef USE_CUDALIB
           ! index calculation causes a significant drop in performance, since num_diff is a 5D array
           !$acc host_data use_device(num_diff)
-          istat = cudaMemset(num_diff, 0.0_RP, int(KA,8)*IA*JA*5*3)
+          ! on the stream of the default async queue, which the kernels before and after use
+          istat = cudaMemsetAsync(num_diff, 0.0_RP, int(KA,8)*IA*JA*5*3, &
+                                  acc_get_cuda_stream(acc_async_noval))
           !$acc end host_data
           if ( istat /= cudaSuccess ) then
-            LOG_ERROR("ATMOS_DYN_Tstep_large_fvm_heve",*)'cudaMemset failed'
+            LOG_ERROR("ATMOS_DYN_Tstep_large_fvm_heve",*)'cudaMemsetAsync failed'
             LOG_ERROR_CONT(*)'istat = ', istat
             LOG_ERROR_CONT(*)'cudaErrorString = ', cudaGetErrorString(istat)
             call PRC_abort
           endif
 #else
           !$omp parallel workshare
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           num_diff(:,:,:,:,:) = 0.0_RP
           !$acc end kernels
@@ -1629,7 +1641,7 @@ contains
        else
 
           !$omp parallel workshare
-          !$acc kernels
+          !$acc kernels async
 !XFILL
           DDIV(:,:,:) = 0.0_RP
           !$acc end kernels
@@ -1688,7 +1700,7 @@ contains
 
        !$omp parallel do default(none) private(i,j,iv) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JSB,JEB,ISB,IEB,KS,KE,KA,MOMZ) !,DENS,MOMX,MOMY,RHOT,VA,PROG)
-       !$acc parallel vector_length(32)
+       !$acc parallel vector_length(32) async
        !$acc loop collapse(2)
        do j  = JSB, JEB
        do i  = ISB, IEB
@@ -1733,7 +1745,7 @@ contains
 
        if ( USE_AVERAGE ) then
           !$omp parallel do
-          !$acc kernels
+          !$acc kernels async
           do j = JSB, JEB
           do i = ISB, IEB
           do k = KS, KE
@@ -1749,7 +1761,7 @@ contains
        endif
 
        !$omp parallel
-       !$acc kernels
+       !$acc kernels async
        do n = 1, 3
        !$omp do
        do j = JSB, JEB
@@ -1772,7 +1784,7 @@ contains
     !###########################################################################
 
     !$omp parallel
-    !$acc kernels
+    !$acc kernels async
     do n = 1, 3
 !OCL XFILL
        !$omp do
@@ -1824,7 +1836,7 @@ contains
           if ( FLAG_TRACER_SPLIT_TEND ) then
              !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
              !$omp shared(KA,IA,JA,iq,QTRC,RHOQ_t,DENS,dtl)
-             !$acc kernels
+             !$acc kernels async
              do j = 1, JA
              do i = 1, IA
              do k = 1, KA
@@ -1879,7 +1891,7 @@ contains
 
           if ( ref_save(iq) ) then
              !$omp workshare
-             !$acc kernels
+             !$acc kernels async
              qflx_ref(:,:,:,:) = qflx(:,:,:,:)
              !$acc end kernels
              !$omp end workshare
@@ -1891,6 +1903,7 @@ contains
                 call FILE_HISTORY_query( HIST_qflx(iv,iq), do_put )
                 if ( do_put .or. MONIT_lateral_flag(iv) ) then
                    call multiply_flux_by_metric_xyz( iv, qflx, GSQRT, MAPF )
+                   !$acc wait
                    call FILE_HISTORY_put( HIST_qflx(iv,iq), qflx(:,:,:,iv) )
                 end if
              end do
@@ -1898,7 +1911,7 @@ contains
              if ( TRACER_MASS(iq) == 1.0_RP ) then
                 if ( BND_W .and. MONIT_qflx_west > 0 ) then
                    !$omp parallel do
-                   !$acc kernels
+                   !$acc kernels async
                    do j = JS, JE
                    do k = KS, KE
                       qflx_west(k,j) = qflx_west(k,j) + qflx(k,IS-1,j,XDIR)
@@ -1908,7 +1921,7 @@ contains
                 end if
                 if ( BND_E .and. MONIT_qflx_east > 0 ) then
                    !$omp parallel do
-                   !$acc kernels
+                   !$acc kernels async
                    do j = JS, JE
                    do k = KS, KE
                       qflx_east(k,j) = qflx_east(k,j) + qflx(k,IE,j,XDIR)
@@ -1918,7 +1931,7 @@ contains
                 end if
                 if ( BND_S .and. MONIT_qflx_south > 0 ) then
                    !$omp parallel do
-                   !$acc kernels
+                   !$acc kernels async
                    do i = IS, IE
                    do k = KS, KE
                       qflx_south(k,i) = qflx_south(k,i) + qflx(k,i,JS-1,YDIR)
@@ -1928,7 +1941,7 @@ contains
                 end if
                 if ( BND_N .and. MONIT_qflx_north > 0 ) then
                    !$omp parallel do
-                   !$acc kernels
+                   !$acc kernels async
                    do i = IS, IE
                    do k = KS, KE
                       qflx_north(k,i) = qflx_north(k,i) + qflx(k,i,JE,YDIR)
@@ -1944,7 +1957,7 @@ contains
        else
 
           !$omp parallel do
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = KS, KE
@@ -1960,7 +1973,7 @@ contains
        call COMM_vars8( QTRC(:,:,:,iq), I_COMM_QTRC(iq) )
 
        if ( USE_AVERAGE ) then
-          !$acc kernels
+          !$acc kernels async
           do j = JSB, JEB
           do i = ISB, IEB
           do k = KS, KE
@@ -1980,6 +1993,7 @@ contains
 
     if ( Llast ) then
        !- history ---------------------------------------
+       !$acc wait
        call FILE_HISTORY_put( HIST_phys(1), DENS_tp )
        call FILE_HISTORY_put( HIST_phys(2), MOMZ_tp )
        call FILE_HISTORY_put( HIST_phys(3), MOMX_tp )
@@ -1996,6 +2010,7 @@ contains
          call FILE_HISTORY_query( HIST_mflx(iv), do_put )
          if ( do_put .or. MONIT_lateral_flag(iv) ) then
            call multiply_flux_by_metric_xyz( iv, mflx, GSQRT, MAPF )
+           !$acc wait
            call FILE_HISTORY_put( HIST_mflx(iv), mflx(:,:,:,iv) )
          end if
        end do
@@ -2004,11 +2019,13 @@ contains
          call FILE_HISTORY_query( HIST_tflx(iv), do_put )
          if ( do_put ) then
            call multiply_flux_by_metric_xyz( iv, tflx, GSQRT, MAPF )
+           !$acc wait
            call FILE_HISTORY_put( HIST_tflx(iv), tflx(:,:,:,iv) )
          end if
        end do
 
        !- monitor mass budget ------------------------------------
+       !$acc wait
        call MONITOR_put( MONIT_damp_mass, damp_t_DENS(:,:,:) )
        if ( IS>0 ) &
        call MONITOR_put_lateral_flux( MONIT_mflx_west, BND_W .and. MONIT_mflx_west > 0, mflx(:,IS-1,:,XDIR), zero_x )
@@ -2025,6 +2042,7 @@ contains
     end if
 
     !$acc end data
+    !$acc wait
     !$acc end data
 
     return
@@ -2068,7 +2086,7 @@ contains
 
     if (I_DIR == ZDIR) then
       !$omp parallel do
-      !$acc kernels
+      !$acc kernels async
       do j = JS, JE
       do i = IS, IE
       do k = KS-1, KE
@@ -2081,7 +2099,7 @@ contains
 
     if (I_DIR == XDIR) then
       !$omp parallel do
-      !$acc kernels
+      !$acc kernels async
       do j = JS, JE
       do i = ISB, IEB
       do k = KS, KE
@@ -2094,7 +2112,7 @@ contains
 
     if (I_DIR == YDIR) then
       !$omp parallel do
-      !$acc kernels
+      !$acc kernels async
       do j = JSB, JEB
       do i = IS, IE
       do k = KS, KE
