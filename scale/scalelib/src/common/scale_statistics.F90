@@ -922,6 +922,13 @@ contains
     integer  :: allstatidx(VA,2)
     logical :: do_globalcomm
 
+    real(RP) :: vmax, vmin
+    integer  :: pmax, pmin, idx
+    integer  :: kmax, imax, jmax
+    integer  :: kmin, imin, jmin
+    integer  :: nk, ni
+    logical  :: on_device
+
     integer :: k, i, j
     integer :: ierr
     integer :: v, p
@@ -933,32 +940,93 @@ contains
     LOG_NEWLINE
     LOG_INFO("STATISTICS_detail_3D",*) 'Variable Statistics '
 
-    !$acc update host(var) if ( acc_is_present(var) )
+    on_device = .false.
+#ifdef _OPENACC
+    on_device = acc_is_present(var)
+#endif
 
-    do v = 1, VA
-       statval_l(  v,:) = var(KS,IS,JS,v)
-       statidx_l(1,v,:) = KS
-       statidx_l(2,v,:) = IS
-       statidx_l(3,v,:) = JS
-       do j = JS, JE
-       do i = IS, IE
-       do k = KS, KE
-          if ( var(k,i,j,v) > statval_l(v,1) ) then
-             statval_l(  v,1) = var(k,i,j,v)
-             statidx_l(1,v,1) = k
-             statidx_l(2,v,1) = i
-             statidx_l(3,v,1) = j
-          end if
-          if ( var(k,i,j,v) < statval_l(v,2) ) then
-             statval_l(  v,2) = var(k,i,j,v)
-             statidx_l(1,v,2) = k
-             statidx_l(2,v,2) = i
-             statidx_l(3,v,2) = j
-          end if
-       end do
-       end do
-       end do
-    enddo
+    if ( on_device ) then
+       ! Same result as the host loop below: the reported point is the first one
+       ! in (k,i,j) storage order whose value equals the max (min).
+       nk = KE - KS + 1
+       ni = IE - IS + 1
+       do v = 1, VA
+          vmax = -huge(vmax)
+          vmin =  huge(vmin)
+          !$acc parallel loop collapse(3) reduction(max:vmax) reduction(min:vmin) present(var)
+          do j = JS, JE
+          do i = IS, IE
+          do k = KS, KE
+             vmax = max( vmax, var(k,i,j,v) )
+             vmin = min( vmin, var(k,i,j,v) )
+          end do
+          end do
+          end do
+
+          pmax = huge(pmax)
+          pmin = huge(pmin)
+          !$acc parallel loop collapse(3) reduction(min:pmax,pmin) private(idx) present(var)
+          do j = JS, JE
+          do i = IS, IE
+          do k = KS, KE
+             idx = ( k - KS ) + nk * ( ( i - IS ) + ni * ( j - JS ) )
+             if ( var(k,i,j,v) == vmax ) pmax = min( pmax, idx )
+             if ( var(k,i,j,v) == vmin ) pmin = min( pmin, idx )
+          end do
+          end do
+          end do
+
+          ! no match (e.g. all values are -Inf/+Inf): the host loop keeps the first point
+          if ( pmax == huge(pmax) ) pmax = 0
+          if ( pmin == huge(pmin) ) pmin = 0
+
+          kmax = KS + mod( pmax, nk )
+          imax = IS + mod( pmax / nk, ni )
+          jmax = JS + pmax / ( nk * ni )
+          kmin = KS + mod( pmin, nk )
+          imin = IS + mod( pmin / nk, ni )
+          jmin = JS + pmin / ( nk * ni )
+
+          !$acc serial present(var) copyout(vmax, vmin)
+          vmax = var(kmax,imax,jmax,v)
+          vmin = var(kmin,imin,jmin,v)
+          !$acc end serial
+
+          statval_l(  v,1) = vmax
+          statidx_l(1,v,1) = kmax
+          statidx_l(2,v,1) = imax
+          statidx_l(3,v,1) = jmax
+          statval_l(  v,2) = vmin
+          statidx_l(1,v,2) = kmin
+          statidx_l(2,v,2) = imin
+          statidx_l(3,v,2) = jmin
+       enddo
+    else
+       do v = 1, VA
+          statval_l(  v,:) = var(KS,IS,JS,v)
+          statidx_l(1,v,:) = KS
+          statidx_l(2,v,:) = IS
+          statidx_l(3,v,:) = JS
+          do j = JS, JE
+          do i = IS, IE
+          do k = KS, KE
+             if ( var(k,i,j,v) > statval_l(v,1) ) then
+                statval_l(  v,1) = var(k,i,j,v)
+                statidx_l(1,v,1) = k
+                statidx_l(2,v,1) = i
+                statidx_l(3,v,1) = j
+             end if
+             if ( var(k,i,j,v) < statval_l(v,2) ) then
+                statval_l(  v,2) = var(k,i,j,v)
+                statidx_l(1,v,2) = k
+                statidx_l(2,v,2) = i
+                statidx_l(3,v,2) = j
+             end if
+          end do
+          end do
+          end do
+       enddo
+    end if
 
     if ( do_globalcomm ) then
        call PROF_rapstart('COMM_Bcast', 2)
