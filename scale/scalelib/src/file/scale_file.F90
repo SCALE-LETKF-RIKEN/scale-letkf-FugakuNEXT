@@ -194,6 +194,7 @@ module scale_file
   !++ Public parameters & variables
   !
   logical, public :: FILE_AGGREGATE !> do parallel I/O through PnetCDF (default setting)
+  integer, public :: FILE_DEFLATE_LEVEL !> zlib deflate level of variables in netCDF-4 files created without PnetCDF (0: no compression)
 
   !-----------------------------------------------------------------------------
   !
@@ -240,12 +241,14 @@ contains
     integer, intent(in) :: myrank
 
     namelist / PARAM_FILE / &
-         FILE_AGGREGATE
+         FILE_AGGREGATE, &
+         FILE_DEFLATE_LEVEL
 
     integer :: fid
     integer :: ierr
 
-    FILE_AGGREGATE = .false.
+    FILE_AGGREGATE     = .false.
+    FILE_DEFLATE_LEVEL = 2
 
     !--- read namelist
     rewind(IO_FID_CONF)
@@ -6367,6 +6370,7 @@ contains
     integer :: cfid
     integer :: error
     integer :: mpi_comm
+    character(len=16) :: deflate_level
     !---------------------------------------------------------------------------
 
     !--- check aggregate (parallel I/O on a single shared netCDF file)
@@ -6422,6 +6426,15 @@ contains
     if ( error /= FILE_SUCCESS_CODE ) then
        LOG_ERROR("FILE_get_fid",*) 'failed to open file :'//trim(fname)//'.nc'
        call PRC_abort
+    end if
+
+    if ( mode == FILE_FWRITE .and. ( .not. aggregate_ ) ) then
+       write(deflate_level,'(I0)') FILE_DEFLATE_LEVEL
+       error = file_set_option_c( cfid, cstr('netcdf'), cstr('deflate_level'), cstr(deflate_level) )
+       if ( error /= FILE_SUCCESS_CODE ) then
+          LOG_ERROR("FILE_get_fid",*) 'failed to set deflate level for file :'//trim(fname)//'.nc'
+          call PRC_abort
+       end if
     end if
 
     FILE_nfiles = FILE_nfiles + 1
