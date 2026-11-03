@@ -226,7 +226,7 @@ contains
     call COMM_vars8_init( 'MOMX_t', MOMX_t, I_COMM_MOMX_t )
     call COMM_vars8_init( 'MOMY_t', MOMY_t, I_COMM_MOMY_t )
     call COMM_vars8_init( 'RHOT_t', RHOT_t, I_COMM_RHOT_t )
-    call COMM_vars8_init( 'DENS_t', DENS_t, I_COMM_DENS_damp )
+    call COMM_vars8_init( 'DENS_damp', DENS_damp, I_COMM_DENS_damp )
 
     do iq = 1, QA
        I_COMM_RHOQ_t(iq) = 5 + VA + iq
