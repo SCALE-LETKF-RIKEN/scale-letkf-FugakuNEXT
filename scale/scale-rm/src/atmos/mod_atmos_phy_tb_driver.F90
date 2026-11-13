@@ -351,6 +351,7 @@ contains
                                    SFLX_SH, SFLX_Q,                        & ! [IN]
                                    GSQRT, J13G, J23G, J33G, MAPF,          & ! [IN]
                                    dt_TB                                   ) ! [IN]
+          !$acc wait
           !$acc update device(QFLX_MOMZ,QFLX_MOMX,QFLX_MOMY,QFLX_RHOT,QFLX_RHOQ,RHOQ_t_TB,Nu,Ri,Pr)
        case( 'DNS' )
           !$acc kernels async
@@ -370,6 +371,7 @@ contains
                                  SFLX_SH, SFLX_Q,                        & ! [IN]
                                  GSQRT, J13G, J23G, J33G, MAPF,          & ! [IN]
                                  dt_TB                                   ) ! [IN]
+          !$acc wait
           !$acc update device(QFLX_MOMZ,QFLX_MOMX,QFLX_MOMY,QFLX_RHOT,QFLX_RHOQ,RHOQ_t_TB,Nu,Ri,Pr)
        end select
 

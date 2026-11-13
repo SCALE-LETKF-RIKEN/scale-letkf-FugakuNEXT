@@ -4,6 +4,10 @@
 !! @par Description
 !!          Common routines for turbulence
 !!
+!!          In OpenACC builds, the calc_tend_* procedures enqueue work on the default
+!!          async queue. Callers must wait before host access or work on another queue.
+!!          calc_strain_tensor and calc_flux_phi complete before releasing their data.
+!!
 !! @author Team SCALE
 !!
 !<

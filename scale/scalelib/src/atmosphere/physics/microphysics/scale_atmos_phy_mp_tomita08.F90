@@ -2525,6 +2525,7 @@ contains
        end do
        !$acc end parallel
 
+       !$acc wait
        !$acc end data
 #endif
        end if ! flg_lt_l

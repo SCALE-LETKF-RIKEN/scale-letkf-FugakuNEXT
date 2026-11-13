@@ -1196,6 +1196,7 @@ contains
                   TEMP(:,:,:), DENS(:,:,:),           & ! [IN]
                   QTRC(:,:,:,QLS:QLE),                & ! [IN]
                   dqcrg(:,:,:), beta_crg(:,:,:)       ) ! [OUT]
+             !$acc wait
              !$acc update host(dqcrg,beta_crg,QTRC(:,:,:,QS_LT:QE_LT))
              call ATMOS_PHY_MP_sn14_tendency( &
                   KA, KS, KE, IA, IS, IE, JA, JS, JE, &
@@ -1206,6 +1207,7 @@ contains
                   QTRC(:,:,:,QS_LT:QE_LT),                                                                      & ! [IN:optional]
                   QSPLT_in(:,:,:,:), Sarea(:,:,:,:),                                                            & ! [OUT:optional]
                   RHOC_t_MP(:,:,:,QS_LT:QE_LT)                                                                  ) ! [OUT:optional]
+             !$acc wait
              !$acc update device(QSPLT_in,Sarea,RHOC_t_MP(:,:,:,QS_LT:QE_LT))
           else
              !$acc wait
@@ -1215,6 +1217,7 @@ contains
                   Qdry(:,:,:), CPtot(:,:,:), CVtot(:,:,:), CCN(:,:,:), dt_MP, REAL_CZ(:,:,:), REAL_FZ(:,:,:),   & ! [IN]
                   RHOQ_t_MP(:,:,:,QS_MP:QE_MP), RHOE_t(:,:,:), CPtot_t(:,:,:), CVtot_t(:,:,:), EVAPORATE(:,:,:) ) ! [OUT]
           endif
+          !$acc wait
           !$acc update device(RHOQ_t_MP(:,:,:,QS_MP:QE_MP),RHOE_t,CPtot_t,CVtot_t,EVAPORATE)
 
        case ( I_SUZUKI10 )
@@ -1228,6 +1231,7 @@ contains
                   TEMP(:,:,:), DENS(:,:,:),           & ! [IN]
                   QTRC(:,:,:,QLS:QLE),                & ! [IN]
                   dqcrg(:,:,:), beta_crg(:,:,:)       ) ! [OUT]
+             !$acc wait
              !$acc update host(dqcrg,beta_crg,QTRC(:,:,:,QS_LT:QE_LT))
              call ATMOS_PHY_MP_suzuki10_tendency( KA, KS,  KE, IA, IS, IE, JA, JS, JE, KIJMAX, &
                                                   dt_MP,                                  & ! [IN]
@@ -1244,6 +1248,7 @@ contains
                                                   QTRC(:,:,:,QS_LT:QE_LT),                & ! [IN:optional]
                                                   QSPLT_in(:,:,:,:), Sarea(:,:,:,:),      & ! [OUT:optional]
                                                   RHOC_t_MP(:,:,:,QS_LT:QE_LT)            ) ! [OUT:optional]
+             !$acc wait
              !$acc update device(QSPLT_in,Sarea,RHOC_t_MP(:,:,:,QS_LT:QE_LT))
           else
              !$acc wait
@@ -1258,11 +1263,13 @@ contains
                                                   CPtot_t(:,:,:), CVtot_t(:,:,:),         & ! [OUT]
                                                   EVAPORATE(:,:,:)                        ) ! [OUT]
           endif
+          !$acc wait
           !$acc update device(RHOQ_t_MP(:,:,:,QS_MP:QE_mp),RHOE_t,CPtot_t,CVtot_t,EVAPORATE)
 
           call ATMOS_PHY_MP_suzuki10_qtrc2qhyd( KA, KS, KE, IA, IS, IE, JA, JS, JE, &  ! [IN]
                                                 QTRC(:,:,:,QS_MP+1:QE_MP),          &  ! [IN]
                                                 Qe(:,:,:,:)                         )  ! [OUT]
+          !$acc wait
           !$acc update device(Qe)
 
           do iq = 1, N_HYD
@@ -1279,6 +1286,7 @@ contains
              call ATMOS_PHY_MP_suzuki10_crg_qtrc2qhyd( KA, KS, KE, IA, IS, IE, JA, JS, JE, &  ! [IN]
                                                        QTRC(:,:,:,QS_LT:QE_LT),            &  ! [IN]
                                                        Qecrg(:,:,:,:)                      )  ! [OUT]
+             !$acc wait
              !$acc update device(Qecrg)
 
              do iq = 1, N_HYD
