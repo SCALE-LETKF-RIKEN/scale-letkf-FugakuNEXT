@@ -407,7 +407,7 @@ contains
     LOG_PROGRESS(*) 'atmosphere / physics / turbulence / Smagorinsky'
 
 #ifdef DEBUG
-    !$acc kernels
+    !$acc kernels async
     qflx_sgs_momz(:,:,:,:)   = UNDEF
     qflx_sgs_momx(:,:,:,:)   = UNDEF
     qflx_sgs_momy(:,:,:,:)   = UNDEF
@@ -423,7 +423,7 @@ contains
 #endif
 
 #ifdef QUICKDEBUG
-    !$acc kernels
+    !$acc kernels async
     qflx_sgs_momz(KS:KE,   1:IS-1,    :    ,:) = UNDEF
     qflx_sgs_momz(KS:KE,IE+1:IA  ,    :    ,:) = UNDEF
     qflx_sgs_momz(KS:KE,    :    ,   1:JS-1,:) = UNDEF
@@ -452,10 +452,11 @@ contains
          twoD                           ) ! (in)
 
     if ( ATMOS_PHY_TB_SMG_backscatter ) then
+       !$acc wait
        call RANDOM_normal( random(:,:,:) )
        ! 1:2:1 filter
        !$omp parallel do collapse(2)
-       !$acc kernels copyin(random)
+       !$acc kernels copyin(random) async
        do j = JS-1, JE+1
        do i = ISn,  IEp
           do k = KS+1, KE-1
@@ -476,10 +477,11 @@ contains
        end do
        !$acc end kernels
 
+       !$acc wait
        call RANDOM_normal( random(:,:,:) )
        ! 1:2:1 filter
        !$omp parallel do collapse(2)
-       !$acc kernels copyin(random)
+       !$acc kernels copyin(random) async
        do j = JS-1, JE+1
        do i = ISn,  IEp
           do k = KS+1, KE-1
@@ -500,10 +502,11 @@ contains
        end do
        !$acc end kernels
 
+       !$acc wait
        call RANDOM_normal( random(:,:,:) )
        ! 1:2:1 filter
        !$omp parallel do collapse(2)
-       !$acc kernels copyin(random)
+       !$acc kernels copyin(random) async
        do j = JS-1, JE+1
        do i = ISn,  IEp
           do k = KS+1, KE-1
@@ -524,10 +527,11 @@ contains
        end do
        !$acc end kernels
 
+       !$acc wait
        call RANDOM_normal( random(:,:,:) )
        ! 1:2:1 filter
        !$omp parallel do collapse(2)
-       !$acc kernels copyin(random)
+       !$acc kernels copyin(random) async
        do j = JS-1, JE+1
        do i = ISn,  IEp
           do k = KS+1, KE-1
@@ -548,10 +552,11 @@ contains
        end do
        !$acc end kernels
 
+       !$acc wait
        call RANDOM_normal( random(:,:,:) )
        ! 1:2:1 filter
        !$omp parallel do collapse(2)
-       !$acc kernels copyin(random)
+       !$acc kernels copyin(random) async
        do j = JS-1, JE+1
        do i = ISn,  IEp
           do k = KS+1, KE-1
@@ -572,10 +577,11 @@ contains
        end do
        !$acc end kernels
 
+       !$acc wait
        call RANDOM_normal( random(:,:,:) )
        ! 1:2:1 filter
        !$omp parallel do collapse(2)
-       !$acc kernels copyin(random)
+       !$acc kernels copyin(random) async
        do j = JS-1, JE+1
        do i = ISn,  IEp
           do k = KS+1, KE-1
@@ -601,7 +607,7 @@ contains
 
     !$omp parallel do collapse(2) &
     !$omp private(fm,Rf,lambda_r,leOvleo5,C1,C2,D2,e,et,fact,dz,dx,dy)
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE+1
     !$acc loop private(fm,lambda_r,C1,e,fact)
     do i = ISn, IEp
@@ -699,7 +705,7 @@ contains
        ! (cell center)
        if ( ATMOS_PHY_TB_SMG_horizontal ) then
           !$omp workshare
-          !$acc kernels
+          !$acc kernels async
           qflx_sgs_momz(:,:,:,ZDIR) = 0.0_RP
           !$acc end kernels
           !$omp end workshare nowait
@@ -707,7 +713,7 @@ contains
           if ( twoD ) then
              i = IIS
              !$omp do
-             !$acc kernels
+             !$acc kernels async
              do j = JJS, JJE
              do k = KS+1, KE-1
 #ifdef DEBUG
@@ -726,7 +732,7 @@ contains
              !$acc end kernels
           else
              !$omp do collapse(2)
-             !$acc kernels
+             !$acc kernels async
              do j = JJS, JJE
              do i = IIS, IIE
              do k = KS+1, KE-1
@@ -751,7 +757,7 @@ contains
           i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
           !$omp do
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
              ! momentum will not be conserved
@@ -769,7 +775,7 @@ contains
        ! (y edge)
        if ( .not. twoD ) then
        !$omp do collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS,   JJE
        do i = IIS-1, IIE
        do k = KS, KE-1
@@ -799,7 +805,7 @@ contains
        end if
        ! (x edge)
        !$omp do collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS,   IIE
        do k = KS, KE-1
@@ -839,7 +845,7 @@ contains
 
           !$omp parallel do collapse(2) &
           !$omp private (ap)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
              ap = - FourOverThree * dt &
@@ -873,12 +879,13 @@ contains
           end do
           !$acc end kernels
 
+          !$acc wait
           call MATRIX_SOLVER_tridiagonal( KA, KS, KE-1, IA, IIS, IIE, JA, JJS, JJE, &
                                           a(:,:,:), b(:,:,:), c(:,:,:), TEND(:,:,:), &
                                           TEND2(:,:,:) )
 
           !$omp parallel do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
              do k = KS+1, KE-1
@@ -901,13 +908,13 @@ contains
        ! (y edge)
        if ( ATMOS_PHY_TB_SMG_horizontal ) then
           !$omp workshare
-          !$acc kernels
+          !$acc kernels async
           qflx_sgs_momx(:,:,:,ZDIR) = 0.0_RP
           !$acc end kernels
           !$omp end workshare nowait
        else
           !$omp do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE-1
@@ -935,7 +942,7 @@ contains
           i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
           !$omp do
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
              qflx_sgs_momx(KS-1,i,j,ZDIR) = 0.0_RP ! bottom boundary
@@ -951,7 +958,7 @@ contains
 
        ! (cell center)
        !$omp do collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
        do i = IIS, IIE+1
        do k = KS, KE
@@ -978,7 +985,7 @@ contains
 
        ! (z edge)
        !$omp do collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS,   IIE
        do k = KS, KE
@@ -1016,7 +1023,7 @@ contains
 
           !$omp parallel do collapse(2) &
           !$omp private(ap)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
 
@@ -1059,12 +1066,13 @@ contains
           end do
           !$acc end kernels
 
+          !$acc wait
           call MATRIX_SOLVER_tridiagonal( KA, KS, KE, IA, IIS, IIE, JA, JJS, JJE, &
                                           a(:,:,:), b(:,:,:), c(:,:,:), TEND(:,:,:), &
                                           TEND2(:,:,:) )
 
           !$omp parallel do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
              do k = KS, KE-1
@@ -1090,13 +1098,13 @@ contains
 
        if ( ATMOS_PHY_TB_SMG_horizontal ) then
           !$omp workshare
-          !$acc kernels
+          !$acc kernels async
           qflx_sgs_momy(:,:,:,ZDIR) = 0.0_RP
           !$acc end kernels
           !$omp end workshare nowait
        else
           !$omp do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE-1
@@ -1124,7 +1132,7 @@ contains
           i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
           !$omp do
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
              qflx_sgs_momy(KS-1,i,j,ZDIR) = 0.0_RP ! bottom boundary
@@ -1141,7 +1149,7 @@ contains
        ! (z edge)
        if ( .not. twoD ) then
        !$omp do collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS,   JJE
        do i = IIS-1, IIE
        do k = KS, KE
@@ -1174,7 +1182,7 @@ contains
        if ( twoD ) then
           i = IIS
           !$omp do
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE+1
           do k = KS, KE
 #ifdef DEBUG
@@ -1194,7 +1202,7 @@ contains
           !$omp end do nowait
        else
           !$omp do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE+1
           do i = IIS, IIE
           do k = KS, KE
@@ -1231,7 +1239,7 @@ contains
 
           !$omp parallel do collapse(2) &
           !$omp private(ap)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
 
@@ -1274,12 +1282,13 @@ contains
           end do
           !$acc end kernels
 
+          !$acc wait
           call MATRIX_SOLVER_tridiagonal( KA, KS, KE, IA, IIS, IIE, JA, JJS, JJE, &
                                           a(:,:,:), b(:,:,:), c(:,:,:), TEND(:,:,:), &
                                           TEND2(:,:,:) )
 
           !$omp parallel do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
              do k = KS, KE-1
@@ -1307,7 +1316,7 @@ contains
           if ( twoD ) then
              i = IIS
              !$omp do
-             !$acc kernels
+             !$acc kernels async
              !$acc loop private(flxz)
              do j = JJS, JJE
                 do k = KS+1, KE-1
@@ -1332,7 +1341,7 @@ contains
              !$omp end do nowait
           else
              !$omp do collapse(2)
-             !$acc kernels
+             !$acc kernels async
              do j = JJS, JJE
              !$acc loop private(flxz)
              do i = IIS, IIE
@@ -1366,7 +1375,7 @@ contains
           if ( .not. TwoD ) then
           ! MOMX : dfz/dy - dfy/dz
           !$omp do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           !$acc loop private(flxz)
           do i = IIS, IIE
@@ -1394,7 +1403,7 @@ contains
           if ( twoD ) then
              i = IIS
              !$omp do
-             !$acc kernels
+             !$acc kernels async
              !$acc loop private(flxz)
              do j = JJS, JJE
                 do k = KS, KE-1
@@ -1412,7 +1421,7 @@ contains
              !$omp end do nowait
           else
              !$omp do collapse(2)
-             !$acc kernels
+             !$acc kernels async
              do j = JJS, JJE
              !$acc loop private(flxz)
              do i = IIS, IIE
@@ -1445,7 +1454,7 @@ contains
 
 !OCL XFILL
           !$omp do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -1459,7 +1468,7 @@ contains
           if ( .not. twoD ) then
 !OCL XFILL
           !$omp do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -1473,7 +1482,7 @@ contains
 
 !OCL XFILL
           !$omp do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -1494,7 +1503,7 @@ contains
 
           !$omp parallel do collapse(2) &
           !$omp private (ap)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
              ap = - dt * 0.25_RP * ( DENS(KS,i,j)+DENS(KS+1,i,j) ) &
@@ -1546,7 +1555,7 @@ contains
           if ( .not. twoD ) then
              i = IIS
              !$omp parallel do
-             !$acc kernels
+             !$acc kernels async
              do j = JJS-1, JJE+1
                 do k = KS+1, KE-1
                    dd(k,i,j) = sqrt( ( ( POTT(k+1,i,j) - POTT(k-1,i,j) ) * J33G / ( FDZ(k) + FDZ(k-1) ) )**2 &
@@ -1567,7 +1576,7 @@ contains
 
              !$omp parallel do &
              !$omp private(flxz)
-             !$acc kernels
+             !$acc kernels async
              !$acc loop private(flxz)
              do j = JJS, JJE
                 do k = KS, KE-1
@@ -1585,7 +1594,7 @@ contains
              !$acc end kernels
           else
              !$omp parallel do collapse(2)
-             !$acc kernels
+             !$acc kernels async
              do j = JJS-1, JJE+1
              do i = IIS-1, IIE+1
                 do k = KS+1, KE-1
@@ -1614,7 +1623,7 @@ contains
 
              !$omp parallel do collapse(2) &
              !$omp private(flxz)
-             !$acc kernels
+             !$acc kernels async
              do j = JJS, JJE
              !$acc loop private(flxz)
              do i = IIS, IIE
@@ -1639,7 +1648,7 @@ contains
        else
 
           !$omp parallel do collapse(2)
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           do j = JJS, JJE
           do i = IIS, IIE
@@ -1682,7 +1691,7 @@ contains
              if ( twoD ) then
                 i = IIS
                 !$omp parallel do
-                !$acc kernels
+                !$acc kernels async
                 do j = JJS-1, JJE+1
                    do k = KS+1, KE-1
                       dd(k,i,j) = sqrt( ( ( QTRC(k+1,i,j,iq) - QTRC(k-1,i,j,iq) ) * J33G / ( FDZ(k) + FDZ(k-1) ) )**2 &
@@ -1703,7 +1712,7 @@ contains
 
                 !$omp parallel do collapse(2) &
                 !$omp private (flxz)
-                !$acc kernels
+                !$acc kernels async
                 do j = JJS, JJE
                 !$acc loop private(flxz)
                 do i = IIS, IIE
@@ -1723,7 +1732,7 @@ contains
                 !$acc end kernels
              else
                 !$omp parallel do collapse(2)
-                !$acc kernels
+                !$acc kernels async
                 do j = JJS-1, JJE+1
                 do i = IIS-1, IIE+1
                    do k = KS+1, KE-1
@@ -1752,7 +1761,7 @@ contains
 
                 !$omp parallel do collapse(2) &
                 !$omp private (flxz)
-                !$acc kernels
+                !$acc kernels async
                 do j = JJS, JJE
                 !$acc loop private(flxz)
                 do i = IIS, IIE
@@ -1777,7 +1786,7 @@ contains
           else
 
              !$omp parallel do collapse(2)
-             !$acc kernels
+             !$acc kernels async
 !OCL XFILL
              do j = JJS, JJE
              do i = IIS, IIE
@@ -1798,6 +1807,7 @@ contains
     iq = IUNDEF
 #endif
 
+    !$acc wait
     call FILE_HISTORY_in( TKE(:,:,:), 'TKE_SMG', 'turbulent kinetic energy (Smagorinsky)', 'm2/s2', fill_halo=.true. )
 
     !$acc end data

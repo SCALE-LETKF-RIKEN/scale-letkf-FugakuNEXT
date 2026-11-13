@@ -4,6 +4,10 @@
 !! @par Description
 !!          Common routines for turbulence
 !!
+!!          In OpenACC builds, the calc_tend_* procedures enqueue work on the default
+!!          async queue. Callers must wait before host access or work on another queue.
+!!          calc_strain_tensor and calc_flux_phi complete before releasing their data.
+!!
 !! @author Team SCALE
 !!
 !<
@@ -126,7 +130,7 @@ contains
     !$acc             WORK_V, WORK_Z, WORK_X, WORK_Y)
 
 #ifdef DEBUG
-    !$acc kernels
+    !$acc kernels async
     S33_C (:,:,:) = UNDEF
     S11_C (:,:,:) = UNDEF
     S22_C (:,:,:) = UNDEF
@@ -184,7 +188,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE+1
     do i = ISn1, IEp1
        VELZ_XY(KE,i,j) = 0.0_RP
@@ -195,7 +199,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JS-2, JE+2
     do i = ISn2, IEp2
     do k = KS+1, KE
@@ -213,7 +217,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JS-2, JE+2
     do i = ISn2, IEp2
 #ifdef DEBUG
@@ -230,7 +234,7 @@ contains
 
     if ( .not. twoD ) then
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE+1
     do i = IS-2, IE+1
     do k = KS, KE
@@ -248,7 +252,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE+1
     do i = ISn2, IEp1
        VELX_YZ(KE+1,i,j) = 0.0_RP
@@ -259,7 +263,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JS-2, JE+2
     do i = ISn1, IEp2
     do k = KS, KE
@@ -280,7 +284,7 @@ contains
     !$omp parallel do default(none)                   &
     !$omp shared(JS,JE,ISn1,IEp1,KS,KE,MOMY,DENS,VELY_ZX) &
     !$omp private(i,j,k) OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS-2, JE+1
     do i = ISn1, IEp1
     do k = KS, KE
@@ -298,7 +302,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JS-2, JE+1
     do i = ISn1, IEp1
        VELY_ZX(KE+1,i,j) = 0.0_RP
@@ -309,7 +313,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE+2
     do i = ISn2, IEp2
     do k = KS, KE
@@ -349,7 +353,7 @@ contains
        if ( .not. twoD ) then
        ! (y-z plane; u,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
        do k = KS, KE
@@ -366,7 +370,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
           WORK_X(KE+1,i,j) = 0.0_RP
@@ -379,7 +383,7 @@ contains
        end if
        ! (z-x plane; x,v,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
        do k = KS, KE
@@ -396,7 +400,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
           WORK_Y(KE+1,i,j) = 0.0_RP
@@ -410,7 +414,7 @@ contains
        ! dw/dz
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
        do k = KS+1, KE
@@ -429,7 +433,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
 #ifdef DEBUG
@@ -450,7 +454,7 @@ contains
        ! 1/2 * dw/dx
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
 !OCL LOOP_NOINTERCHANGE
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
@@ -480,7 +484,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
 #ifdef DEBUG
@@ -516,7 +520,7 @@ contains
 
        ! (y edge, u,y,w)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS  , JJE
        do i = IIS-1, IIE
        do k = KS, KE-1
@@ -541,7 +545,7 @@ contains
        ! 1/2 * dw/dy
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
        do k = KS+1, KE-1
@@ -569,7 +573,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
 #ifdef DEBUG
@@ -605,7 +609,7 @@ contains
 
        ! (x edge; x,v,w)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS  , IIE
        do k = KS, KE-1
@@ -633,7 +637,7 @@ contains
        ! u
        ! (x-y plane; x,y,w)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
        do k = KS, KE-1
@@ -653,7 +657,7 @@ contains
        ! WORK_X = VELX_YZ
        ! (z-x plane; x,v,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS-1, IIE+1
        do k = KS, KE
@@ -671,7 +675,7 @@ contains
 #endif
        ! (vertex; u,v,w)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS-1, IIE
        do k = KS, KE-1
@@ -701,7 +705,7 @@ contains
        ! du/dx
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
        do k = KS+1, KE-1
@@ -729,7 +733,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
 #ifdef DEBUG
@@ -771,7 +775,7 @@ contains
        ! 1/2 * du/dz
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
        do k = KS+1, KE-1
@@ -793,7 +797,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
 #ifdef DEBUG
@@ -820,7 +824,7 @@ contains
 #endif
        ! (y edge; u,y,w)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS  , JJE
        do i = IIS-1, IIE
        do k = KS, KE-1
@@ -844,7 +848,7 @@ contains
        ! 1/2 * du/dy
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
        do k = KS+1, KE-1
@@ -870,7 +874,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
 #ifdef DEBUG
@@ -912,7 +916,7 @@ contains
 
        ! (z edge; u,v,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS-1, IIE
        do k = KS+1, KE-1
@@ -935,7 +939,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS-1, IIE
 #ifdef DEBUG
@@ -977,7 +981,7 @@ contains
        ! v
        ! (x-y plane; x,y,w)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
        do k = KS, KE-1
@@ -998,7 +1002,7 @@ contains
        ! WORK_Y = VELY_ZX
        ! (vertex; u,v,w)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS-1, IIE
        do k = KS, KE-1
@@ -1025,7 +1029,7 @@ contains
        ! dv/dy
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
        do k = KS+1, KE-1
@@ -1052,7 +1056,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
 #ifdef DEBUG
@@ -1093,7 +1097,7 @@ contains
        ! 1/2 * dv/dx
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
        do k = KS+1, KE-1
@@ -1124,7 +1128,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IIS-1, IIE+1
 #ifdef DEBUG
@@ -1171,7 +1175,7 @@ contains
 #endif
        ! (z edge; u,v,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS-1, IIE
        do k = KS+1, KE-1
@@ -1196,7 +1200,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS-1, IIE
 #ifdef DEBUG
@@ -1235,7 +1239,7 @@ contains
        ! 1/2 * dv/dz
        ! (cell center; x,y,z)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
        do k = KS+1, KE-1
@@ -1257,7 +1261,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE+1
        do i = IISn1, IIEp1
 #ifdef DEBUG
@@ -1285,7 +1289,7 @@ contains
 
        ! (x edge; x,v,w)
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS-1, JJE
        do i = IIS  , IIE
        do k = KS, KE-1
@@ -1317,7 +1321,7 @@ contains
           !$omp parallel do default(none)                                            &
           !$omp shared(JJS,JJE,i,KS,KE,S11_C,S22_C,S33_C,S31_C,S12_C,S23_C,S2) &
           !$omp private(j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS-1, JJE+1
           do k = KS, KE
 #ifdef DEBUG
@@ -1334,7 +1338,7 @@ contains
           !$omp parallel do default(none)                                            &
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE,S11_C,S22_C,S33_C,S31_C,S12_C,S23_C,S2) &
           !$omp private(i,j,k) OMP_SCHEDULE_ collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JJS-1, JJE+1
           do i = IIS-1, IIE+1
           do k = KS, KE
@@ -1360,6 +1364,7 @@ contains
     enddo
     enddo
 
+    !$acc wait
     !$acc end data
 
     return
@@ -1421,7 +1426,7 @@ contains
     ! (x-y plane; x,y,w)
     if ( horizontal ) then
        !$omp parallel workshare
-       !$acc kernels
+       !$acc kernels async
 !XFILL
        qflx_phi(:,:,:,ZDIR) = 0.0_RP
        !$acc end kernels
@@ -1429,7 +1434,7 @@ contains
     else
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JJS,JJE,IIS,IIE,KS,KE,DENS,Kh,FACT,PHI,qflx_phi,GSQRT,RFDZ,J33G)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
        do i = IIS, IIE
        do k = KS, KE-1
@@ -1455,7 +1460,7 @@ contains
        i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
        !$omp parallel do
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
        do i = IIS, IIE
           qflx_phi(KS-1,i,j,ZDIR) = 0.0_RP
@@ -1473,7 +1478,7 @@ contains
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,DENS,Kh,FACT,PHI,qflx_phi,GSQRT,RFDX,J13G,I_UYZ) &
     !$omp shared(RCDZ)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS,   JJE
     do i = IIS-1, IIE
     do k = KS+1,  KE-1
@@ -1504,7 +1509,7 @@ contains
     i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JJS,   JJE
     do i = IIS-1, IIE
 #ifdef DEBUG
@@ -1549,7 +1554,7 @@ contains
     !$omp private(i,j,k) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,Kh,FACT,PHI,RFDY,DENS,qflx_phi,GSQRT,J23G,RCDZ) &
     !$omp shared(MAPF)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS-1, JJE
     do i = IIS,   IIE
     do k = KS+1,  KE-1
@@ -1580,7 +1585,7 @@ contains
     i = IUNDEF; j = IUNDEF; k = IUNDEF
 #endif
     !$omp parallel do
-    !$acc kernels
+    !$acc kernels async
     do j = JJS-1, JJE
     do i = IIS,   IIE
 #ifdef DEBUG
@@ -1626,12 +1631,13 @@ contains
                                         IIS, IIE, JJS, JJE, & ! (in)
                                         twoD ) ! (in)
 
+       !$acc wait
        call MATRIX_SOLVER_tridiagonal( KA, KS, KE, IA, IIS, IIE, JA, JJS, JJE, &
                                        a(:,:,:), b(:,:,:), c(:,:,:), TEND(:,:,:), &
                                        TEND2(:,:,:) )
 
        !$omp parallel do collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
        do i = IIS, IIE
           do k = KS, KE-1
@@ -1648,6 +1654,7 @@ contains
 
     end if
 
+    !$acc wait
     !$acc end data
 
     return
@@ -1695,7 +1702,7 @@ contains
        !$omp         fluxZ) &
        !$omp shared(JJS,JJE,i,KS,KE,I_UYW,I_UY, &
        !$omp        MOMZ_t_TB,QFLX_MOMZ,GSQRT,J13G,J23G,J33G,MAPF,RFDZ,RCDX,RCDY)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
 #ifndef _OPENACC
           do k = KS+1, KE-1
@@ -1752,7 +1759,7 @@ contains
        !$omp         fluxZ) &
        !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UYW,I_UY, &
        !$omp        MOMZ_t_TB,QFLX_MOMZ,GSQRT,J13G,J23G,J33G,MAPF,RFDZ,RCDX,RCDY)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
        do i = IIS, IIE
 #ifndef _OPENACC
@@ -1848,7 +1855,7 @@ contains
     !$omp        fluxZ) &
     !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UYZ,I_UVZ,I_UYW,I_UY,I_UV, &
     !$omp        MOMX_t_TB,QFLX_MOMX,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RFDX,RCDY)
-    !$acc kernels
+    !$acc kernels async
     do j = JJS, JJE
     do i = IIS, IIE
 #ifndef _OPENACC
@@ -1948,7 +1955,7 @@ contains
        !$omp         fluxZ) &
        !$omp shared(JJS,JJE,i,KS,KE,I_UVZ,I_UV, &
        !$omp        MOMY_t_TB,QFLX_MOMY,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RCDX,RFDY)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
 #ifndef _OPENACC
           do k = KS, KE-1
@@ -2005,7 +2012,7 @@ contains
        !$omp         fluxZ) &
        !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UVZ,I_UV, &
        !$omp        MOMY_t_TB,QFLX_MOMY,GSQRT,J13G,J23G,J33G,MAPF,RCDZ,RCDX,RFDY)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
        do i = IIS, IIE
 #ifndef _OPENACC
@@ -2115,7 +2122,7 @@ contains
        !$omp shared(JJS,JJE,i,KS,KE,I_UYZ,I_UY, &
        !$omp        phi_t_TB,QFLX_phi,GSQRT,MAPF, &
        !$omp        J23G,J33G,RCDZ,RCDX,RCDY)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
 #ifndef _OPENACC
           do k = KS, KE-1
@@ -2174,7 +2181,7 @@ contains
        !$omp shared(JJS,JJE,IIS,IIE,KS,KE,I_UYZ,I_UY, &
        !$omp        phi_t_TB,QFLX_phi,GSQRT,MAPF, &
        !$omp        J13G,J23G,J33G,RCDZ,RCDX,RCDY)
-       !$acc kernels
+       !$acc kernels async
        do j = JJS, JJE
        do i = IIS, IIE
 #ifndef _OPENACC

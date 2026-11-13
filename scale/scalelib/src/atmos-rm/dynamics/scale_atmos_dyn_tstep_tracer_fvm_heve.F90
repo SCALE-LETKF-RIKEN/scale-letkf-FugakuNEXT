@@ -130,7 +130,7 @@ contains
     !$acc      create(qflx_lo, qflx_anti)
 
 #ifdef DEBUG
-    !$acc kernels
+    !$acc kernels async
     qflx_hi(:,:,:,:) = UNDEF
     qflx_lo(:,:,:,:) = UNDEF
     !$acc end kernels
@@ -190,6 +190,7 @@ contains
 
     if ( FLAG_FCT_TRACER ) then
 
+       !$acc wait
        call ATMOS_DYN_FVM_fct( qflx_anti,        & ! (out)
                            QTRC0, DENS0, DENS,   & ! (in)
                            qflx_hi, qflx_lo,     & ! (in)
@@ -287,7 +288,7 @@ contains
              !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ &
              !$omp shared(JJS,JJE,IS,KS,KE,QTRCo,QTRC0,DENS0,dtl,qflx_hi,RCDZ,RCDY,MAPF) &
              !$omp shared(GSQRT,RHOQ_t,DENS) 
-             !$acc kernels
+             !$acc kernels async
              do j = JJS, JJE
              do k = KS, KE
                 QTRCo(k,IS,j) = ( QTRC0(k,IS,j) * DENS0(k,IS,j) * GSQRT(k,IS,j,I_XYZ) &
@@ -302,7 +303,7 @@ contains
              !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
              !$omp shared(JJS,JJE,IIS,IIE,KS,KE,QTRCo,QTRC0,DENS0,dtl,qflx_hi,RCDZ,RCDX,RCDY,MAPF) &
              !$omp shared(GSQRT,RHOQ_t,DENS) 
-             !$acc kernels
+             !$acc kernels async
              do j = JJS, JJE
              do i = IIS, IIE
              do k = KS, KE
@@ -322,6 +323,7 @@ contains
        enddo
 
     end if
+    !$acc wait
     !$acc end data
 
     return

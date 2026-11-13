@@ -365,7 +365,7 @@ contains
     !$acc      create(DENS0, MOMZ0, MOMX0, MOMY0, RHOT0, PROG0, mflx_hi_RK, tflx_hi_RK)
 
 #ifdef DEBUG
-    !$acc kernels
+    !$acc kernels async
     DENS_RK1(:,:,:) = UNDEF
     MOMZ_RK1(:,:,:) = UNDEF
     MOMX_RK1(:,:,:) = UNDEF
@@ -393,41 +393,41 @@ contains
 #endif
 
 #ifdef QUICKDEBUG
-    !$acc kernels
+    !$acc kernels async
     mflx_hi(   1:KS-1,:,:,:) = UNDEF
     mflx_hi(KE+1:KA  ,:,:,:) = UNDEF
     !$acc end kernels
 #endif
 
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     DENS0(:,:,:) = DENS(:,:,:)
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     MOMZ0(:,:,:) = MOMZ(:,:,:)
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     MOMX0(:,:,:) = MOMX(:,:,:)
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     MOMY0(:,:,:) = MOMY(:,:,:)
     !$acc end kernels
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
     RHOT0(:,:,:) = RHOT(:,:,:)
     !$acc end kernels
     if ( VA > 0 ) then
-    !$acc kernels
+    !$acc kernels async
 !OCL XFILL
        PROG0(:,:,:,:) = PROG(:,:,:,:)
     !$acc end kernels
     end if
 
     if ( BND_W .and. (.not. TwoD) ) then
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do k = KS, KE
           mflx_hi_RK(k,IS-1,j,2,:) = mflx_hi(k,IS-1,j,2)
@@ -436,7 +436,7 @@ contains
        !$acc end kernels
     end if
     if ( BND_E .and. (.not. TwoD) ) then
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do k = KS, KE
           mflx_hi_RK(k,IE,j,2,:) = mflx_hi(k,IE,j,2)
@@ -445,7 +445,7 @@ contains
        !$acc end kernels
     end if
     if ( BND_S ) then
-       !$acc kernels
+       !$acc kernels async
        do i = IS, IE
        do k = KS, KE
           mflx_hi_RK(k,i,JS-1,3,:) = mflx_hi(k,i,JS-1,3)
@@ -454,7 +454,7 @@ contains
        !$acc end kernels
     end if
     if ( BND_N ) then
-       !$acc kernels
+       !$acc kernels async
        do i = IS, IE
        do k = KS, KE
           mflx_hi_RK(k,i,JE,3,:) = mflx_hi(k,i,JE,3)
@@ -474,6 +474,9 @@ contains
     call PROF_rapstart("DYN_RK4",3)
 
     dtrk = dt / 2.0_RP
+
+    ! Complete the snapshots before synchronous short-step implementations read them.
+    !$acc wait
 
     call ATMOS_DYN_tstep( DENS_RK1, MOMZ_RK1, MOMX_RK1, MOMY_RK1, RHOT_RK1, & ! [OUT]
                           PROG_RK1,                                         & ! [OUT]
@@ -654,7 +657,7 @@ contains
 
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(JS,JE,IS,IE,KS,KE,DENS,DENS_RK1,DENS_RK2,DENS_RK3,DENS0)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -668,7 +671,7 @@ contains
     enddo
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE-1
@@ -682,7 +685,7 @@ contains
     enddo
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -696,7 +699,7 @@ contains
     enddo
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -713,7 +716,7 @@ contains
     !$omp parallel do default(none) &
     !$omp shared(JS,JE,IS,IE,KS,KE,RHOT,RHOT_RK1,RHOT_RK2,RHOT_RK3,RHOT0) &
     !$omp private(i,j,k) OMP_SCHEDULE_ collapse(2)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -727,7 +730,7 @@ contains
     enddo
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async
     do iv = 1, VA
     do j = JS, JE
     do i = IS, IE
@@ -750,7 +753,7 @@ contains
                                   PROG0,                             & ! [IN]
                                   BND_W, BND_E, BND_S, BND_N, TwoD   ) ! [IN]
 
-    !$acc kernels
+    !$acc kernels async
     do n = 1, 3
     do j = JS, JE
     do i = IS, IE
@@ -765,7 +768,7 @@ contains
     enddo
     !$acc end kernels
 
-    !$acc kernels
+    !$acc kernels async
     do n = 1, 3
     do j = JS, JE
     do i = IS, IE
@@ -780,6 +783,7 @@ contains
     enddo
     !$acc end kernels
 
+    !$acc wait
     !$acc end data
 
     call PROF_rapend  ("DYN_RK4",3)

@@ -996,14 +996,14 @@ contains
 
     if ( update_flag ) then
 
-       !$acc kernels
+       !$acc kernels async
        CCN(:,:,:) = CCN_t(:,:,:) * dt_MP
        !$acc end kernels
 
        select case ( MP_model_id )
        case ( I_KESSLER )
           !$omp workshare
-          !$acc kernels
+          !$acc kernels async
 !OCL XFILL
           TEMP1(:,:,:) = TEMP(:,:,:)
 !OCL XFILL
@@ -1015,6 +1015,7 @@ contains
           !$acc end kernels
           !$omp end workshare
 
+          !$acc wait
           call ATMOS_PHY_MP_kessler_adjustment( &
                KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                DENS(:,:,:), PRES(:,:,:), dt_MP,                                      & ! [IN]
@@ -1022,7 +1023,7 @@ contains
                RHOE_t(:,:,:), EVAPORATE(:,:,:)                                       ) ! [OUT]
 
           !$omp parallel do collapse(3)
-          !$acc kernels
+          !$acc kernels async
           do iq = QS_MP, QE_MP
           do j = JS, JE
           do i = IS, IE
@@ -1035,7 +1036,7 @@ contains
           !$acc end kernels
 
           !$omp parallel do collapse(2)
-          !$acc kernels
+          !$acc kernels async
           do j = JS, JE
           do i = IS, IE
           do k = KS, KE
@@ -1102,7 +1103,7 @@ contains
           if( flg_lt ) then
 !OCL XFILL
              !$omp parallel do collapse(3)
-             !$acc parallel
+             !$acc parallel async
              !$acc loop collapse(3)
              do iq = QS_LT, QE_LT
              do j = JS, JE
@@ -1115,6 +1116,7 @@ contains
              end do
              !$acc end parallel
 
+             !$acc wait
              call ATMOS_PHY_LT_sato2019_select_dQCRG_from_LUT( &
                   KA, KS, KE, IA, IS, IE, JA, JS, JE, & ! [IN]
                   QLA,                                & ! [IN]
@@ -1185,6 +1187,7 @@ contains
 
        case ( I_SN14 )
 
+          !$acc wait
           !$acc update host(DENS,W,QTRC(:,:,:,QS_MP:QE_MP),PRES,TEMP,Qdry,CPtot,CVtot,CCN)
           if( flg_lt ) then
              call ATMOS_PHY_LT_sato2019_select_dQCRG_from_LUT( &
@@ -1193,6 +1196,7 @@ contains
                   TEMP(:,:,:), DENS(:,:,:),           & ! [IN]
                   QTRC(:,:,:,QLS:QLE),                & ! [IN]
                   dqcrg(:,:,:), beta_crg(:,:,:)       ) ! [OUT]
+             !$acc wait
              !$acc update host(dqcrg,beta_crg,QTRC(:,:,:,QS_LT:QE_LT))
              call ATMOS_PHY_MP_sn14_tendency( &
                   KA, KS, KE, IA, IS, IE, JA, JS, JE, &
@@ -1203,18 +1207,22 @@ contains
                   QTRC(:,:,:,QS_LT:QE_LT),                                                                      & ! [IN:optional]
                   QSPLT_in(:,:,:,:), Sarea(:,:,:,:),                                                            & ! [OUT:optional]
                   RHOC_t_MP(:,:,:,QS_LT:QE_LT)                                                                  ) ! [OUT:optional]
+             !$acc wait
              !$acc update device(QSPLT_in,Sarea,RHOC_t_MP(:,:,:,QS_LT:QE_LT))
           else
+             !$acc wait
              call ATMOS_PHY_MP_sn14_tendency( &
                   KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                   DENS(:,:,:), W(:,:,:), QTRC(:,:,:,QS_MP:QE_MP), PRES(:,:,:), TEMP(:,:,:),                     & ! [IN]
                   Qdry(:,:,:), CPtot(:,:,:), CVtot(:,:,:), CCN(:,:,:), dt_MP, REAL_CZ(:,:,:), REAL_FZ(:,:,:),   & ! [IN]
                   RHOQ_t_MP(:,:,:,QS_MP:QE_MP), RHOE_t(:,:,:), CPtot_t(:,:,:), CVtot_t(:,:,:), EVAPORATE(:,:,:) ) ! [OUT]
           endif
+          !$acc wait
           !$acc update device(RHOQ_t_MP(:,:,:,QS_MP:QE_MP),RHOE_t,CPtot_t,CVtot_t,EVAPORATE)
 
        case ( I_SUZUKI10 )
 
+          !$acc wait
           !$acc update host(DENS,PRES,TEMP,QTRC(:,:,:,QS_MP:QE_MP),QDRY,CPtot,CVtot,CCN)
           if( flg_lt ) then
              call ATMOS_PHY_LT_sato2019_select_dQCRG_from_LUT( &
@@ -1223,6 +1231,7 @@ contains
                   TEMP(:,:,:), DENS(:,:,:),           & ! [IN]
                   QTRC(:,:,:,QLS:QLE),                & ! [IN]
                   dqcrg(:,:,:), beta_crg(:,:,:)       ) ! [OUT]
+             !$acc wait
              !$acc update host(dqcrg,beta_crg,QTRC(:,:,:,QS_LT:QE_LT))
              call ATMOS_PHY_MP_suzuki10_tendency( KA, KS,  KE, IA, IS, IE, JA, JS, JE, KIJMAX, &
                                                   dt_MP,                                  & ! [IN]
@@ -1239,8 +1248,10 @@ contains
                                                   QTRC(:,:,:,QS_LT:QE_LT),                & ! [IN:optional]
                                                   QSPLT_in(:,:,:,:), Sarea(:,:,:,:),      & ! [OUT:optional]
                                                   RHOC_t_MP(:,:,:,QS_LT:QE_LT)            ) ! [OUT:optional]
+             !$acc wait
              !$acc update device(QSPLT_in,Sarea,RHOC_t_MP(:,:,:,QS_LT:QE_LT))
           else
+             !$acc wait
              call ATMOS_PHY_MP_suzuki10_tendency( KA, KS,  KE, IA, IS, IE, JA, JS, JE, KIJMAX, &
                                                   dt_MP,                                  & ! [IN]
                                                   DENS(:,:,:),  PRES(:,:,:), TEMP(:,:,:), & ! [IN]
@@ -1252,11 +1263,13 @@ contains
                                                   CPtot_t(:,:,:), CVtot_t(:,:,:),         & ! [OUT]
                                                   EVAPORATE(:,:,:)                        ) ! [OUT]
           endif
+          !$acc wait
           !$acc update device(RHOQ_t_MP(:,:,:,QS_MP:QE_mp),RHOE_t,CPtot_t,CVtot_t,EVAPORATE)
 
           call ATMOS_PHY_MP_suzuki10_qtrc2qhyd( KA, KS, KE, IA, IS, IE, JA, JS, JE, &  ! [IN]
                                                 QTRC(:,:,:,QS_MP+1:QE_MP),          &  ! [IN]
                                                 Qe(:,:,:,:)                         )  ! [OUT]
+          !$acc wait
           !$acc update device(Qe)
 
           do iq = 1, N_HYD
@@ -1273,6 +1286,7 @@ contains
              call ATMOS_PHY_MP_suzuki10_crg_qtrc2qhyd( KA, KS, KE, IA, IS, IE, JA, JS, JE, &  ! [IN]
                                                        QTRC(:,:,:,QS_LT:QE_LT),            &  ! [IN]
                                                        Qecrg(:,:,:,:)                      )  ! [OUT]
+             !$acc wait
              !$acc update device(Qecrg)
 
              do iq = 1, N_HYD
@@ -1308,7 +1322,7 @@ contains
 
 
        !$omp parallel do collapse(2)
-       !$acc parallel
+       !$acc parallel async
        !$acc loop collapse(2)
        do j = JS, JE
        do i = IS, IE
@@ -1339,17 +1353,18 @@ contains
                 hist_vterm_idx(iq) = ih
              end if
           end do
+          !$acc wait
           !$acc update device(hist_vterm_idx)
           if ( ih > 0 ) then
              allocate( vterm_hist(KA,IA,JA,ih) )
              !$acc enter data create(vterm_hist)
-             !$acc kernels
+             !$acc kernels async
              vterm_hist(:,:,:,:) = 0.0_RP
              !$acc end kernels
           end if
 
 #ifdef _OPENACC
-          !$acc parallel loop collapse(3)
+          !$acc parallel loop collapse(3) async
           do j = JS, JE
           do i = IS, IE
           do k = KS, KE
@@ -1380,7 +1395,7 @@ contains
           !$omp         DENS2,TEMP2,PRES2,CPtot2,CVtot2,RHOE,RHOE2,RHOQ,RHOQ2, &
           !$omp         RHOQ2_crg,mflux_crg,sflux_crg,eflux_crg, &
           !$omp         vterm,mflux,sflux,eflux,FLX_hydro,CP_t,CV_t)
-          !$acc parallel
+          !$acc parallel async
           !$acc loop collapse(2) gang
           do j = JS, JE
           do i = IS, IE
@@ -1397,7 +1412,7 @@ contains
           end do
           !$acc end parallel
 
-          !$acc parallel loop collapse(3)
+          !$acc parallel loop collapse(3) async
           do j = JS, JE
           do i = IS, IE
 #endif
@@ -1416,7 +1431,7 @@ contains
           end do
           !$acc end parallel loop
 
-          !$acc parallel loop collapse(4)
+          !$acc parallel loop collapse(4) async
           do j = JS, JE
           do i = IS, IE
 #endif
@@ -1433,7 +1448,7 @@ contains
 #endif
              if( flg_lt ) then
 #ifdef _OPENACC
-                !$acc parallel loop collapse(4)
+                !$acc parallel loop collapse(4) async
                 do j = JS, JE
                 do i = IS, IE
 #endif
@@ -1449,7 +1464,7 @@ contains
 #endif
              endif
 #ifdef _OPENACC
-          !$acc parallel loop collapse(2)
+          !$acc parallel loop collapse(2) async
           do j = JS, JE
           do i = IS, IE
 #endif
@@ -1459,7 +1474,7 @@ contains
 #ifdef _OPENACC
           end do
           end do
-          !$acc kernels loop collapse(2)
+          !$acc kernels loop collapse(2) async
           do j = JS, JE
           do i = IS, IE
 #endif
@@ -1475,7 +1490,7 @@ contains
                 select case ( MP_model_id )
                 case ( I_KESSLER )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2) gang
+                   !$acc parallel loop collapse(2) gang async
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1491,7 +1506,7 @@ contains
 #endif
                 case ( I_TOMITA08 )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2) gang
+                   !$acc parallel loop collapse(2) gang async
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1506,7 +1521,7 @@ contains
 #endif
                   case ( I_SN14 )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2) gang
+                   !$acc parallel loop collapse(2) gang async
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1521,7 +1536,7 @@ contains
 #endif
                   case ( I_SUZUKI10 )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2) gang
+                   !$acc parallel loop collapse(2) gang async
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1537,7 +1552,7 @@ contains
                    ! do nothing
                 case default
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(4)
+                   !$acc parallel loop collapse(4) async
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1555,7 +1570,7 @@ contains
 
                 ! store to history output
 #ifdef _OPENACC
-                !$acc parallel loop collapse(2)
+                !$acc parallel loop collapse(2) async
                 do j = JS, JE
                 do i = IS, IE
 #endif
@@ -1579,7 +1594,7 @@ contains
                 case ( I_UPWIND )
 #ifdef _OPENACC
                    ! RHOQ2 at the entry is passed in another array (RHOQ0_sed)
-                   !$acc parallel loop collapse(4)
+                   !$acc parallel loop collapse(4) async
                    do j = JS, JE
                    do i = IS, IE
                    do iq = QS_MP+1, QE_MP
@@ -1590,7 +1605,7 @@ contains
                    end do
                    end do
                    !$acc end parallel loop
-                   !$acc parallel loop collapse(2) gang
+                   !$acc parallel loop collapse(2) gang async
                    do j = JS, JE
                    do i = IS, IE
                       call ATMOS_PHY_MP_precipitation_upwind( &
@@ -1609,6 +1624,7 @@ contains
                    end do
                    !$acc end parallel loop
 #else
+                   !$acc wait
                    call ATMOS_PHY_MP_precipitation_upwind( &
                         KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
                         TEMP2(:), vterm(:,:),   & ! [IN]
@@ -1623,7 +1639,7 @@ contains
 #endif
                 case ( I_SEMILAG )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2) gang
+                   !$acc parallel loop collapse(2) gang async
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1646,7 +1662,7 @@ contains
 #endif
                 case default
 #ifdef _OPENACC
-                !$acc parallel loop collapse(2)
+                !$acc parallel loop collapse(2) async
                 do j = JS, JE
                 do i = IS, IE
 #endif
@@ -1655,7 +1671,7 @@ contains
                 end do
                 end do
                 !$acc end parallel loop
-                !$acc parallel loop collapse(2)
+                !$acc parallel loop collapse(2) async
                 do j = JS, JE
                 do i = IS, IE
 #endif
@@ -1674,7 +1690,7 @@ contains
                    case ( I_UPWIND )
 #ifdef _OPENACC
                    ! as for RHOQ2 above, RHOQ2_crg at the entry is passed in another array
-                   !$acc parallel loop collapse(4)
+                   !$acc parallel loop collapse(4) async
                    do j = JS, JE
                    do i = IS, IE
                    do iq = QS_LT, QE_LT
@@ -1685,7 +1701,7 @@ contains
                    end do
                    end do
                    !$acc end parallel loop
-                   !$acc parallel loop collapse(2) gang
+                   !$acc parallel loop collapse(2) gang async
                    do j = JS, JE
                    do i = IS, IE
                       call ATMOS_PHY_MP_precipitation_upwind( &
@@ -1704,6 +1720,7 @@ contains
                    end do
                    !$acc end parallel loop
 #else
+                      !$acc wait
                       call ATMOS_PHY_MP_precipitation_upwind( &
                            KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
                            TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
@@ -1718,7 +1735,7 @@ contains
 #endif
                    case ( I_SEMILAG )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2) gang
+                   !$acc parallel loop collapse(2) gang async
                    do j = JS, JE
                    do i = IS, IE
 #endif
@@ -1741,7 +1758,7 @@ contains
 #endif
                    case default
 #ifdef _OPENACC
-                  !$acc parallel loop collapse(2)
+                  !$acc parallel loop collapse(2) async
                   do j = JS, JE
                   do i = IS, IE
 #endif
@@ -1751,7 +1768,7 @@ contains
                   end do
                   !$acc end parallel loop
 
-                  !$acc parallel loop collapse(2)
+                  !$acc parallel loop collapse(2) async
                   do j = JS, JE
                   do i = IS, IE
 #endif
@@ -1767,7 +1784,7 @@ contains
                 endif
 
 #ifdef _OPENACC
-                !$acc parallel loop collapse(3)
+                !$acc parallel loop collapse(3) async
                 do j = JS, JE
                 do i = IS, IE
 #endif
@@ -1779,7 +1796,7 @@ contains
                 end do
                 !$acc end parallel loop
 
-                !$acc parallel loop collapse(3)
+                !$acc parallel loop collapse(3) async
                 do j = JS, JE
                 do i = IS, IE
 #endif
@@ -1791,7 +1808,7 @@ contains
                 end do
                 !$acc end parallel loop
 
-                !$acc parallel loop collapse(2)
+                !$acc parallel loop collapse(2) async
                 do j = JS, JE
                 do i = IS, IE
 #endif
@@ -1808,7 +1825,7 @@ contains
              enddo ! step
 
 #ifdef _OPENACC
-             !$acc parallel loop collapse(2)
+             !$acc parallel loop collapse(2) async
              do j = JS, JE
              do i = IS, IE
 #endif
@@ -1819,7 +1836,7 @@ contains
              end do
              !$acc end parallel loop
 
-             !$acc parallel loop collapse(3)
+             !$acc parallel loop collapse(3) async
              do j = JS, JE
              do i = IS, IE
 #endif
@@ -1832,7 +1849,7 @@ contains
              end do
              !$acc end parallel loop
 
-             !$acc parallel loop collapse(3)
+             !$acc parallel loop collapse(3) async
              do j = JS, JE
              do i = IS, IE
 #endif
@@ -1860,7 +1877,7 @@ contains
             end do
             !$acc end parallel loop
 
-            !$acc parallel loop collapse(4)
+            !$acc parallel loop collapse(4) async
             do j = JS, JE
             do i = IS, IE
 #endif
@@ -1878,7 +1895,7 @@ contains
 
              if( flg_lt ) then
 #ifdef _OPENACC
-             !$acc parallel loop collapse(4)
+             !$acc parallel loop collapse(4) async
              do j = JS, JE
              do i = IS, IE
 #endif
@@ -1896,7 +1913,7 @@ contains
              endif
 
 #ifdef _OPENACC
-          !$acc parallel loop collapse(2) gang
+          !$acc parallel loop collapse(2) gang async
           do j = JS, JE
           do i = IS, IE
 #endif
@@ -1913,14 +1930,17 @@ contains
 
           ! history output
           if ( allocated( vterm_hist ) ) then
+             !$acc wait
              !$acc update host(vterm_hist)
           end if
           do iq = QS_MP+1, QE_MP
              if ( hist_vterm_idx(iq) > 0 ) then
+                !$acc wait
                 call FILE_HISTORY_put( hist_vterm_id(iq), vterm_hist(:,:,:,hist_vterm_idx(iq)) )
              end if
           end do
           if ( allocated( vterm_hist ) ) then
+             !$acc wait
              !$acc exit data delete(vterm_hist)
              deallocate( vterm_hist )
           end if
@@ -1930,7 +1950,7 @@ contains
        end if
 
 !OCL XFILL
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
           precip(i,j) = SFLX_rain(i,j) + SFLX_snow(i,j)
@@ -1938,6 +1958,7 @@ contains
        end do
        !$acc end kernels
 
+       !$acc wait
        call FILE_HISTORY_in( SFLX_rain(:,:),   'RAIN_MP',   'surface rain rate by MP',          'kg/m2/s',  fill_halo=.true. )
        call FILE_HISTORY_in( SFLX_snow(:,:),   'SNOW_MP',   'surface snow rate by MP',          'kg/m2/s',  fill_halo=.true. )
        call FILE_HISTORY_in( precip   (:,:),   'PREC_MP',   'surface precipitation rate by MP', 'kg/m2/s',  fill_halo=.true. )
@@ -1972,7 +1993,7 @@ contains
     !$omp shared(KS,KE,IS,IE,JS,JE, &
     !$omp        DENS_t_MP,MOMZ_t_MP,RHOU_t_MP,RHOV_t_MP,RHOH_MP, &
     !$omp        DENS_t,MOMZ_t,RHOU_t,RHOV_t,RHOH)
-    !$acc parallel
+    !$acc parallel async
     !$acc loop collapse(2)
     do j = JS, JE
     do i = IS, IE
@@ -1991,7 +2012,7 @@ contains
     !$omp parallel do default(none) OMP_SCHEDULE_ collapse(3) &
     !$omp private(iq,i,j,k) &
     !$omp shared(QS_MP,QE_MP,JS,JE,IS,IE,KS,KE,RHOQ_t,RHOQ_t_MP)
-    !$acc parallel
+    !$acc parallel async
     !$acc loop collapse(3)
     do iq = QS_MP, QE_MP
     do j = JS, JE
@@ -2006,7 +2027,7 @@ contains
 
     if( flg_lt ) then
        !$omp parallel do collapse(3)
-       !$acc parallel
+       !$acc parallel async
        !$acc loop collapse(3)
        do iq = QS_LT, QE_LT
        do j = JS, JE
@@ -2022,6 +2043,7 @@ contains
     endif
 
     if ( STATISTICS_checktotal ) then
+       !$acc wait
        call STATISTICS_total( KA, KS, KE, IA, IS, IE, JA, JS, JE, &
                               DENS_t_MP(:,:,:), 'DENS_t_MP',       &
                               ATMOS_GRID_CARTESC_REAL_VOL(:,:,:),  &
@@ -2047,6 +2069,7 @@ contains
        enddo
     endif
 
+    !$acc wait
     !$acc end data
     !$acc end data
 

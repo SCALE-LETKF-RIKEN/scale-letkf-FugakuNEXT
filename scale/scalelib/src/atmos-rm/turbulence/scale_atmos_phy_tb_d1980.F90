@@ -482,6 +482,7 @@ contains
                                GSQRT, J13G, J23G, J33G, MAPF, & ! (in)
                                IIS, IIE, JJS, JJE, & ! (in)
                                twoD ) ! (in)
+                               !$acc wait
 
           !$omp parallel do &
           !$omp private(ap)
@@ -613,6 +614,7 @@ contains
                                qflx_sgs_momx, & ! (in)
                                GSQRT, J13G, J23G, J33G, MAPF, & ! (in)
                                IIS, IIE, JJS, JJE ) ! (in)
+                               !$acc wait
 
           !$omp parallel do &
           !$omp private(ap)
@@ -757,6 +759,7 @@ contains
                                GSQRT, J13G, J23G, J33G, MAPF, & ! (in)
                                IIS, IIE, JJS, JJE, & ! (in)
                                twoD ) ! (in)
+                               !$acc wait
 
           !$omp parallel do &
           !$omp private(ap)
@@ -940,6 +943,7 @@ contains
                            GSQRT, J13G, J23G, J33G, MAPF, & ! (in)
                            IIS, IIE, JJS, JJE,            & ! (in)
                            twoD                           ) ! (in)
+                           !$acc wait
        !$omp parallel do
        do j = JJS, JJE
        do i = IIS, IIE

@@ -864,6 +864,7 @@ contains
        call PROF_rapend  ('COMM_vars_pers', 2)
     else
        call PROF_rapstart('COMM_vars', 2)
+       !$acc wait
        if ( COMM_USE_MPI_ONESIDED ) then
           call vars_3D_mpi_onesided(var, gid_, vid)
        else
@@ -903,6 +904,7 @@ contains
        call PROF_rapend  ('COMM_vars_pers', 2)
     else
        call PROF_rapstart('COMM_vars', 2)
+       !$acc wait
        if ( COMM_USE_MPI_ONESIDED ) then
           call vars8_3D_mpi_onesided(var, gid_, vid)
        else
@@ -988,6 +990,7 @@ contains
     end if
 
     call PROF_rapstart('COMM_vars', 2)
+    !$acc wait
     if ( COMM_USE_MPI_ONESIDED ) then
        call vars_2D_mpi_onesided(var, gid_, vid)
     else
@@ -1021,6 +1024,7 @@ contains
     end if
 
     call PROF_rapstart('COMM_vars', 2)
+    !$acc wait
     if ( COMM_USE_MPI_ONESIDED ) then
        call vars8_2D_mpi_onesided(var, gid_, vid)
     else
@@ -4772,8 +4776,8 @@ contains
        call packWE_3D( KA, IA, IS, IE, JA, JS, JE, &
                        IHALO, &
                        var, gid, ginfo(gid)%packid(vid))
-       !$acc wait
     end if
+    !$acc wait
 
     call MPI_STARTALL(ginfo(gid)%preq_cnt(vid), ginfo(gid)%preq_list(1:ginfo(gid)%preq_cnt(vid),vid), ierr)
 

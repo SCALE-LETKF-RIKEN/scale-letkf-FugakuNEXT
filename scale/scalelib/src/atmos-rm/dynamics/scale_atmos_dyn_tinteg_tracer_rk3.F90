@@ -165,7 +165,7 @@ contains
     ! Start RK
     !------------------------------------------------------------------------
 
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE+1
     do i = max(IS-1,1), min(IE+1,IA)
     do k = KS, KE
@@ -197,7 +197,7 @@ contains
     call COMM_wait ( QTRC_RK1(:,:,:), I_COMM_RK1, .false. )
 
 
-    !$acc kernels
+    !$acc kernels async
     do j = JS-1, JE+1
     do i = max(IS-1,1), min(IE+1,IA)
     do k = KS, KE
@@ -242,6 +242,7 @@ contains
          dtrk, & ! (in)
          FLAG_FCT_TRACER, FLAG_FCT_ALONG_STREAM ) ! (in)
 
+    !$acc wait
     !$acc end data
 
     return

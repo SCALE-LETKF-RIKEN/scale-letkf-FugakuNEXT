@@ -319,6 +319,7 @@ contains
        !$acc      create(QFLX_MOMZ, QFLX_MOMX, QFLX_MOMY, QFLX_RHOT, &
        !$acc             Nu, Ri, Pr, N2, tend)
 
+       !$acc wait
        call ATMOS_vars_get_diagnostic( "N2", N2 )
 
        select case( ATMOS_PHY_TB_TYPE )
@@ -333,12 +334,13 @@ contains
                                  GSQRT, J13G, J23G, J33G, MAPF,           & ! [IN]
                                  dt_TB                                    ) ! [IN]
        case( 'D1980' )
-          !$acc kernels
+          !$acc kernels async
           MOMZ_t_TB(:,:,:)   = 0.0_RP
           MOMX_t_TB(:,:,:)   = 0.0_RP
           MOMY_t_TB(:,:,:)   = 0.0_RP
           RHOT_t_TB(:,:,:)   = 0.0_RP
           !$acc end kernels
+          !$acc wait
           !$acc update host(MOMZ,MOMX,MOMY,RHOT,DENS,QTRC,N2,SFLX_MW,SFLX_MU,SFLX_MV,SFLX_SH,SFLX_Q)
           call ATMOS_PHY_TB_d1980( QFLX_MOMZ, QFLX_MOMX, QFLX_MOMY,        & ! [OUT]
                                    QFLX_RHOT, QFLX_RHOQ,                   & ! [OUT]
@@ -349,14 +351,16 @@ contains
                                    SFLX_SH, SFLX_Q,                        & ! [IN]
                                    GSQRT, J13G, J23G, J33G, MAPF,          & ! [IN]
                                    dt_TB                                   ) ! [IN]
+          !$acc wait
           !$acc update device(QFLX_MOMZ,QFLX_MOMX,QFLX_MOMY,QFLX_RHOT,QFLX_RHOQ,RHOQ_t_TB,Nu,Ri,Pr)
        case( 'DNS' )
-          !$acc kernels
+          !$acc kernels async
           MOMZ_t_TB(:,:,:)   = 0.0_RP
           MOMX_t_TB(:,:,:)   = 0.0_RP
           MOMY_t_TB(:,:,:)   = 0.0_RP
           RHOT_t_TB(:,:,:)   = 0.0_RP
           !$acc end kernels
+          !$acc wait
           !$acc update host(MOMZ,MOMX,MOMY,RHOT,DENS,QTRC,N2,SFLX_MW,SFLX_MU,SFLX_MV,SFLX_SH,SFLX_Q)
           call ATMOS_PHY_TB_dns( QFLX_MOMZ, QFLX_MOMX, QFLX_MOMY,        & ! [OUT]
                                  QFLX_RHOT, QFLX_RHOQ,                   & ! [OUT]
@@ -367,6 +371,7 @@ contains
                                  SFLX_SH, SFLX_Q,                        & ! [IN]
                                  GSQRT, J13G, J23G, J33G, MAPF,          & ! [IN]
                                  dt_TB                                   ) ! [IN]
+          !$acc wait
           !$acc update device(QFLX_MOMZ,QFLX_MOMX,QFLX_MOMY,QFLX_RHOT,QFLX_RHOQ,RHOQ_t_TB,Nu,Ri,Pr)
        end select
 
@@ -382,7 +387,7 @@ contains
                                IIS, IIE, JJS, JJE, & ! (in)
                                twoD ) ! (in)
           !$omp parallel do
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE-1
@@ -398,7 +403,7 @@ contains
                                GSQRT, J13G, J23G, J33G, MAPF, & ! (in)
                                IIS, IIE, JJS, JJE ) ! (in)
           !$omp parallel do
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -415,7 +420,7 @@ contains
                                IIS, IIE, JJS, JJE, & ! (in)
                                twoD ) ! (in)
           !$omp parallel do
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -431,7 +436,7 @@ contains
                                IIS, IIE, JJS, JJE, & ! (in)
                                twoD ) ! (in)
           !$omp parallel do
-          !$acc kernels
+          !$acc kernels async
           do j = JJS, JJE
           do i = IIS, IIE
           do k = KS, KE
@@ -451,7 +456,7 @@ contains
                                  twoD ) ! (in)
 
              !$omp parallel do
-             !$acc kernels
+             !$acc kernels async
              do j = JJS, JJE
              do i = IIS, IIE
              do k = KS, KE
@@ -467,6 +472,7 @@ contains
        end do
 
 
+       !$acc wait
        call FILE_HISTORY_in( NU (:,:,:), 'NU',  'eddy viscosity',           'm2/s' , fill_halo=.true. )
        call FILE_HISTORY_in( Ri (:,:,:), 'Ri',  'Richardson number',        'NIL'  , fill_halo=.true. )
        call FILE_HISTORY_in( Pr (:,:,:), 'Pr',  'Prantle number',           'NIL'  , fill_halo=.true. )
@@ -570,7 +576,7 @@ contains
 
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(JS,JE,IS,IE,KS,KE,MOMZ_t,MOMZ_t_TB,MOMY_t,MOMY_t_TB,RHOT_t,RHOT_t_TB)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -584,7 +590,7 @@ contains
     if ( .not. twoD ) then
     !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
     !$omp shared(JS,JE,IS,IE,KS,KE,MOMX_t,MOMX_t_TB)
-    !$acc kernels
+    !$acc kernels async
     do j = JS, JE
     do i = IS, IE
     do k = KS, KE
@@ -601,7 +607,7 @@ contains
 
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
 !       !$acc kernels async(iq)
-       !$acc kernels
+       !$acc kernels async
        do j  = JS, JE
        do i  = IS, IE
        do k  = KS, KE
@@ -616,13 +622,13 @@ contains
     !$acc data create(qflx_x, qflx_y)
 
     if ( monit_west > 0 ) then
-       !$acc kernels
+       !$acc kernels async
        qflx_x(:,:) = 0.0_RP
        !$acc end kernels
        if ( .not. PRC_HAS_W ) then
           do iq = 1, QA
              if ( TRACER_ADVC(iq) .and. TRACER_MASS(iq) == 1.0_RP ) then
-                !$acc kernels
+                !$acc kernels async
                 do j = JS, JE
                 do k = KS, KE
                    qflx_x(k,j) = qflx_x(k,j) + QFLX_RHOQ(k,IS-1,j,XDIR,iq)
@@ -632,17 +638,18 @@ contains
              end if
           end do
        end if
+!$acc wait
 !$acc update host(qflx_x)
        call MONITOR_put( monit_west, qflx_x(:,:) )
     end if
     if ( monit_east > 0 ) then
-       !$acc kernels
+       !$acc kernels async
        qflx_x(:,:) = 0.0_RP
        !$acc end kernels
        if ( .not. PRC_HAS_E ) then
           do iq = 1, QA
              if ( TRACER_ADVC(iq) .and. TRACER_MASS(iq) == 1.0_RP ) then
-                !$acc kernels
+                !$acc kernels async
                 do j = JS, JE
                 do k = KS, KE
                    qflx_x(k,j) = qflx_x(k,j) + QFLX_RHOQ(k,IE,j,XDIR,iq)
@@ -652,17 +659,18 @@ contains
              end if
           end do
        end if
+!$acc wait
 !$acc update host(qflx_x)
        call MONITOR_put( monit_east, qflx_x(:,:) )
     end if
     if ( monit_south > 0 ) then
-       !$acc kernels
+       !$acc kernels async
        qflx_y(:,:) = 0.0_RP
        !$acc end kernels
        if ( .not. PRC_HAS_S ) then
           do iq = 1, QA
              if ( TRACER_ADVC(iq) .and. TRACER_MASS(iq) == 1.0_RP ) then
-                !$acc kernels
+                !$acc kernels async
                 do i = IS, IE
                 do k = KS, KE
                    qflx_y(k,i) = qflx_y(k,i) + QFLX_RHOQ(k,i,JS-1,YDIR,iq)
@@ -672,17 +680,18 @@ contains
              end if
           end do
        end if
+!$acc wait
 !$acc update host(qflx_y)
        call MONITOR_put( monit_south, qflx_y(:,:) )
     end if
     if ( monit_north > 0 ) then
-       !$acc kernels
+       !$acc kernels async
        qflx_y(:,:) = 0.0_RP
        !$acc end kernels
        if ( .not. PRC_HAS_N ) then
           do iq = 1, QA
              if ( TRACER_ADVC(iq) .and. TRACER_MASS(iq) == 1.0_RP ) then
-                !$acc kernels
+                !$acc kernels async
                 do i = IS, IE
                 do k = KS, KE
                    qflx_y(k,i) = qflx_y(k,i) + QFLX_RHOQ(k,i,JE,YDIR,iq)
@@ -692,12 +701,14 @@ contains
              end if
           end do
        end if
+!$acc wait
 !$acc update host(qflx_y)
        call MONITOR_put( monit_north, qflx_y(:,:) )
     end if
 
 !    !$acc wait
 
+    !$acc wait
     !$acc end data
     !$acc end data
 

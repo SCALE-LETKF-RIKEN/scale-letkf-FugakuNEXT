@@ -711,6 +711,7 @@ contains
             num_diff(:,:,:,I_MOMZ,YDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
+            !$acc wait
 
 
        !$omp parallel private(i,j,k,advcv,advch,wdamp,div)
@@ -885,6 +886,7 @@ contains
                num_diff(:,:,:,I_MOMZ,YDIR), & ! (in)
                CDZ, TwoD, & ! (in)
                IIS-1, IIE+1, JJS-1, JJE+1 ) ! (in)
+               !$acc wait
 
        endif
     enddo
@@ -1022,6 +1024,7 @@ contains
             num_diff(:,:,:,I_MOMX,YDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
+            !$acc wait
 
 
        !$omp parallel private(i,j,k,advcv,advch,div,f2h1,f2h2,f2h1m,f2h2m,dpresm,dpresk,dpresp,momy_u)
@@ -1203,6 +1206,7 @@ contains
                num_diff(:,:,:,I_MOMX,YDIR), & ! (in)
                CDZ, TwoD, & ! (in)
                IIS-1, IIE+1, JJS-1, JJE+1 ) ! (in)
+               !$acc wait
 
        endif
     enddo
@@ -1366,6 +1370,7 @@ contains
             num_diff(:,:,:,I_MOMY,YDIR), & ! (in
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
+            !$acc wait
 
 
        !$omp parallel private(i,j,k,advcv,advch,div,f2h1,f2h2,f2h1m,f2h2m,dpresm,dpresk,dpresp,momx_v)
@@ -1555,6 +1560,7 @@ contains
                num_diff(:,:,:,I_MOMY,YDIR), & ! (in)
                CDZ, TwoD, & ! (in)
                IIS-1, IIE+1, JJS-1, JJE+1 ) ! (in)
+               !$acc wait
 
        endif
     enddo
@@ -1691,6 +1697,7 @@ contains
             num_diff(:,:,:,I_RHOT,YDIR), & ! (in)
             CDZ, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
+            !$acc wait
 
        !-----< update rho*theta >-----
 
@@ -1809,6 +1816,7 @@ contains
                num_diff(:,:,:,I_RHOT,YDIR), & ! (in)
                CDZ, & ! (in)
                IIS-1, IIE+1, JJS-1, JJE+1 ) ! (in)
+               !$acc wait
 
        enddo
        enddo

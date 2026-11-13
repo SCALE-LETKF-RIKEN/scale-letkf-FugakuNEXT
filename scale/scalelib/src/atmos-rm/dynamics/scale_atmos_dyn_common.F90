@@ -4,6 +4,10 @@
 !! @par Description
 !!          common subroutines for Atmospheric dynamical process
 !!
+!! Runtime OpenACC helpers use the default async queue. Callers must wait
+!! before host access/transfers or work on another queue. Per-call device
+!! temporaries are completed before their data regions are released.
+!!
 !! @author Team SCALE
 !!
 !<
@@ -154,7 +158,7 @@ contains
    !$acc data copy(var)
 
    if (lateral_halo) then
-      !$acc kernels
+      !$acc kernels async
 !OCL XFILL
       do j = 1, JA
       do i = 1, ISB-1
@@ -169,7 +173,7 @@ contains
       enddo
       enddo
       !$acc end kernels
-      !$acc kernels
+      !$acc kernels async
 !OCL XFILL
       do j = 1, JSB-1
       do i = 1, IA
@@ -179,7 +183,7 @@ contains
       enddo
       enddo
       !$acc end kernels
-      !$acc kernels
+      !$acc kernels async
 !OCL XFILL
       do j = JEB+1, JA
       do i = 1, IA
@@ -192,7 +196,7 @@ contains
    end if
 
    if (top_bottom_halo) then
-      !$acc kernels
+      !$acc kernels async
 !OCL XFILL
       do j = JS, JE
       do i = IS, IE
@@ -240,7 +244,7 @@ contains
        !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp private(i,iv) &
        !$omp shared(JA,IS,KS,KE,DENS,DENS0,MOMZ,MOMZ0,MOMX,MOMX0,MOMY,MOMY0,RHOT,RHOT0,VA,PROG,PROG0)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = 1, JA
        do i = 1, IS-1
@@ -263,7 +267,7 @@ contains
        !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp private(i,iv) &
        !$omp shared(JA,IE,IA,KS,KE,DENS,DENS0,MOMZ,MOMZ0,MOMX,MOMX0,MOMY,MOMY0,RHOT,RHOT0,VA,PROG,PROG0)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = 1, JA
        do i = IE+1, IA
@@ -282,7 +286,7 @@ contains
        enddo
        !$acc end kernels
        !$omp parallel do private(j,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = 1, JA
        do k = KS, KE
@@ -295,7 +299,7 @@ contains
        !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp private(i,iv) &
        !$omp shared(JS,IA,KS,KE,DENS,DENS0,MOMZ,MOMZ0,MOMX,MOMX0,MOMY,MOMY0,RHOT,RHOT0,VA,PROG,PROG0)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = 1, JS-1
        do i = 1, IA
@@ -318,7 +322,7 @@ contains
        !$omp parallel do default(none) private(j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp private(i,iv) &
        !$omp shared(JA,JE,IA,KS,KE,DENS,DENS0,MOMZ,MOMZ0,MOMX,MOMX0,MOMY,MOMY0,RHOT,RHOT0,VA,PROG,PROG0)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = JE+1, JA
        do i = 1, IA
@@ -337,7 +341,7 @@ contains
        enddo
        !$acc end kernels
        !$omp parallel do private(i,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do i = 1, IA
        do k = KS, KE
@@ -372,7 +376,7 @@ contains
     if ( BND_W .and. (.not. TwoD) ) then
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JA,IS,KS,KE,QTRC,QTRC0)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = 1, JA
        do i = 1, IS-1
@@ -386,7 +390,7 @@ contains
     if ( BND_E .and. (.not. TwoD) ) then
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JA,IE,IA,KS,KE,QTRC,QTRC0)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = 1, JA
        do i = IE+1, IA
@@ -400,7 +404,7 @@ contains
     if ( BND_S ) then
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JS,IA,KS,KE,QTRC,QTRC0)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = 1, JS-1
        do i = 1, IA
@@ -414,7 +418,7 @@ contains
     if ( BND_N ) then
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JA,JE,IA,KS,KE,QTRC,QTRC0)
-       !$acc kernels
+       !$acc kernels async
 !OCL XFILL
        do j = JE+1, JA
        do i = 1, IA
@@ -466,7 +470,7 @@ contains
 
     if ( TwoD ) then
        !$omp parallel do private(j,k) OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE+1
        do k = KS-1, KE+1
           DDIV(k,IS,j) = J33G * ( MOMZ(k,IS,j) - MOMZ(k-1,IS,j) ) * RCDZ(k) &
@@ -482,7 +486,7 @@ contains
        k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
        !$omp parallel do private(j) OMP_SCHEDULE_
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE+1
           DDIV(KS,IS,j) = J33G * ( MOMZ(KS,IS,j) ) * RCDZ(KS) &
                          + ( ( MOMY(KS+1,IS,j) + MOMY(KS+1,IS,j-1) ) * J23G(KS+1,IS,j,I_XYW) &
@@ -503,7 +507,7 @@ contains
 #endif
     else
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE+1
        do i = IS, IE+1
        do k = KS-1, KE+1
@@ -525,7 +529,7 @@ contains
        k = IUNDEF; i = IUNDEF; j = IUNDEF
 #endif
        !$omp parallel do private(i,j) OMP_SCHEDULE_ collapse(2)
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE+1
        do i = IS, IE+1
           DDIV(KS,i,j) = J33G * ( MOMZ(KS,i,j) ) * RCDZ(KS) &
@@ -556,6 +560,7 @@ contains
 #endif
     end if
 
+    !$acc wait
     !$acc end data
 
     call PROF_rapend  ("DYN_divercence", 2)
@@ -631,7 +636,7 @@ contains
    !$omp private(kk,kb) &
 #endif
    !$omp private(PRES,Rtot,CVtot,CPtot,QDRY)
-   !$acc kernels copyout(DPRES, RT2P, REF_rhot) copyin(RHOT, QTRC, REF_pres, AQ_R, AQ_CV, AQ_CP, AQ_MASS)
+   !$acc kernels copyout(DPRES, RT2P, REF_rhot) copyin(RHOT, QTRC, REF_pres, AQ_R, AQ_CV, AQ_CP, AQ_MASS) async
    do j = 1, JA
    !$acc loop private(Rtot, CVtot, CPtot, QDRY)
    do i = 1, IA

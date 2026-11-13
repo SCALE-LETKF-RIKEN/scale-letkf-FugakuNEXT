@@ -479,7 +479,7 @@ contains
 
        !$acc data create(DENS00)
 
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -491,7 +491,7 @@ contains
        enddo
        !$acc end kernels
 
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -501,7 +501,7 @@ contains
        enddo
        !$acc end kernels
 
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -511,7 +511,7 @@ contains
        enddo
        !$acc end kernels
 
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -521,7 +521,7 @@ contains
        enddo
        !$acc end kernels
 
-       !$acc kernels
+       !$acc kernels async
        do j = JS, JE
        do i = IS, IE
        do k = KS, KE
@@ -531,7 +531,7 @@ contains
        enddo
        !$acc end kernels
 
-       !$acc kernels
+       !$acc kernels async
        do iq = 1, QA
        do j = JS, JE
        do i = IS, IE
@@ -545,6 +545,7 @@ contains
        enddo
        !$acc end kernels
 
+       !$acc wait
        !$acc end data
 
        call COMM_vars8( DENS(:,:,:), I_COMM_DENS )
@@ -566,26 +567,27 @@ contains
        enddo
 
        if ( USE_AVERAGE ) then
-          !$acc kernels
+          !$acc kernels async
           DENS_av(:,:,:)   = DENS(:,:,:)
           !$acc end kernels
-          !$acc kernels
+          !$acc kernels async
           MOMZ_av(:,:,:)   = MOMZ(:,:,:)
           !$acc end kernels
-          !$acc kernels
+          !$acc kernels async
           MOMX_av(:,:,:)   = MOMX(:,:,:)
           !$acc end kernels
-          !$acc kernels
+          !$acc kernels async
           MOMY_av(:,:,:)   = MOMY(:,:,:)
           !$acc end kernels
-          !$acc kernels
+          !$acc kernels async
           RHOT_av(:,:,:)   = RHOT(:,:,:)
           !$acc end kernels
-          !$acc kernels
+          !$acc kernels async
           QTRC_av(:,:,:,:) = QTRC(:,:,:,:)
           !$acc end kernels
        endif
 
+       !$acc wait
        call PROF_rapend("DYN_Tinteg", 2)
 
        return
@@ -636,6 +638,7 @@ contains
                                  I_QV,                                                 & ! [IN]
                                  DTSEC, DTSEC_DYN                                      ) ! [IN]
 
+    !$acc wait
     call PROF_rapend  ("DYN_Tinteg", 2)
 
     !$acc end data
