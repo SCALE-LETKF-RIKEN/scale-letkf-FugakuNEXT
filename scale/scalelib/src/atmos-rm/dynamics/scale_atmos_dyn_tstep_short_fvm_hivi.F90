@@ -556,6 +556,7 @@ contains
             num_diff(:,:,:,I_MOMZ,YDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
+            !$acc wait
 
        !--- update momentum(z)
        if ( TwoD ) then
@@ -672,6 +673,7 @@ contains
             num_diff(:,:,:,I_MOMX,YDIR), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
+            !$acc wait
 
        !--- update momentum(x)
        if ( TwoD ) then
@@ -783,6 +785,7 @@ contains
             num_diff(:,:,:,I_MOMY,YDIR), & ! (in
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
+            !$acc wait
 
        !--- update momentum(y)
        if ( TwoD ) then
@@ -892,6 +895,7 @@ contains
             num_diff(:,:,:,I_RHOT,YDIR), & ! (in)
             CDZ, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
+            !$acc wait
 
        if ( TwoD ) then
           !$omp parallel do private(j,k) OMP_SCHEDULE_

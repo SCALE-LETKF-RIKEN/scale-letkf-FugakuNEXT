@@ -491,11 +491,7 @@ contains
 #endif
        !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
        !$omp shared(JJS,JJE,IIS,IIE,IA,KS,KE,DPRES0,RT2P,RHOT,REF_rhot,DPRES,DENS,PHI)
-#ifdef HEVI_FISSION
        !$acc kernels async
-#else
-       !$acc kernels async
-#endif
        do j = JJS, JJE+1
        do i = IIS, min(IIE+1,IA)
           do k = KS, KE
@@ -555,11 +551,7 @@ contains
           !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
           !$omp shared(JJS,JJE,IIS,IIE,KS,KE,GSQRT,MOMX,MOMY,J13G,J23G,mflx_hi,MAPF,num_diff) &
           !$omp shared(RMAPF,MAPF_R12)
-#ifdef HEVI_FISSION
           !$acc kernels async
-#else
-          !$acc kernels async
-#endif
           do j = JJS, JJE
           do i = IIS-1, IIE
              do k = KS, KE-1
@@ -863,13 +855,9 @@ contains
           !$omp shared(qflx_hi,qflx_J13,qflx_J23,DDIV,MOMZ0,MOMZ_t,Sw) &
           !$omp shared(RFDZ,RCDX,RCDY,FDZ,dtrk,wdamp_coef,divdmp_coef) &
           !$omp shared(MAPF,GSQRT)
-#ifdef HEVI_FISSION
           ! same queue as the kernel above, so that div_work is ready here
           ! without a synchronization with the host in between
           !$acc kernels async
-#else
-          !$acc kernels async
-#endif
           do j = JJS, JJE
           do i = IIS, IIE
 !OCL NORECURRENCE
@@ -1394,15 +1382,11 @@ contains
           !$omp shared(MAPF,GSQRT,J13G,I_UY,I_UV,I_UYW,I_UYZ) &
           !$omp shared(dtrk,CORIOLI,COEF_CF_U,RMAPF,MAPF_M12,divdmp_coef) &
           !$omp shared(RGSQRT_UYZ,F2H_UYZ)
-#ifdef HEVI_FISSION
           ! queues 1-3 start after the work already queued on the default queue
           !$acc wait(acc_async_noval) async(1)
           !$acc wait(acc_async_noval) async(2)
           !$acc wait(acc_async_noval) async(3)
           !$acc kernels async
-#else
-          !$acc kernels async
-#endif
           do j = JJS, JJE
           do i = IIS, iee
 !OCL NORECURRENCE
@@ -1517,7 +1501,7 @@ contains
           !$acc end kernels
           end if
 
-          ! wait for pg_work (async(0)), cf_work (async(1)), advc_work (async(2)), and div_work (async(3))
+          ! wait for pg_work (default queue), cf_work (async(1)), advc_work (async(2)), and div_work (async(3))
           !$acc wait(1,2,3) async
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &
@@ -1679,15 +1663,11 @@ contains
           !$omp shared(MAPF,GSQRT,J23G,I_UV) &
           !$omp shared(dtrk,CORIOLI,COEF_CF_V,RMAPF,MAPF_M12,divdmp_coef) &
           !$omp shared(RGSQRT_XVZ,F2H_XVZ)
-#ifdef HEVI_FISSION
           ! queues 1-3 start after the work already queued on the default queue
           !$acc wait(acc_async_noval) async(1)
           !$acc wait(acc_async_noval) async(2)
           !$acc wait(acc_async_noval) async(3)
           !$acc kernels async
-#else
-          !$acc kernels async
-#endif
           do j = JJS, min(JJE,JEH)
           do i = IIS, IIE
 !OCL NORECURRENCE
@@ -1801,7 +1781,7 @@ contains
           !$acc end kernels
           end if
 
-          ! wait for pg_work (async(0)), cf_work (async(1)), advc_work (async(2)), and div_work (async(3))
+          ! wait for pg_work (default queue), cf_work (async(1)), advc_work (async(2)), and div_work (async(3))
           !$acc wait(1,2,3) async
 
           !$omp parallel do default(shared) OMP_SCHEDULE_ collapse(2) &

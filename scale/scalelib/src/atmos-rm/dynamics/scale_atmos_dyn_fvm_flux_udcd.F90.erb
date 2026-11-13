@@ -373,6 +373,10 @@ use_f6  = fuse_lu && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", ord
 !! @par Description
 !!          FVM flux scheme with the <%=@scheme%> order
 !!
+!! OpenACC compute regions use the default async queue. With device-resident
+!! arrays, callers must wait before host access/transfers or work on another
+!! queue; calls between kernels on the same queue preserve their order.
+!!
 !! @author Team SCALE
 !!
 !<

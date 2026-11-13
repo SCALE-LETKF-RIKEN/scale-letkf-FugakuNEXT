@@ -532,6 +532,7 @@ contains
        DFT_g2g_divfree, &
        DFT_g2g
 #ifdef USE_CUDALIB
+    use, intrinsic :: iso_fortran_env, only: int64
     use cudafor
     use openacc, only: &
        acc_get_cuda_stream, &
@@ -1601,7 +1602,7 @@ contains
           ! index calculation causes a significant drop in performance, since num_diff is a 5D array
           !$acc host_data use_device(num_diff)
           ! on the stream of the default async queue, which the kernels before and after use
-          istat = cudaMemsetAsync(num_diff, 0.0_RP, int(KA,8)*IA*JA*5*3, &
+          istat = cudaMemsetAsync(num_diff, 0.0_RP, int(KA,int64)*IA*JA*5*3, &
                                   acc_get_cuda_stream(acc_async_noval))
           !$acc end host_data
           if ( istat /= cudaSuccess ) then
@@ -1834,6 +1835,8 @@ contains
           call PROF_rapstart("DYN_Tracer_Tinteg", 2)
 
           if ( FLAG_TRACER_SPLIT_TEND ) then
+            ! EULER and LINRK copy the input with synchronous kernels.
+            !$acc wait
              !$omp parallel do default(none) private(i,j,k) OMP_SCHEDULE_ collapse(2) &
              !$omp shared(KA,IA,JA,iq,QTRC,RHOQ_t,DENS,dtl)
              !$acc kernels async

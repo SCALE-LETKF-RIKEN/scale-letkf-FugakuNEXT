@@ -190,6 +190,7 @@ contains
 
     if ( FLAG_FCT_TRACER ) then
 
+       !$acc wait
        call ATMOS_DYN_FVM_fct( qflx_anti,        & ! (out)
                            QTRC0, DENS0, DENS,   & ! (in)
                            qflx_hi, qflx_lo,     & ! (in)

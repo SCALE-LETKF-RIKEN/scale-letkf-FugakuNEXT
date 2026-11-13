@@ -5,6 +5,10 @@
 !! @par Description
 !!          FVM flux scheme with the cd8 order
 !!
+!! OpenACC compute regions use the default async queue. With device-resident
+!! arrays, callers must wait before host access/transfers or work on another
+!! queue; calls between kernels on the same queue preserve their order.
+!!
 !! @author Team SCALE
 !!
 !<

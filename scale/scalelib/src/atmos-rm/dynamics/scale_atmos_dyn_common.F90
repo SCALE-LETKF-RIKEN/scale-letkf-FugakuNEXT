@@ -4,6 +4,10 @@
 !! @par Description
 !!          common subroutines for Atmospheric dynamical process
 !!
+!! Runtime OpenACC helpers use the default async queue. Callers must wait
+!! before host access/transfers or work on another queue. Per-call device
+!! temporaries are completed before their data regions are released.
+!!
 !! @author Team SCALE
 !!
 !<
@@ -556,6 +560,7 @@ contains
 #endif
     end if
 
+    !$acc wait
     !$acc end data
 
     call PROF_rapend  ("DYN_divercence", 2)

@@ -475,6 +475,9 @@ contains
 
     dtrk = dt / 2.0_RP
 
+    ! Complete the snapshots before synchronous short-step implementations read them.
+    !$acc wait
+
     call ATMOS_DYN_tstep( DENS_RK1, MOMZ_RK1, MOMX_RK1, MOMY_RK1, RHOT_RK1, & ! [OUT]
                           PROG_RK1,                                         & ! [OUT]
                           mflx_hi_RK(:,:,:,:,1), tflx_hi_RK(:,:,:,:,1),     & ! [INOUT,OUT]
