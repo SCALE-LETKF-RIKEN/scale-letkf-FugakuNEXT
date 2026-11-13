@@ -91,8 +91,9 @@ module mod_atmos_phy_mp_driver
 
 #ifdef _OPENACC
   ! RHOQ2 and RHOQ2_crg at the entry of each sedimentation step, passed to
-  ! ATMOS_PHY_MP_precipitation_upwind in another array from the updated one, so
-  ! that the vector lanes do not read the elements updated by the other lanes
+  ! ATMOS_PHY_MP_precipitation_upwind_3D in another array from the updated one:
+  ! the level k reads RHOQ(k+1), which the thread of the level k+1 updates in the
+  ! same kernel, so the result would depend on the execution order without it
   real(RP), private, allocatable :: RHOQ0_sed    (:,:,:,:)
   real(RP), private, allocatable :: RHOQ0_sed_crg(:,:,:,:)
 #endif
@@ -290,6 +291,10 @@ contains
     use scale_time, only: &
        TIME_DTSEC_ATMOS_PHY_MP
     use scale_atmos_hydrometeor, only: &
+#ifdef _OPENACC
+       QHS,   &
+       QHE,   &
+#endif
        N_HYD
     use scale_atmos_phy_mp_kessler, only: &
        ATMOS_PHY_MP_KESSLER_setup
@@ -491,6 +496,13 @@ contains
              allocate( RHOQ0_sed(KA,QS_MP+1:QE_MP,IA,JA) )
              !$acc enter data create(RHOQ0_sed)
              if ( flg_lt ) then
+                ! the charge density falls with the terminal velocity of vterm(:,1:QA_LT),
+                ! which must be that of the hydrometeors (vterm(:,QHS:QHE))
+                if ( QHS /= QS_MP+1 .or. QE_LT-QS_LT /= QHE-QHS ) then
+                   LOG_ERROR("ATMOS_PHY_MP_driver_setup",*) 'the charge density does not correspond to the first hydrometeors: ', &
+                                                            QS_MP, QHS, QHE, QS_LT, QE_LT
+                   call PRC_abort
+                end if
                 allocate( RHOQ0_sed_crg(KA,QS_LT:QE_LT,IA,JA) )
                 !$acc enter data create(RHOQ0_sed_crg)
              end if
@@ -793,6 +805,9 @@ contains
        QLE,   &
        QIA
     use scale_atmos_phy_mp_common, only: &
+#ifdef _OPENACC
+       ATMOS_PHY_MP_precipitation_upwind_3D, &
+#endif
        ATMOS_PHY_MP_precipitation_upwind,  &
        ATMOS_PHY_MP_precipitation_semilag, &
        ATMOS_PHY_MP_precipitation_momentum
@@ -803,6 +818,9 @@ contains
        ATMOS_PHY_MP_KESSLER_terminal_velocity
     use scale_atmos_phy_mp_tomita08, only: &
        ATMOS_PHY_MP_TOMITA08_adjustment, &
+#ifdef _OPENACC
+       ATMOS_PHY_MP_TOMITA08_terminal_velocity_3D, &
+#endif
        ATMOS_PHY_MP_TOMITA08_terminal_velocity
     use scale_atmos_phy_mp_sn14, only: &
        ATMOS_PHY_MP_sn14_tendency, &
@@ -1506,18 +1524,17 @@ contains
 #endif
                 case ( I_TOMITA08 )
 #ifdef _OPENACC
-                   !$acc parallel loop collapse(2) gang async
-                   do j = JS, JE
-                   do i = IS, IE
-#endif
+                   ! all the columns at once
+                   ! (the macros of the column arrays are not expanded without the index, so the whole arrays are passed)
+                   call ATMOS_PHY_MP_tomita08_terminal_velocity_3D( &
+                        KA, KS, KE, IA, IS, IE, JA, JS, JE, &
+                        DENS2, TEMP2, RHOQ2, & ! [IN]
+                        vterm                ) ! [OUT]
+#else
                    call ATMOS_PHY_MP_tomita08_terminal_velocity( &
                         KA, KS, KE, &
                         DENS2(:), TEMP2(:), RHOQ2(:,:), & ! [IN]
                         vterm(:,:)                      ) ! [OUT]
-#ifdef _OPENACC
-                   end do
-                   end do
-                   !$acc end parallel loop
 #endif
                   case ( I_SN14 )
 #ifdef _OPENACC
@@ -1605,24 +1622,20 @@ contains
                    end do
                    end do
                    !$acc end parallel loop
-                   !$acc parallel loop collapse(2) gang async
-                   do j = JS, JE
-                   do i = IS, IE
-                      call ATMOS_PHY_MP_precipitation_upwind( &
-                           KA, KS, KE, QE_MP-QS_MP, QLA, QIA, &
-                           TEMP2(:), vterm(:,:),   & ! [IN]
-                           FDZ(:), RCDZ(:),        & ! [IN]
-                           MP_DTSEC_SEDIMENTATION, & ! [IN]
-                           i, j,                   & ! [IN]
-                           DENS2(:), RHOQ2(:,:),   & ! [INOUT]
-                           CPtot2(:), CVtot2(:),   & ! [INOUT]
-                           RHOE2(:),               & ! [INOUT]
-                           mflux(:), sflux(:),     & ! [OUT]
-                           eflux,                  & ! [OUT]
-                           RHOQ0 = RHOQ0_sed(:,:,i,j) ) ! [IN]
-                   end do
-                   end do
-                   !$acc end parallel loop
+                   ! all the columns at once
+                   call ATMOS_PHY_MP_precipitation_upwind_3D( &
+                        KA, KS, KE, IA, IS, IE, JA, JS, JE, &
+                        QE_MP-QS_MP, QLA, QIA,  & ! [IN]
+                        QE_MP-QS_MP,            & ! [IN]
+                        TEMP2, vterm,           & ! [IN]
+                        FDZ, RCDZ,              & ! [IN]
+                        MP_DTSEC_SEDIMENTATION, & ! [IN]
+                        RHOQ0_sed,              & ! [IN]
+                        DENS2, RHOQ2,           & ! [INOUT]
+                        CPtot2, CVtot2,         & ! [INOUT]
+                        RHOE2,                  & ! [INOUT]
+                        mflux, sflux,           & ! [OUT]
+                        eflux_2d                ) ! [OUT]
 #else
                    !$acc wait
                    call ATMOS_PHY_MP_precipitation_upwind( &
@@ -1701,24 +1714,22 @@ contains
                    end do
                    end do
                    !$acc end parallel loop
-                   !$acc parallel loop collapse(2) gang async
-                   do j = JS, JE
-                   do i = IS, IE
-                      call ATMOS_PHY_MP_precipitation_upwind( &
-                           KA, KS, KE, QA_LT, 0, 0,    & ! no mass tracer for charge density
-                           TEMP2(:), vterm(:,QHS:QHE), & ! [IN]
-                           FDZ(:), RCDZ(:),            & ! [IN]
-                           MP_DTSEC_SEDIMENTATION,     & ! [IN]
-                           i, j,                       & ! [IN]
-                           DENS2(:), RHOQ2_crg(:,:),   & ! [INOUT]
-                           CPtot2(:), CVtot2(:),       & ! [INOUT]
-                           RHOE2(:),                   & ! [INOUT]
-                           mflux_crg(:), sflux_crg(:), & ! [OUT] dummy
-                           eflux_crg,                  & ! [OUT] dummy
-                           RHOQ0 = RHOQ0_sed_crg(:,:,i,j) ) ! [IN]
-                   end do
-                   end do
-                   !$acc end parallel loop
+                   ! all the columns at once
+                   ! the hydrometeors are the first QA_LT tracers of the terminal velocity array
+                   ! (QHS = QS_MP+1 and QA_LT = QHA, checked at the setup)
+                   call ATMOS_PHY_MP_precipitation_upwind_3D( &
+                        KA, KS, KE, IA, IS, IE, JA, JS, JE, &
+                        QA_LT, 0, 0,            & ! [IN] no mass tracer for charge density
+                        QE_MP-QS_MP,            & ! [IN]
+                        TEMP2, vterm,           & ! [IN]
+                        FDZ, RCDZ,              & ! [IN]
+                        MP_DTSEC_SEDIMENTATION, & ! [IN]
+                        RHOQ0_sed_crg,          & ! [IN]
+                        DENS2, RHOQ2_crg,       & ! [INOUT]
+                        CPtot2, CVtot2,         & ! [INOUT]
+                        RHOE2,                  & ! [INOUT]
+                        mflux_crg, sflux_crg,   & ! [OUT] dummy
+                        eflux_crg_2d            ) ! [OUT] dummy
 #else
                       !$acc wait
                       call ATMOS_PHY_MP_precipitation_upwind( &

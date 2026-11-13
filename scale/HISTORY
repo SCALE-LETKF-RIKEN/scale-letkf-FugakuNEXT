@@ -1,5 +1,13 @@
 = Release History
 
+== 2026-11-14 (SCALE-LETKF local changes)
+* Improvements:
+  * Port scale-met/scale#3595 (571bc2ccd, f711a986c): compute upwind
+    sedimentation and TOMITA08 terminal velocity over all grid points with
+    OpenACC, and check the hydrometeor/charge tracer layout at setup.
+    The formulae and CPU paths are retained. Upstream timings are not
+    measurements of this port.
+
 == 2024-04-10 (5.5.1)
 * Bug fixes:
   * Fixed the mkinit for the baroclinic wave test case

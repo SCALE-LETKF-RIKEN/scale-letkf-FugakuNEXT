@@ -30,6 +30,9 @@ module scale_atmos_phy_mp_common
   public :: ATMOS_PHY_MP_negative_fixer
   public :: ATMOS_PHY_MP_saturation_adjustment
   public :: ATMOS_PHY_MP_precipitation_upwind
+#ifdef _OPENACC
+  public :: ATMOS_PHY_MP_precipitation_upwind_3D
+#endif
   public :: ATMOS_PHY_MP_precipitation_semilag
   public :: ATMOS_PHY_MP_precipitation_momentum
 
@@ -441,7 +444,12 @@ contains
   end subroutine ATMOS_PHY_MP_saturation_adjustment_3D
 
   !-----------------------------------------------------------------------------
-!OCL SERIAL
+#ifdef _OPENACC
+  !-----------------------------------------------------------------------------
+  !> precipitation transport of a column
+  !! The formulae are in MP_precipitation_upwind_k. SCALE-RM uses
+  !! ATMOS_PHY_MP_precipitation_upwind_3D on GPUs; a caller on the device (a gang
+  !! loop over the columns) must give RHOQ0.
   subroutine ATMOS_PHY_MP_precipitation_upwind( &
        KA, KS, KE, QHA, QLA, QIA, &
        TEMP, vterm, FDZ, RCDZ, dt,     &
@@ -450,13 +458,6 @@ contains
        mflx, sflx, esflx,              &
        RHOQ0                           )
     !$acc routine vector
-    use scale_const, only: &
-       GRAV  => CONST_GRAV
-    use scale_atmos_hydrometeor, only: &
-       CP_WATER, &
-       CP_ICE, &
-       CV_WATER, &
-       CV_ICE
     implicit none
     integer,  intent(in), value :: KA, KS, KE
     integer,  intent(in), value :: QHA, QLA, QIA
@@ -479,16 +480,183 @@ contains
     real(RP), intent(out)   :: esflx
 
     ! RHOQ at the entry, in a different array from RHOQ.
-    ! On GPUs, the lane k reads RHOQ(k+1,:), which the lane k+1 updates, so the
-    ! result can depend on the execution order of the lanes without it.
+    ! On the device, the lane k reads RHOQ(k+1,:), which the lane k+1 updates, so
+    ! the result can depend on the execution order of the lanes without it.
+    real(RP), intent(in), optional :: RHOQ0(KA,QHA)
+
+    integer  :: k
+    !---------------------------------------------------------------------------
+
+    mflx(:) = 0.0_RP
+    sflx(:) = 0.0_RP
+    esflx   = 0.0_RP
+
+    !$acc loop vector
+    do k = KS, KE
+       call MP_precipitation_upwind_k( &
+            KA, KS, KE, QHA, QLA, QIA, k,   & ! [IN]
+            TEMP(:), vterm(:,:),            & ! [IN]
+            FDZ(:), RCDZ(:), dt,            & ! [IN]
+            DENS(:), RHOQ(:,:),             & ! [INOUT]
+            CPtot(:), CVtot(:), RHOE(:),    & ! [INOUT]
+            mflx(:), sflx(:), esflx,        & ! [OUT]
+            RHOQ0                           ) ! [IN]
+    end do
+
+    return
+  end subroutine ATMOS_PHY_MP_precipitation_upwind
+
+  !-----------------------------------------------------------------------------
+  !> precipitation transport of all the columns
+  !! All the grid points are computed in one kernel, since a level depends only on
+  !! the input (RHOQ0, vterm, TEMP) of itself and of the adjacent levels. The kernels
+  !! are put on the default async queue and are not waited for here: wait before the
+  !! host refers to the results. The arrays must be present on the device.
+  !! vterm may have more tracers (QVA) than the transported ones (QHA): the first QHA
+  !! are used, so that the terminal velocity array can be given as it is for the
+  !! tracers falling with the hydrometeors (e.g., the charge density).
+  !! MP_precipitation_upwind_k has to be in this file so that the compiler expands
+  !! it in the kernel (a call from another file is not expanded and is slow).
+  subroutine ATMOS_PHY_MP_precipitation_upwind_3D( &
+       KA, KS, KE, IA, IS, IE, JA, JS, JE, &
+       QHA, QLA, QIA, QVA, &
+       TEMP, vterm, FDZ, RCDZ, dt,     &
+       RHOQ0,                          &
+       DENS, RHOQ, CPtot, CVtot, RHOE, &
+       mflx, sflx, esflx               )
+    implicit none
+    integer,  intent(in) :: KA, KS, KE
+    integer,  intent(in) :: IA, IS, IE
+    integer,  intent(in) :: JA, JS, JE
+    integer,  intent(in) :: QHA, QLA, QIA
+    integer,  intent(in) :: QVA               ! number of the tracers in vterm (>= QHA)
+
+    real(RP), intent(in) :: TEMP (KA,IA,JA)
+    real(RP), intent(in) :: vterm(KA,QVA,IA,JA) ! terminal velocity of cloud mass (the first QHA are used)
+    real(RP), intent(in) :: FDZ  (KA,IA,JA)
+    real(RP), intent(in) :: RCDZ (KA,IA,JA)
+    real(RP), intent(in) :: dt
+    real(RP), intent(in) :: RHOQ0(KA,QHA,IA,JA) ! RHOQ at the entry (another array from RHOQ)
+
+    real(RP), intent(inout) :: DENS (KA,IA,JA)
+    real(RP), intent(inout) :: RHOQ (KA,QHA,IA,JA)
+    real(RP), intent(inout) :: CPtot(KA,IA,JA)
+    real(RP), intent(inout) :: CVtot(KA,IA,JA)
+    real(RP), intent(inout) :: RHOE (KA,IA,JA)
+
+    real(RP), intent(out)   :: mflx (KA,IA,JA)
+    real(RP), intent(out)   :: sflx (2,IA,JA) !> 1: rain, 2: snow
+    real(RP), intent(out)   :: esflx(IA,JA)
+
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    ! the levels that the transport below does not set
+    !$acc parallel loop collapse(2) async present(mflx)
+    do j = JS, JE
+    do i = IS, IE
+       !$acc loop seq
+       do k = 1, KS-2
+          mflx(k,i,j) = 0.0_RP
+       end do
+       !$acc loop seq
+       do k = KE, KA
+          mflx(k,i,j) = 0.0_RP
+       end do
+    end do
+    end do
+    !$acc end parallel loop
+
+    !$acc parallel loop collapse(3) async &
+    !$acc present(TEMP, vterm, FDZ, RCDZ, RHOQ0, DENS, RHOQ, CPtot, CVtot, RHOE, mflx, sflx, esflx)
+    do j = JS, JE
+    do i = IS, IE
+    do k = KS, KE
+       call MP_precipitation_upwind_k( &
+            KA, KS, KE, QHA, QLA, QIA, k,                  & ! [IN]
+            TEMP(:,i,j), vterm(:,:,i,j),                   & ! [IN]
+            FDZ(:,i,j), RCDZ(:,i,j), dt,                   & ! [IN]
+            DENS(:,i,j), RHOQ(:,:,i,j),                    & ! [INOUT]
+            CPtot(:,i,j), CVtot(:,i,j), RHOE(:,i,j),       & ! [INOUT]
+            mflx(:,i,j), sflx(:,i,j), esflx(i,j),          & ! [OUT]
+            RHOQ0(:,:,i,j)                                 ) ! [IN]
+    end do
+    end do
+    end do
+    !$acc end parallel loop
+
+    return
+  end subroutine ATMOS_PHY_MP_precipitation_upwind_3D
+#endif
+
+  !-----------------------------------------------------------------------------
+  !> precipitation transport
+  !! With OpenACC, this is the level k of a column, called from the two subroutines
+  !! above (the loop of k is in them). Without it, this is a column.
+  !! This is the only place of the formulae.
+#ifdef _OPENACC
+  subroutine MP_precipitation_upwind_k( &
+       KA, KS, KE, QHA, QLA, QIA, k,   &
+       TEMP, vterm, FDZ, RCDZ, dt,     &
+       DENS, RHOQ, CPtot, CVtot, RHOE, &
+       mflx, sflx, esflx,              &
+       RHOQ0                           )
+    !$acc routine seq
+#else
+!OCL SERIAL
+  subroutine ATMOS_PHY_MP_precipitation_upwind( &
+       KA, KS, KE, QHA, QLA, QIA, &
+       TEMP, vterm, FDZ, RCDZ, dt,     &
+       i, j,                           &
+       DENS, RHOQ, CPtot, CVtot, RHOE, &
+       mflx, sflx, esflx,              &
+       RHOQ0                           )
+#endif
+    use scale_const, only: &
+       GRAV  => CONST_GRAV
+    use scale_atmos_hydrometeor, only: &
+       CP_WATER, &
+       CP_ICE, &
+       CV_WATER, &
+       CV_ICE
+    implicit none
+    integer,  intent(in), value :: KA, KS, KE
+    integer,  intent(in), value :: QHA, QLA, QIA
+#ifdef _OPENACC
+    integer,  intent(in), value :: k
+#endif
+
+    real(RP), intent(in) :: TEMP (KA)
+    real(RP), intent(in) :: vterm(KA,QHA) ! terminal velocity of cloud mass
+    real(RP), intent(in) :: FDZ  (KA)
+    real(RP), intent(in) :: RCDZ (KA)
+    real(RP), intent(in) :: dt
+#ifndef _OPENACC
+    integer,  intent(in) :: i, j         ! for debug
+#endif
+
+    real(RP), intent(inout) :: DENS (KA)
+    real(RP), intent(inout) :: RHOQ (KA,QHA)
+    real(RP), intent(inout) :: CPtot(KA)
+    real(RP), intent(inout) :: CVtot(KA)
+    real(RP), intent(inout) :: RHOE (KA)
+
+    real(RP), intent(out)   :: mflx (KA)
+    real(RP), intent(out)   :: sflx (2) !> 1: rain, 2: snow
+    real(RP), intent(out)   :: esflx
+
+    ! RHOQ at the entry, in a different array from RHOQ.
+    ! On GPUs, the level k reads RHOQ(k+1,:), which the thread (or the vector lane)
+    ! of the level k+1 updates, so the result can depend on the execution order
+    ! without it. It is required in ATMOS_PHY_MP_precipitation_upwind_3D.
     real(RP), intent(in), optional :: RHOQ0(KA,QHA)
 
 #ifdef _OPENACC
-    ! In this vector routine, the compiler reads the intent(inout) and intent(out)
+    ! Except RHOQ(k+1,:), the level k reads and writes only the elements at k (or
+    ! k-1 for the fluxes), so they are kept in the scalars below during the loop of
+    ! iq. (In a vector routine, the compiler reads the intent(inout) and intent(out)
     ! arrays with volatile loads, which bypass the L1 cache, since the other lanes
-    ! may write them. Except RHOQ(k+1,:), the lane k reads and writes only the
-    ! elements at k (or k-1 for the fluxes), so they are kept in the scalars below
-    ! during the loop of iq.
+    ! may write them.)
     real(RP) :: qflx0
     real(RP) :: qflx1
     real(RP) :: eflx0
@@ -512,29 +680,29 @@ contains
     real(RP) :: dDENS
     real(RP) :: CP, CV
 
-    integer  :: k, iq
+#ifndef _OPENACC
+    integer  :: k
+#endif
+    integer  :: iq
     !---------------------------------------------------------------------------
 
     ! tracer/energy transport by falldown
     ! 1st order upwind, forward euler, velocity is always negative
 
+#ifndef _OPENACC
     mflx(:) = 0.0_RP
     sflx(:) = 0.0_RP
     esflx   = 0.0_RP
 
-#ifndef _OPENACC
     qflx(KE) = 0.0_RP
     eflx(KE) = 0.0_RP
-#endif
 
-#ifdef _OPENACC
-    has_RHOQ0 = present(RHOQ0)
-#endif
-
-    !$acc loop vector
     do k = KS, KE
+#endif
 
 #ifdef _OPENACC
+       has_RHOQ0 = present(RHOQ0)
+
        DENS_k = DENS(k)
        RHOE_k = RHOE(k)
        mflx_k    = 0.0_RP
@@ -677,12 +845,16 @@ contains
           sflx(2) = sflx2
           esflx   = esflx_k
        end if
+#else
+    end do
 #endif
 
-    end do
-
     return
+#ifdef _OPENACC
+  end subroutine MP_precipitation_upwind_k
+#else
   end subroutine ATMOS_PHY_MP_precipitation_upwind
+#endif
 
   !-----------------------------------------------------------------------------
 !OCL SERIAL
