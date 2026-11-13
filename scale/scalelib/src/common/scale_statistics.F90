@@ -898,6 +898,8 @@ contains
        KA, KS, KE, IA, IS, IE, JA, JS, JE, VA, &
        varname, var, &
        local         )
+    use iso_fortran_env, only: &
+       int64
     use scale_prc, only: &
        PRC_nprocs
     use scale_comm_cartesC, only: &
@@ -923,10 +925,10 @@ contains
     logical :: do_globalcomm
 
     real(RP) :: vmax, vmin
-    integer  :: pmax, pmin, idx
+    integer(int64) :: pmax, pmin, idx
     integer  :: kmax, imax, jmax
     integer  :: kmin, imin, jmin
-    integer  :: nk, ni
+    integer(int64) :: nk, ni
     logical  :: on_device
 
     integer :: k, i, j
@@ -948,8 +950,8 @@ contains
     if ( on_device ) then
        ! Same result as the host loop below: the reported point is the first one
        ! in (k,i,j) storage order whose value equals the max (min).
-       nk = KE - KS + 1
-       ni = IE - IS + 1
+       nk = int( KE - KS + 1, kind=int64 )
+       ni = int( IE - IS + 1, kind=int64 )
        do v = 1, VA
           vmax = -huge(vmax)
           vmin =  huge(vmin)
@@ -969,7 +971,8 @@ contains
           do j = JS, JE
           do i = IS, IE
           do k = KS, KE
-             idx = ( k - KS ) + nk * ( ( i - IS ) + ni * ( j - JS ) )
+             idx = int( k - KS, kind=int64 ) &
+                 + nk * ( int( i - IS, kind=int64 ) + ni * int( j - JS, kind=int64 ) )
              if ( var(k,i,j,v) == vmax ) pmax = min( pmax, idx )
              if ( var(k,i,j,v) == vmin ) pmin = min( pmin, idx )
           end do
@@ -977,15 +980,15 @@ contains
           end do
 
           ! no match (e.g. all values are -Inf/+Inf): the host loop keeps the first point
-          if ( pmax == huge(pmax) ) pmax = 0
-          if ( pmin == huge(pmin) ) pmin = 0
+          if ( pmax == huge(pmax) ) pmax = 0_int64
+          if ( pmin == huge(pmin) ) pmin = 0_int64
 
-          kmax = KS + mod( pmax, nk )
-          imax = IS + mod( pmax / nk, ni )
-          jmax = JS + pmax / ( nk * ni )
-          kmin = KS + mod( pmin, nk )
-          imin = IS + mod( pmin / nk, ni )
-          jmin = JS + pmin / ( nk * ni )
+          kmax = KS + int( mod( pmax, nk ) )
+          imax = IS + int( mod( pmax / nk, ni ) )
+          jmax = JS + int( pmax / ( nk * ni ) )
+          kmin = KS + int( mod( pmin, nk ) )
+          imin = IS + int( mod( pmin / nk, ni ) )
+          jmin = JS + int( pmin / ( nk * ni ) )
 
           !$acc serial present(var) copyout(vmax, vmin)
           vmax = var(kmax,imax,jmax,v)
