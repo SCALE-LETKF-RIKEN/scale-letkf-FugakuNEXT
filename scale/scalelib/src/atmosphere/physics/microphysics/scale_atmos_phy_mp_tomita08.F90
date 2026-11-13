@@ -41,6 +41,9 @@ module scale_atmos_phy_mp_tomita08
   public :: ATMOS_PHY_MP_tomita08_getvar
   public :: ATMOS_PHY_MP_tomita08_adjustment
   public :: ATMOS_PHY_MP_tomita08_terminal_velocity
+#ifdef _OPENACC
+  public :: ATMOS_PHY_MP_tomita08_terminal_velocity_3D
+#endif
   public :: ATMOS_PHY_MP_tomita08_effective_radius
   public :: ATMOS_PHY_MP_tomita08_cloud_fraction
   public :: ATMOS_PHY_MP_tomita08_qtrc2qhyd
@@ -82,6 +85,9 @@ module scale_atmos_phy_mp_tomita08
   !++ Private procedure
   !
   private :: MP_tomita08
+#ifdef _OPENACC
+  private :: MP_tomita08_terminal_velocity_k
+#endif
 
   !-----------------------------------------------------------------------------
   !
@@ -2640,18 +2646,105 @@ contains
      return
   end subroutine MP_tomita08
 
+#ifdef _OPENACC
   !-----------------------------------------------------------------------------
-  !> Lin-type cold rain microphysics (terminal velocity)
-!OCL SERIAL
+  !> Lin-type cold rain microphysics (terminal velocity) of a column
+  !! Called for each column in a gang loop. The formulae are in
+  !! MP_tomita08_terminal_velocity_k.
   subroutine ATMOS_PHY_MP_tomita08_terminal_velocity( &
        KA, KS, KE, &
        DENS, TEMP, RHOQ, &
        vterm             )
     !$acc routine vector
+    implicit none
+    integer,  intent(in), value :: KA, KS, KE
+
+    real(RP), intent(in)  :: DENS(KA)
+    real(RP), intent(in)  :: TEMP(KA)
+    real(RP), intent(in)  :: RHOQ(KA,QA_MP-1)
+
+    real(RP), intent(out) :: vterm(KA,QA_MP-1)
+
+    integer  :: k
+    !---------------------------------------------------------------------------
+
+    !$acc loop vector
+    do k = KS, KE
+       call MP_tomita08_terminal_velocity_k( KA, k,                    & ! [IN]
+                                             DENS(:), TEMP(:), RHOQ(:,:), & ! [IN]
+                                             vterm(:,:)                   ) ! [OUT]
+    end do
+
+    return
+  end subroutine ATMOS_PHY_MP_tomita08_terminal_velocity
+
+  !-----------------------------------------------------------------------------
+  !> Lin-type cold rain microphysics (terminal velocity) of all the columns
+  !! All the grid points are computed in one kernel. It is put on the default
+  !! async queue and is not waited for here: wait before the host refers to vterm.
+  !! The arrays must be present on the device.
+  !! MP_tomita08_terminal_velocity_k has to be in this file so that the compiler
+  !! expands it in the kernel (a call from another file is not expanded and is slow).
+  subroutine ATMOS_PHY_MP_tomita08_terminal_velocity_3D( &
+       KA, KS, KE, IA, IS, IE, JA, JS, JE, &
+       DENS, TEMP, RHOQ, &
+       vterm             )
+    implicit none
+    integer,  intent(in)  :: KA, KS, KE
+    integer,  intent(in)  :: IA, IS, IE
+    integer,  intent(in)  :: JA, JS, JE
+
+    real(RP), intent(in)  :: DENS(KA,IA,JA)
+    real(RP), intent(in)  :: TEMP(KA,IA,JA)
+    real(RP), intent(in)  :: RHOQ(KA,QA_MP-1,IA,JA)
+
+    real(RP), intent(out) :: vterm(KA,QA_MP-1,IA,JA)
+
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$acc parallel loop collapse(3) async present(DENS, TEMP, RHOQ, vterm)
+    do j = JS, JE
+    do i = IS, IE
+    do k = KS, KE
+       call MP_tomita08_terminal_velocity_k( KA, k,                                      & ! [IN]
+                                             DENS(:,i,j), TEMP(:,i,j), RHOQ(:,:,i,j), & ! [IN]
+                                             vterm(:,:,i,j)                           ) ! [OUT]
+    end do
+    end do
+    end do
+    !$acc end parallel loop
+
+    return
+  end subroutine ATMOS_PHY_MP_tomita08_terminal_velocity_3D
+#endif
+
+  !-----------------------------------------------------------------------------
+  !> Lin-type cold rain microphysics (terminal velocity)
+  !! With OpenACC, this is the level k of a column, called from the two subroutines
+  !! above (the loop of k is in them). Without it, this is a column.
+  !! This is the only place of the formulae.
+#ifdef _OPENACC
+  subroutine MP_tomita08_terminal_velocity_k( &
+       KA, k, &
+       DENS, TEMP, RHOQ, &
+       vterm             )
+    !$acc routine seq
+#else
+!OCL SERIAL
+  subroutine ATMOS_PHY_MP_tomita08_terminal_velocity( &
+       KA, KS, KE, &
+       DENS, TEMP, RHOQ, &
+       vterm             )
+#endif
     use scale_const, only: &
        TEM00 => CONST_TEM00
     implicit none
+#ifdef _OPENACC
+    integer,  intent(in), value :: KA, k
+#else
     integer,  intent(in), value :: KA, KS, KE
+#endif
 
     real(RP), intent(in)  :: DENS(KA)
     real(RP), intent(in)  :: TEMP(KA)
@@ -2709,11 +2802,12 @@ contains
     real(RP) :: loga_, b_, nm
 
     real(RP) :: zerosw
+#ifndef _OPENACC
     integer  :: k
+#endif
     !---------------------------------------------------------------------------
 
-    !$acc loop private(coef_at, coef_bt)
-    do k = KS, KE
+    LOOP_K
        ! store to work
        temc_tv(k) = TEMP(k) - TEM00
        qr_tv  (k) = RHOQ(k,I_hyd_QR) / dens(k)
@@ -2851,7 +2945,6 @@ contains
     endif
 
 #ifdef _OPENACC
-    end do
 #undef temc_tv
 #undef qr_tv
 #undef qi_tv
@@ -2865,7 +2958,11 @@ contains
 #endif
 
     return
+#ifdef _OPENACC
+  end subroutine MP_tomita08_terminal_velocity_k
+#else
   end subroutine ATMOS_PHY_MP_tomita08_terminal_velocity
+#endif
 
   !-----------------------------------------------------------------------------
   !> Calculate Cloud Fraction
