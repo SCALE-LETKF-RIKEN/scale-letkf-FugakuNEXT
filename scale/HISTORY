@@ -2,6 +2,12 @@
 
 == 2026-11-14 (SCALE-LETKF local changes)
 * Improvements:
+  * Port scale-met/scale#3612 (0de3bc4a8, a4d4e88d1): reduce OpenACC
+    sedimentation tracer-loop and terminal-velocity history overhead, and
+    compute precipitation momentum transport over all grid points.
+    Retain this tree's formulae and CPU loops; the upstream SPRINTARS work
+    arrays are absent here. GPU FMA contraction may change rounding.
+    Upstream timings are not measurements of this port.
   * Port scale-met/scale#3595 (571bc2ccd, f711a986c): compute upwind
     sedimentation and TOMITA08 terminal velocity over all grid points with
     OpenACC, and check the hydrometeor/charge tracer layout at setup.
