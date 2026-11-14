@@ -26,6 +26,7 @@ LIBS = $(LIBDIR)/libscale$(POSTFIX).a $(LIBDIR)/libdcutils.a
 
 OBJS = \
 	test_comm.o             \
+	test_atmos_phy_mp_common.o \
 	test_atmos_phy_tb_smg.o \
 	test_atmos_dyn.o
 
@@ -54,6 +55,7 @@ $(BINDIR)/$(BINNAME)  : $(BUILD_DIR)/$(BINNAME).o  $(patsubst %,$(BUILD_DIR)/%,$
 $(BUILD_DIR)/$(BINNAME).o  : $(BINNAME).f90  $(LIBS) $(patsubst %,$(BUILD_DIR)/%,$(OBJS))
 
 $(BUILD_DIR)/test_comm.o:             test_comm.f90
+$(BUILD_DIR)/test_atmos_phy_mp_common.o: test_atmos_phy_mp_common.f90
 $(BUILD_DIR)/test_atmos_phy_tb_smg.o: test_atmos_phy_tb_smg.f90
 $(BUILD_DIR)/test_atmos_dyn.o:        test_atmos_dyn.f90
 $(BUILD_DIR)/unit.o:                  unit.f90 $(patsubst %,$(BUILD_DIR)/%,$(MODS))

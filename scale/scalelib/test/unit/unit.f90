@@ -19,6 +19,7 @@ program unit
      ATMOS_HYDROMETEOR_finalize
 
   use test_atmos_phy_tb_smg
+  use test_atmos_phy_mp_common
   use test_atmos_dyn
   use test_comm
   implicit none
@@ -51,6 +52,9 @@ program unit
 
   write(*,*) "test_comm"
   call test_comm_run
+
+  write(*,*) "test_atmos_phy_mp_common_run"
+  call test_atmos_phy_mp_common_run
 
   write(*,*) "test_atmos_phy_tb_smg_run"
   call test_atmos_phy_tb_smg_run

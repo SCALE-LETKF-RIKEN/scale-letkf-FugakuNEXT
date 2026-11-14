@@ -807,6 +807,7 @@ contains
     use scale_atmos_phy_mp_common, only: &
 #ifdef _OPENACC
        ATMOS_PHY_MP_precipitation_upwind_3D, &
+       ATMOS_PHY_MP_precipitation_momentum_3D, &
 #endif
        ATMOS_PHY_MP_precipitation_upwind,  &
        ATMOS_PHY_MP_precipitation_semilag, &
@@ -1449,12 +1450,17 @@ contains
           end do
           !$acc end parallel loop
 
-          !$acc parallel loop collapse(4) async
+          ! One thread per grid point reuses the index calculation for all tracers.
+          !$acc parallel loop collapse(3) async
           do j = JS, JE
           do i = IS, IE
-#endif
+          do k = KS, KE
+          !$acc loop seq
+          do iq = QS_MP+1, QE_MP
+#else
              do iq = QS_MP+1, QE_MP
              do k = KS, KE
+#endif
                 RHOQ (k,iq) = DENS(k,i,j) * QTRC(k,i,j,iq) + RHOQ_t_MP(k,i,j,iq) * dt_MP
                 RHOQ2(k,iq) = RHOQ(k,iq)
              end do
@@ -1466,12 +1472,16 @@ contains
 #endif
              if( flg_lt ) then
 #ifdef _OPENACC
-                !$acc parallel loop collapse(4) async
+                !$acc parallel loop collapse(3) async
                 do j = JS, JE
                 do i = IS, IE
-#endif
+                do k = KS, KE
+                !$acc loop seq
+                do iq = QS_LT, QE_LT
+#else
                 do iq = QS_LT, QE_LT
                 do k = KS, KE
+#endif
                    RHOQ2_crg(k,iq) = DENS2(k) * QTRC(k,i,j,iq)
                 end do
                 end do
@@ -1492,15 +1502,17 @@ contains
 #ifdef _OPENACC
           end do
           end do
-          !$acc kernels loop collapse(2) async
+          !$acc parallel loop collapse(3) async
           do j = JS, JE
           do i = IS, IE
-#endif
+          do k = 1, KA
+             FLX_hydro(k) = 0.0_RP
+          end do
+          end do
+          end do
+          !$acc end parallel loop
+#else
              FLX_hydro(:) = 0.0_RP
-#ifdef _OPENACC
-          end do
-          end do
-          !$acc end kernels loop
 #endif
 
              do step = 1, MP_NSTEP_SEDIMENTATION
@@ -1587,6 +1599,7 @@ contains
 
                 ! store to history output
 #ifdef _OPENACC
+                if ( ih > 0 ) then
                 !$acc parallel loop collapse(2) async
                 do j = JS, JE
                 do i = IS, IE
@@ -1605,17 +1618,19 @@ contains
                 end do
                 end do
                 !$acc end parallel loop
+                end if
 #endif
 
                 select case ( MP_upwind_scheme_id )
                 case ( I_UPWIND )
 #ifdef _OPENACC
                    ! RHOQ2 at the entry is passed in another array (RHOQ0_sed)
-                   !$acc parallel loop collapse(4) async
+                   !$acc parallel loop collapse(3) async
                    do j = JS, JE
                    do i = IS, IE
-                   do iq = QS_MP+1, QE_MP
                    do k = KS, KE
+                   !$acc loop seq
+                   do iq = QS_MP+1, QE_MP
                       RHOQ0_sed(k,iq,i,j) = RHOQ2(k,iq)
                    end do
                    end do
@@ -1703,11 +1718,12 @@ contains
                    case ( I_UPWIND )
 #ifdef _OPENACC
                    ! as for RHOQ2 above, RHOQ2_crg at the entry is passed in another array
-                   !$acc parallel loop collapse(4) async
+                   !$acc parallel loop collapse(3) async
                    do j = JS, JE
                    do i = IS, IE
-                   do iq = QS_LT, QE_LT
                    do k = KS, KE
+                   !$acc loop seq
+                   do iq = QS_LT, QE_LT
                       RHOQ0_sed_crg(k,iq,i,j) = RHOQ2_crg(k,iq)
                    end do
                    end do
@@ -1888,12 +1904,16 @@ contains
             end do
             !$acc end parallel loop
 
-            !$acc parallel loop collapse(4) async
+            !$acc parallel loop collapse(3) async
             do j = JS, JE
             do i = IS, IE
-#endif
+            do k = KS, KE
+            !$acc loop seq
+            do iq = QS_MP+1, QE_MP
+#else
              do iq = QS_MP+1, QE_MP
              do k  = KS, KE
+#endif
                 RHOQ_t_MP(k,i,j,iq) = RHOQ_t_MP(k,i,j,iq) &
                      + ( RHOQ2(k,iq) - RHOQ(k,iq) ) / dt_MP
              enddo
@@ -1906,12 +1926,16 @@ contains
 
              if( flg_lt ) then
 #ifdef _OPENACC
-             !$acc parallel loop collapse(4) async
+             !$acc parallel loop collapse(3) async
              do j = JS, JE
              do i = IS, IE
-#endif
+             do k = KS, KE
+             !$acc loop seq
+             do iq = QS_LT, QE_LT
+#else
                 do iq = QS_LT, QE_LT
                 do k  = KS, KE
+#endif
                    RHOC_t_MP(k,i,j,iq) = RHOC_t_MP(k,i,j,iq) &
                         + ( RHOQ2_crg(k,iq) - DENS(k,i,j) * QTRC(k,i,j,iq) ) / dt_MP
                 enddo
@@ -1924,10 +1948,11 @@ contains
              endif
 
 #ifdef _OPENACC
-          !$acc parallel loop collapse(2) gang async
-          do j = JS, JE
-          do i = IS, IE
-#endif
+          call ATMOS_PHY_MP_precipitation_momentum_3D( &
+                  KA, KS, KE, IA, IS, IE, JA, JS, JE, &
+                  DENS, MOMZ, U, V, FLX_hydro, RCDZ, RFDZ, &
+                  MOMZ_t_MP, RHOU_t_MP, RHOV_t_MP )
+#else
              call ATMOS_PHY_MP_precipitation_momentum( &
                      KA, KS, KE, &
                      DENS(:,i,j), MOMZ(:,i,j), U(:,i,j), V(:,i,j),        & ! [IN]
@@ -1938,6 +1963,7 @@ contains
           enddo
           enddo
           !$acc end parallel loop
+#endif
 
           ! history output
           if ( allocated( vterm_hist ) ) then

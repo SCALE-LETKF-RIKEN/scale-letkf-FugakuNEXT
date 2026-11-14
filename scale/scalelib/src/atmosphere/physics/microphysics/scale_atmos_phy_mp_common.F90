@@ -32,6 +32,7 @@ module scale_atmos_phy_mp_common
   public :: ATMOS_PHY_MP_precipitation_upwind
 #ifdef _OPENACC
   public :: ATMOS_PHY_MP_precipitation_upwind_3D
+  public :: ATMOS_PHY_MP_precipitation_momentum_3D
 #endif
   public :: ATMOS_PHY_MP_precipitation_semilag
   public :: ATMOS_PHY_MP_precipitation_momentum
@@ -1069,7 +1070,8 @@ contains
   end subroutine ATMOS_PHY_MP_precipitation_semilag
 
   !-----------------------------------------------------------------------------
-!OCL SERIAL
+#ifdef _OPENACC
+  !> precipitation momentum transport of one column (device entry point)
   subroutine ATMOS_PHY_MP_precipitation_momentum( &
        KA, KS, KE, &
        DENS, MOMZ, U, V, mflx, &
@@ -1079,6 +1081,86 @@ contains
     implicit none
 
     integer,  intent(in), value :: KA, KS, KE
+    real(RP), intent(in)  :: DENS(KA), MOMZ(KA), U(KA), V(KA), mflx(KA)
+    real(RP), intent(in)  :: RCDZ(KA), RFDZ(KA)
+    real(RP), intent(out) :: MOMZ_t(KA), RHOU_t(KA), RHOV_t(KA)
+
+    integer :: k
+    !---------------------------------------------------------------------------
+
+    !$acc loop vector
+    do k = KS, KE
+       call MP_precipitation_momentum_k( &
+            KA, KE, k, DENS, MOMZ, U, V, mflx, RCDZ, RFDZ, &
+            MOMZ_t(k), RHOU_t(k), RHOV_t(k) )
+    end do
+
+    return
+  end subroutine ATMOS_PHY_MP_precipitation_momentum
+
+  !-----------------------------------------------------------------------------
+  !> precipitation momentum transport of all the columns
+  !! Each level reads only the input fields, so all grid points are independent.
+  !! Both device entry points share the level calculation below. Keeping it in
+  !! this file allows the compiler to inline it in the grid-point kernel.
+  !! Arrays must be present on the device. Work is queued on the default async
+  !! queue; the caller must wait before accessing the results on the host.
+  !! Only the inner box is written; its halos are preserved. FMA contraction may change rounding.
+  subroutine ATMOS_PHY_MP_precipitation_momentum_3D( &
+       KA, KS, KE, IA, IS, IE, JA, JS, JE, &
+       DENS, MOMZ, U, V, mflx, &
+       RCDZ, RFDZ,             &
+       MOMZ_t, RHOU_t, RHOV_t  )
+    implicit none
+
+    integer,  intent(in) :: KA, KS, KE, IA, IS, IE, JA, JS, JE
+    real(RP), intent(in) :: DENS(KA,IA,JA), MOMZ(KA,IA,JA)
+    real(RP), intent(in) :: U(KA,IA,JA), V(KA,IA,JA), mflx(KA,IA,JA)
+    real(RP), intent(in) :: RCDZ(KA,IA,JA), RFDZ(KA,IA,JA)
+    real(RP), intent(inout) :: MOMZ_t(KA,IA,JA), RHOU_t(KA,IA,JA), RHOV_t(KA,IA,JA)
+
+    integer :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$acc parallel loop collapse(3) async present(DENS, MOMZ, U, V, mflx, RCDZ, RFDZ, MOMZ_t, RHOU_t, RHOV_t)
+    do j = JS, JE
+    do i = IS, IE
+    do k = KS, KE
+       call MP_precipitation_momentum_k( &
+            KA, KE, k, DENS(:,i,j), MOMZ(:,i,j), U(:,i,j), V(:,i,j), &
+            mflx(:,i,j), RCDZ(:,i,j), RFDZ(:,i,j), &
+            MOMZ_t(k,i,j), RHOU_t(k,i,j), RHOV_t(k,i,j) )
+    end do
+    end do
+    end do
+    !$acc end parallel loop
+
+    return
+  end subroutine ATMOS_PHY_MP_precipitation_momentum_3D
+
+  !-----------------------------------------------------------------------------
+  subroutine MP_precipitation_momentum_k( &
+       KA, KE, k, &
+       DENS, MOMZ, U, V, mflx, &
+       RCDZ, RFDZ,             &
+       MOMZ_t, RHOU_t, RHOV_t  )
+    !$acc routine seq
+#else
+!OCL SERIAL
+  subroutine ATMOS_PHY_MP_precipitation_momentum( &
+       KA, KS, KE, &
+       DENS, MOMZ, U, V, mflx, &
+       RCDZ, RFDZ,             &
+       MOMZ_t, RHOU_t, RHOV_t  )
+    !$acc routine vector
+#endif
+    implicit none
+
+#ifdef _OPENACC
+    integer,  intent(in), value :: KA, KE, k
+#else
+    integer,  intent(in), value :: KA, KS, KE
+#endif
     real(RP), intent(in)  :: DENS  (KA)
     real(RP), intent(in)  :: MOMZ  (KA)
     real(RP), intent(in)  :: U     (KA)
@@ -1086,9 +1168,13 @@ contains
     real(RP), intent(in)  :: mflx  (KA)
     real(RP), intent(in)  :: RCDZ  (KA)
     real(RP), intent(in)  :: RFDZ  (KA)
+#ifdef _OPENACC
+    real(RP), intent(out) :: MOMZ_t, RHOU_t, RHOV_t
+#else
     real(RP), intent(out) :: MOMZ_t(KA)
     real(RP), intent(out) :: RHOU_t(KA)
     real(RP), intent(out) :: RHOV_t(KA)
+#endif
 
 #ifdef _OPENACC
     real(RP) :: flx0, flx1
@@ -1096,12 +1182,12 @@ contains
     real(RP) :: flx(KA)
 #endif
 
+#ifndef _OPENACC
     integer  :: k
+#endif
     !---------------------------------------------------------------------------
 
-#ifdef _OPENACC
-    do k = KS, KE
-#else
+#ifndef _OPENACC
     flx(KE) = 0.0_RP
 #endif
 
@@ -1110,9 +1196,9 @@ contains
     if ( k < KE ) then
        flx0 = ( mflx(k  ) + mflx(k-1) ) * MOMZ(k  ) / ( DENS(k+1) + DENS(k  ) )
        flx1 = ( mflx(k+1) + mflx(k  ) ) * MOMZ(k+1) / ( DENS(k+2) + DENS(k+1) )
-       MOMZ_t(k) = - ( flx1 - flx0 ) * RFDZ(k)
+       MOMZ_t = - ( flx1 - flx0 ) * RFDZ(k)
     else ! k = KE
-       MOMZ_t(k) = 0.0_RP
+       MOMZ_t = 0.0_RP
     end if
 #else
     do k = KS, KE-1
@@ -1132,7 +1218,7 @@ contains
     else
        flx1 = 0.0_RP
     end if
-    RHOU_t(k) = - ( flx1 - flx0 ) * RCDZ(k)
+    RHOU_t = - ( flx1 - flx0 ) * RCDZ(k)
 #else
     do k = KS-1, KE-1
        flx(k) = mflx(k) * U(k+1)
@@ -1147,10 +1233,10 @@ contains
     flx0 = mflx(k-1) * V(k)
     if ( k < KE ) then
        flx1 = mflx(k) * V(k+1)
+    else
+       flx1 = 0.0_RP
     end if
-    RHOV_t(k) = - ( flx1 - flx0 ) * RCDZ(k)
-
-    end do
+    RHOV_t = - ( flx1 - flx0 ) * RCDZ(k)
 #else
     do k = KS-1, KE-1
        flx(k) = mflx(k) * V(k+1)
@@ -1161,6 +1247,10 @@ contains
 #endif
 
     return
+#ifdef _OPENACC
+  end subroutine MP_precipitation_momentum_k
+#else
   end subroutine ATMOS_PHY_MP_precipitation_momentum
+#endif
 
 end module scale_atmos_phy_mp_common
