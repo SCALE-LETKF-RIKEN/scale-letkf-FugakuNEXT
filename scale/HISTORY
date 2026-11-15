@@ -25,6 +25,11 @@
     kernel and waits for it there (#3633). The unit tests of upstream are
     imported except those of run-comm-dyn (unit_atmos_dyn_average is not in
     this tree). Upstream timings are not measurements of this port.
+  * PROF items of the halo exchange, local change (not in upstream): an
+    exchange with an ID that is not bound to an array is counted in COMM_vars
+    and COMM_wait also when its group is exchanged in a batch. Upstream
+    counts it in COMM_vars_pers and COMM_wait_pers there, so that the number
+    of calls and the time move between the items with COMM_USE_NONPC_BATCH.
 
 == 2026-11-15 (SCALE-LETKF local changes)
 * Improvements:

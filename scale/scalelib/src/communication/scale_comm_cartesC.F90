@@ -2201,8 +2201,10 @@ contains
   !-----------------------------------------------------------------------------
   !> The exchange with the ID (checked by COMM_check_vid) is counted in the items of the
   !! persistent communication (COMM_vars_pers, COMM_wait_pers): not an ID up to COMM_vsize_max,
-  !! and not an ID not bound to an array outside of a batch, which is exchanged as a
-  !! non-persistent variable
+  !! and not an ID not bound to an array. The latter is counted in COMM_vars and COMM_wait also
+  !! in a batch (unlike the upstream SCALE, which counts it in the persistent items there), so
+  !! that the number of calls and the time of the items do not move between them with
+  !! COMM_USE_NONPC_BATCH
   function COMM_pers_item( gid, vid ) result(pers)
     implicit none
 
@@ -2210,18 +2212,10 @@ contains
     integer, intent(in) :: vid
     logical :: pers
 
-    integer :: seqid, ig
     !---------------------------------------------------------------------------
 
     pers = vid > COMM_vsize_max
-    if ( pers ) then
-       seqid = vid - COMM_vsize_max
-       if ( ginfo(gid)%pc_free(seqid) ) then
-          ig = ginfo(gid)%pc_group(seqid)
-          pers = .false.
-          if ( ig > 0 ) pers = ginfo(gid)%grp(ig)%state == COMM_PC_GROUP_BATCH
-       end if
-    end if
+    if ( pers ) pers = .not. ginfo(gid)%pc_free(vid-COMM_vsize_max)
 
     return
   end function COMM_pers_item
@@ -7171,7 +7165,12 @@ contains
                                MPI_STATUSES_IGNORE,                              &
                                ierr                                              )
              call PROF_rapend  ('COMM_mpi_wait', 3)
-             call count_bytes( 'COMM_wait_pers', 'COMM_mpi_wait', ginfo(gid)%grp(ig)%nsend )
+             ! in the item of the member waited first (see COMM_pers_item)
+             if ( ginfo(gid)%pc_free(vid) ) then
+                call count_bytes( 'COMM_wait',      'COMM_mpi_wait', ginfo(gid)%grp(ig)%nsend )
+             else
+                call count_bytes( 'COMM_wait_pers', 'COMM_mpi_wait', ginfo(gid)%grp(ig)%nsend )
+             end if
              ginfo(gid)%grp(ig)%arrived = .true.
           end if
           call G_offsets( gid, ginfo(gid)%grp(ig)%nmem, ginfo(gid)%pc_slot(vid), .true., off )
