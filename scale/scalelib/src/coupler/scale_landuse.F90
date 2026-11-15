@@ -315,11 +315,12 @@ contains
        temp(:,:) = real(LANDUSE_index_PFT(:,:,p),kind=RP)
        !$acc end kernels
 
-       call COMM_vars8( LANDUSE_frac_PFT(:,:,p), 8+2*(p-1) )
-       call COMM_vars8( temp            (:,:)  , 9+2*(p-1) )
+       ! the same vids for every p: each pair is waited for before the next one
+       call COMM_vars8( LANDUSE_frac_PFT(:,:,p), 8 )
+       call COMM_vars8( temp            (:,:)  , 9 )
 
-       call COMM_wait ( LANDUSE_frac_PFT(:,:,p), 8+2*(p-1), FILL_BND_ )
-       call COMM_wait ( temp            (:,:)  , 9+2*(p-1), FILL_BND_ )
+       call COMM_wait ( LANDUSE_frac_PFT(:,:,p), 8, FILL_BND_ )
+       call COMM_wait ( temp            (:,:)  , 9, FILL_BND_ )
 
        !$acc kernels
        LANDUSE_index_PFT(:,:,p) = aint(temp(:,:),kind=4)

@@ -96,7 +96,8 @@ contains
     use scale_const, only: &
        UNDEF => CONST_UNDEF
     use scale_comm_cartesC, only: &
-       COMM_vars8_init
+       COMM_vars8_init, &
+       COMM_vars_group_init
     implicit none
 
     character(len=*) :: tinteg_type
@@ -164,6 +165,11 @@ contains
        I_COMM_PROG_RK1(iv) = 5 + iv
        call COMM_vars8_init( 'PROG_RK1', PROG_RK1(:,:,:,iv), I_COMM_PROG_RK1(iv) )
     enddo
+    ! the variables of the stage are posted consecutively (ATMOS_DYN_tinteg_short_rk3), and then
+    ! PROG after them: two groups (COMM_vars_group_init)
+    call COMM_vars_group_init( 'DYN_RK3_stage1', &
+                               [ I_COMM_DENS_RK1, I_COMM_MOMZ_RK1, I_COMM_MOMX_RK1, I_COMM_MOMY_RK1, I_COMM_RHOT_RK1 ] )
+    call COMM_vars_group_init( 'DYN_RK3_stage1_PROG', I_COMM_PROG_RK1(1:VA) )
 
 
     I_COMM_DENS_RK2 = 1
@@ -180,6 +186,11 @@ contains
        I_COMM_PROG_RK2(iv) = 5 + iv
        call COMM_vars8_init( 'PROG_RK2', PROG_RK2(:,:,:,iv), I_COMM_PROG_RK2(iv) )
     enddo
+    ! the variables of the stage are posted consecutively (ATMOS_DYN_tinteg_short_rk3), and then
+    ! PROG after them: two groups (COMM_vars_group_init)
+    call COMM_vars_group_init( 'DYN_RK3_stage2', &
+                               [ I_COMM_DENS_RK2, I_COMM_MOMZ_RK2, I_COMM_MOMX_RK2, I_COMM_MOMY_RK2, I_COMM_RHOT_RK2 ] )
+    call COMM_vars_group_init( 'DYN_RK3_stage2_PROG', I_COMM_PROG_RK2(1:VA) )
 
     DENS_RK1(:,:,:) = UNDEF
     MOMZ_RK1(:,:,:) = UNDEF

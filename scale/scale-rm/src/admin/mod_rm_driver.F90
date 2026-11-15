@@ -149,7 +149,8 @@ contains
        FILE_GrADS_finalize
     use scale_comm_cartesC, only: &
        COMM_setup,  &
-       COMM_regist, &
+       COMM_regist,        &
+       COMM_vars_finalize, &
        COMM_finalize
     use scale_comm_cartesC_nest, only: &
        COMM_CARTESC_NEST_setup, &
@@ -607,6 +608,9 @@ contains
     call PROF_setprefx('FIN')
 
     call PROF_rapstart('All', 0)
+
+    ! release the persistent communication variables before the components free the registered arrays
+    call COMM_vars_finalize
 
     if( ATMOS_do ) call ATMOS_driver_finalize
     if( OCEAN_do ) call OCEAN_driver_finalize

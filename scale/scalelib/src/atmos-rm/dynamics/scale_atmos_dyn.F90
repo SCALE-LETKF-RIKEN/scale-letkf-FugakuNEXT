@@ -105,7 +105,8 @@ contains
     use scale_const, only: &
        UNDEF => CONST_UNDEF
     use scale_comm_cartesC, only: &
-       COMM_vars8_init
+       COMM_vars8_init, &
+       COMM_vars_group_init
     use scale_atmos_dyn_common, only: &
        ATMOS_DYN_wdamp_setup
     use scale_atmos_dyn_fvm_numfilter, only: &
@@ -266,6 +267,12 @@ contains
 
     else
 
+       ! set at every setup: COMM_vars8_init replaces them with the persistent IDs
+       I_COMM_DENS = 1
+       I_COMM_MOMZ = 2
+       I_COMM_MOMX = 3
+       I_COMM_MOMY = 4
+       I_COMM_RHOT = 5
        call COMM_vars8_init( 'DENS', DENS, I_COMM_DENS )
        call COMM_vars8_init( 'MOMZ', MOMZ, I_COMM_MOMZ )
        call COMM_vars8_init( 'MOMX', MOMX, I_COMM_MOMX )
@@ -282,6 +289,11 @@ contains
           call COMM_vars8_init( 'QTRC', QTRC(:,:,:,iq), I_COMM_QTRC(iq) )
        enddo
 
+       ! the prognostic variables and the tracers are posted consecutively (ATMOS_DYN); PROG is not
+       ! exchanged (COMM_vars_group_init)
+       call COMM_vars_group_init( 'DYN_NONE', &
+                                  [ I_COMM_DENS, I_COMM_MOMZ, I_COMM_MOMX, I_COMM_MOMY, I_COMM_RHOT, I_COMM_QTRC(1:QA) ] )
+
     endif
 
     return
@@ -289,7 +301,12 @@ contains
 
   !-----------------------------------------------------------------------------
   !> finalize
+  !! The persistent communication variables registered in ATMOS_DYN_setup and its sub-setups
+  !! (on grid 1) are released here (COMM_vars_finalize) before their arrays are freed. This
+  !! releases all the persistent variables of the grid, also those registered by other components.
   subroutine ATMOS_DYN_finalize
+    use scale_comm_cartesC, only: &
+       COMM_vars_finalize
     use scale_atmos_dyn_fvm_metric, only: &
        ATMOS_DYN_FVM_metric_finalize
     use scale_atmos_dyn_tstep_large, only: &
@@ -302,6 +319,9 @@ contains
        ATMOS_DYN_FVM_numfilter_finalize
     use scale_spnudge, only: &
        SPNUDGE_finalize
+
+    ! the registered arrays must stay allocated until the persistent requests are freed
+    call COMM_vars_finalize( gid = 1 )
 
     deallocate( I_COMM_PROG )
     deallocate( I_COMM_QTRC )

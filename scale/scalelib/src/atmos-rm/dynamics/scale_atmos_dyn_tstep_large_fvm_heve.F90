@@ -138,7 +138,8 @@ contains
        OHM => CONST_OHM, &
        UNDEF => CONST_UNDEF
     use scale_comm_cartesC, only: &
-       COMM_vars8_init
+       COMM_vars8_init, &
+       COMM_vars_group_init
     use scale_file_history, only: &
        FILE_HISTORY_reg, &
        FILE_HISTORY_put
@@ -215,6 +216,11 @@ contains
        call COMM_vars8_init( 'PROG', PROG(:,:,:,iv), I_COMM_PROG(iv) )
     end do
 
+    ! the groups of the persistent exchanges posted consecutively in ATMOS_DYN_Tstep_large_fvm_heve
+    ! (COMM_vars_group_init): the prognostic variables, and PROG after them
+    call COMM_vars_group_init( 'DYN_large_heve_state', [ I_COMM_DENS, I_COMM_MOMZ, I_COMM_MOMX, I_COMM_MOMY, I_COMM_RHOT ] )
+    call COMM_vars_group_init( 'DYN_large_heve_PROG', I_COMM_PROG(1:VA) )
+
     I_COMM_DENS_t = 1
     I_COMM_MOMZ_t = 2
     I_COMM_MOMX_t = 3
@@ -227,6 +233,9 @@ contains
     call COMM_vars8_init( 'MOMY_t', MOMY_t, I_COMM_MOMY_t )
     call COMM_vars8_init( 'RHOT_t', RHOT_t, I_COMM_RHOT_t )
     call COMM_vars8_init( 'DENS_damp', DENS_damp, I_COMM_DENS_damp )
+    ! the tendencies are posted in two runs with the wait of DENS_damp between them: two groups
+    call COMM_vars_group_init( 'DYN_large_heve_tend1', [ I_COMM_DENS_damp, I_COMM_DENS_t, I_COMM_MOMZ_t ] )
+    call COMM_vars_group_init( 'DYN_large_heve_tend2', [ I_COMM_MOMX_t, I_COMM_MOMY_t, I_COMM_RHOT_t ] )
 
     do iq = 1, QA
        I_COMM_RHOQ_t(iq) = 5 + VA + iq
@@ -235,6 +244,9 @@ contains
        call COMM_vars8_init( 'RHOQ_t', RHOQ_t(:,:,:,iq), I_COMM_RHOQ_t(iq) )
        call COMM_vars8_init( 'QTRC',   QTRC  (:,:,:,iq), I_COMM_QTRC(iq) )
     end do
+    ! the tracers are posted in the loop of the tracers and waited after it (the time integration of
+    ! a tracer waits for its own exchanges in between, at the same place in all the processes)
+    call COMM_vars_group_init( 'DYN_large_heve_QTRC', I_COMM_QTRC(1:QA) )
 
     I_COMM_mflx_z = 1
     I_COMM_mflx_x = 2
@@ -242,6 +254,12 @@ contains
     call COMM_vars8_init( 'mflx_Z', mflx(:,:,:,ZDIR), I_COMM_mflx_z )
     call COMM_vars8_init( 'mflx_X', mflx(:,:,:,XDIR), I_COMM_mflx_x )
     call COMM_vars8_init( 'mflx_Y', mflx(:,:,:,YDIR), I_COMM_mflx_y )
+    ! the mass flux in x is not exchanged in 2-D
+    if ( PRC_TwoD ) then
+       call COMM_vars_group_init( 'DYN_large_heve_mflx', [ I_COMM_mflx_z, I_COMM_mflx_y ] )
+    else
+       call COMM_vars_group_init( 'DYN_large_heve_mflx', [ I_COMM_mflx_z, I_COMM_mflx_x, I_COMM_mflx_y ] )
+    end if
 
     allocate( ZERO(KA,IA,JA) )
     ZERO(:,:,:) = 0.0_RP
