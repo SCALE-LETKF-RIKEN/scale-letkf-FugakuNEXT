@@ -65,7 +65,8 @@
 !! order that depends on the process, before they are waited in another such order: with the
 !! posts of the groups on the two grids interleaved, with a group posted after the other, with
 !! persistent and non-persistent exchanges of other variables, with an exchange of another
-!! variable between the waits, and in two rounds. The reference exchange of one variable at a
+!! variable between the waits, with exchanges of other variables between the posts (at the same
+!! place in all the processes), and in two rounds. The reference exchange of one variable at a
 !! time is not allowed for a member of a group: the result is compared with the result kept from
 !! phase A of the first configuration and with the source cells, and the values are left in the
 !! buffers by a round of all the variables posted and waited in the same order in all the
@@ -635,6 +636,13 @@ contains
     wa = perm( ga(size(ga):1:-1) )
     call run_gcase( "exchange between the waits of a group", &
                     (/ perm(ga), lone, -wa(1), V_D1, -V_D1, -wa(2:), -lone /) )
+
+    ! exchanges of other variables posted and waited between the posts of a group, at the same
+    ! place in all the processes (a 4-direction persistent variable, a non-persistent one, and the
+    ! group of grid 2); the first member posted depends on the process
+    pa = perm(ga)
+    call run_gcase( "exchanges between the posts of a group", &
+                    (/ pa(1), V_D1, -V_D1, V_N1, -V_N1, perm(gb), -perm(gb), pa(2:), lone, -perm(ga), -lone /) )
 
     ! two rounds of a group in a case
     call run_gcase( "two rounds of a group", &

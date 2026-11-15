@@ -25,6 +25,26 @@
     unit_comm_check and the upstream test_comm are imported; the dynamics
     tests of upstream (unit_atmos_dyn_average, unit_atmos_dyn_split) are not.
     Upstream timings are not measurements of this port.
+  * Persistent halo exchange in batch, local changes after the port above
+    (not in upstream). The packing kernel of a member of a group is not
+    waited at its post: the kernels of all the members are waited once,
+    when the last member is posted. A COMM_wait between the posts of a
+    group now stops with an error only if it waits a member of that group;
+    an exchange outside the group may be posted and waited there, provided
+    that it is at the same place in all the processes (it hangs otherwise,
+    and this is no longer detected). With this, the 15 fluxes of the
+    numerical filter are one group (DYN_numfilter) instead of five, and the
+    tendencies (two groups) and the tracers (one group) of the large step
+    are declared. Warm bubble, 80x80x40 on 2x2 processes and 4 GPUs, 200
+    steps: 65 -> 36 rounds and 520 -> 288 persistent sends per step and
+    process, Main_Loop 7.06 -> 6.61 s (mean of 3, one node); the history
+    and restart files are identical. Not measured in a real case.
+  * The halo exchanges of calc_numdiff in the numerical filter of the
+    tracers use the IDs 1 to 3 (as upstream) instead of 16 to 18, which are
+    the IDs of the 11th to 13th tracers (without PROG) still in exchange in
+    the tracer loop of the large step: with 12 or more tracers, the tracer
+    filter and ND_LAPLACIAN_NUM >= 3, the check of the packing buffers
+    (in all builds since the port above) stopped the run.
 
 == 2026-11-14 (SCALE-LETKF local changes)
 * Improvements:

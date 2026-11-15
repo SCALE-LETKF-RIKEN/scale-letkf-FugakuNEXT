@@ -233,6 +233,9 @@ contains
     call COMM_vars8_init( 'MOMY_t', MOMY_t, I_COMM_MOMY_t )
     call COMM_vars8_init( 'RHOT_t', RHOT_t, I_COMM_RHOT_t )
     call COMM_vars8_init( 'DENS_damp', DENS_damp, I_COMM_DENS_damp )
+    ! the tendencies are posted in two runs with the wait of DENS_damp between them: two groups
+    call COMM_vars_group_init( 'DYN_large_heve_tend1', [ I_COMM_DENS_damp, I_COMM_DENS_t, I_COMM_MOMZ_t ] )
+    call COMM_vars_group_init( 'DYN_large_heve_tend2', [ I_COMM_MOMX_t, I_COMM_MOMY_t, I_COMM_RHOT_t ] )
 
     do iq = 1, QA
        I_COMM_RHOQ_t(iq) = 5 + VA + iq
@@ -241,6 +244,9 @@ contains
        call COMM_vars8_init( 'RHOQ_t', RHOQ_t(:,:,:,iq), I_COMM_RHOQ_t(iq) )
        call COMM_vars8_init( 'QTRC',   QTRC  (:,:,:,iq), I_COMM_QTRC(iq) )
     end do
+    ! the tracers are posted in the loop of the tracers and waited after it (the time integration of
+    ! a tracer waits for its own exchanges in between, at the same place in all the processes)
+    call COMM_vars_group_init( 'DYN_large_heve_QTRC', I_COMM_QTRC(1:QA) )
 
     I_COMM_mflx_z = 1
     I_COMM_mflx_x = 2

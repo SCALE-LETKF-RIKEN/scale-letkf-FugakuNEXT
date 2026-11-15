@@ -267,6 +267,12 @@ contains
 
     else
 
+       ! set at every setup: COMM_vars8_init replaces them with the persistent IDs
+       I_COMM_DENS = 1
+       I_COMM_MOMZ = 2
+       I_COMM_MOMX = 3
+       I_COMM_MOMY = 4
+       I_COMM_RHOT = 5
        call COMM_vars8_init( 'DENS', DENS, I_COMM_DENS )
        call COMM_vars8_init( 'MOMZ', MOMZ, I_COMM_MOMZ )
        call COMM_vars8_init( 'MOMX', MOMX, I_COMM_MOMX )

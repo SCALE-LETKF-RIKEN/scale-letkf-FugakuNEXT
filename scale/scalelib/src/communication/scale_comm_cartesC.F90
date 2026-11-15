@@ -291,7 +291,7 @@ module scale_comm_cartesC
   logical, private             :: initialized = .false.
 
   !> number of the groups whose posts are not complete (the first member is posted, the last is not),
-  !! on all the grids: COMM_wait is not allowed then
+  !! on all the grids: COMM_wait of a member of such a group is not allowed then (COMM_group_wait_check)
   integer, private             :: COMM_grp_posting = 0
 
   !-----------------------------------------------------------------------------
@@ -1185,7 +1185,7 @@ contains
     COMM_CHECK_CONTIGUOUS("COMM_wait_3D",var)
     addr = COMM_address( var )
     call COMM_check_vid( "COMM_wait_3D", vid, gid_, .true., 0, addr, pid )
-    if ( COMM_grp_posting > 0 ) call COMM_group_wait_error( "COMM_wait_3D", vid, gid_ )
+    if ( COMM_grp_posting > 0 ) call COMM_group_wait_check( "COMM_wait_3D", vid, gid_ )
     call COMM_packbuf_release( "COMM_wait_3D", gid_, pid, vid, 3, addr )
 
     if ( vid > COMM_vsize_max ) then
@@ -1333,7 +1333,7 @@ contains
     COMM_CHECK_CONTIGUOUS("COMM_wait_2D",var)
     addr = COMM_address( var )
     call COMM_check_vid( "COMM_wait_2D", vid, gid_, .false., 0, addr, pid )
-    if ( COMM_grp_posting > 0 ) call COMM_group_wait_error( "COMM_wait_2D", vid, gid_ )
+    if ( COMM_grp_posting > 0 ) call COMM_group_wait_check( "COMM_wait_2D", vid, gid_ )
     call COMM_packbuf_release( "COMM_wait_2D", gid_, pid, vid, 2, addr )
 
     call PROF_rapstart('COMM_wait', 2)
@@ -2325,10 +2325,15 @@ contains
   !! processes must call it in the same order, with the same IDs (it aborts otherwise).
   !! The rule of the consecutive posts: between the post (COMM_vars8) of the first member of the
   !! group in a round and that of the last member,
-  !!   - no COMM_wait may be called, with any ID on any grid (it aborts), and
-  !!   - no operation that waits for other processes (a collective communication, a barrier, the
-  !!     completion of a message) may be placed where the processes differ (it may hang; this is
-  !!     not detected). The same collective calls in all the processes are allowed.
+  !!   - no member of the group may be waited (it aborts), and
+  !!   - no operation that waits for other processes (a COMM_wait of another exchange, a collective
+  !!     communication, a barrier, the completion of a message) may be placed where the processes
+  !!     differ (it may hang; this is not detected): the messages of a batch are started only at
+  !!     the post of the last member. The same calls at the same place in all the processes are
+  !!     allowed, e.g., an exchange of a variable outside the group that is posted and waited
+  !!     between the posts of the members in all the processes.
+  !! A member posted must not be changed until it is waited: in a batch it is packed by a kernel in
+  !! the queue, which is waited only at the post of the last member.
   !! All the members are posted in a round before they are waited; the order of the posts and of
   !! the waits may differ among the processes. A member waited may not be posted again before all
   !! the members are waited (it aborts).
@@ -2941,9 +2946,9 @@ contains
   end subroutine COMM_group_waited
 
   !-----------------------------------------------------------------------------
-  !> COMM_wait while the posts of a group are not complete (COMM_grp_posting > 0): abort, with the
-  !! members not posted if the ID waited is a member of such a group
-  subroutine COMM_group_wait_error( routine_name, vid, gid )
+  !> COMM_wait while the posts of a group are not complete (COMM_grp_posting > 0): abort if the
+  !! exchange waited is that of a member of such a group, with the group and the members not posted
+  subroutine COMM_group_wait_check( routine_name, vid, gid )
     use scale_prc, only: &
        PRC_abort
     implicit none
@@ -2964,19 +2969,18 @@ contains
        end if
     end if
 
-    if ( ig > 0 ) then
-       LOG_ERROR(routine_name,*) 'a member of the group is waited before all its members are posted: ', &
-                                 trim(ginfo(gid)%grp(ig)%name)
-       LOG_ERROR_CONT(*) 'grid, ID waited: ', gid, vid
-       do m = 1, ginfo(gid)%grp(ig)%nmem
-          if ( ginfo(gid)%pc_gstat(ginfo(gid)%grp(ig)%seq(m)) == 0 ) then
-             LOG_ERROR_CONT(*) 'ID of a member not posted: ', ginfo(gid)%grp(ig)%seq(m) + COMM_vsize_max
-          end if
-       end do
-    else
-       LOG_ERROR(routine_name,*) 'COMM_wait is called while the posts of a group are not complete'
-       LOG_ERROR_CONT(*) '(no exchange may be waited between the posts of the members of a group); grid, ID waited: ', gid, vid
-    end if
+    ! an exchange outside the groups with posts not complete may be waited (at the same place in
+    ! all the processes: see COMM_vars_group_init)
+    if ( ig == 0 ) return
+
+    LOG_ERROR(routine_name,*) 'a member of the group is waited before all its members are posted: ', &
+                              trim(ginfo(gid)%grp(ig)%name)
+    LOG_ERROR_CONT(*) 'grid, ID waited: ', gid, vid
+    do m = 1, ginfo(gid)%grp(ig)%nmem
+       if ( ginfo(gid)%pc_gstat(ginfo(gid)%grp(ig)%seq(m)) == 0 ) then
+          LOG_ERROR_CONT(*) 'ID of a member not posted: ', ginfo(gid)%grp(ig)%seq(m) + COMM_vsize_max
+       end if
+    end do
     do g = 1, COMM_gid
        do m = 1, ginfo(g)%grp_num
           if ( ginfo(g)%grp(m)%nposted > 0 .and. ginfo(g)%grp(m)%nposted < ginfo(g)%grp(m)%nmem ) then
@@ -2988,7 +2992,7 @@ contains
     call PRC_abort
 
     return
-  end subroutine COMM_group_wait_error
+  end subroutine COMM_group_wait_check
 
   !-----------------------------------------------------------------------------
   !> Register a variable for persistent communication (COMM_vars_init, COMM_vars8_init)
@@ -6545,7 +6549,11 @@ contains
                          var, ginfo(gid)%grp(ig)%sendbuf, ginfo(gid)%grp(ig)%nbuf, &
                          gid, .true., off )
           if ( ginfo(gid)%grp(ig)%nposted == ginfo(gid)%grp(ig)%nmem ) then
+             ! the packing kernels of all the members are waited once, before the messages are started
+             ! (COMM_pack of pack8_3D is the time to queue the kernel only)
+             call PROF_rapstart('COMM_pack_wait', 3)
              !$acc wait
+             call PROF_rapend  ('COMM_pack_wait', 3)
              call PROF_rapstart('COMM_mpi_post', 3)
              call MPI_STARTALL( ginfo(gid)%grp(ig)%nreq, ginfo(gid)%grp(ig)%req(1:ginfo(gid)%grp(ig)%nreq), ierr )
              call PROF_rapend  ('COMM_mpi_post', 3)
@@ -6570,7 +6578,9 @@ contains
                        var, gid, pid)
     end if
 
+    call PROF_rapstart('COMM_pack_wait', 3)
     !$acc wait
+    call PROF_rapend  ('COMM_pack_wait', 3)
     call PROF_rapstart('COMM_mpi_post', 3)
     call MPI_STARTALL(ginfo(gid)%preq_cnt(vid), ginfo(gid)%preq_list(1:ginfo(gid)%preq_cnt(vid),vid), ierr)
     call PROF_rapend  ('COMM_mpi_post', 3)
@@ -6960,7 +6970,11 @@ contains
   !! section of each direction (G_N etc.: to the neighbor in that direction). The rows in y (N/S)
   !! are packed only with with_NS (the batch; the layout 2 sends them from the variable), the W/E
   !! halos are the rows of L2_range_WE, and the corners are IHALO x JHALO blocks to the diagonal
-  !! neighbors. The sections are those of pack8_sections, as in the requests
+  !! neighbors. The sections are those of pack8_sections, as in the requests.
+  !! The kernel is left in the queue: the caller waits for it before the messages are started (one
+  !! wait for all the members of a batch). The variable and the buffer are on the device (a
+  !! persistent variable, and the buffers of the layout 2 and of a group), where the data region
+  !! below copies nothing
   subroutine pack8_3D( KA, IA, IS, IE, JA, JS, JE, &
                        IHALO, JHALO, &
                        var, buf, nbuf, gid, with_NS, off )
@@ -7124,8 +7138,6 @@ contains
        enddo
     end if
     !$acc end parallel
-
-    !$acc wait
 
     call PROF_rapend('COMM_pack', 3)
 

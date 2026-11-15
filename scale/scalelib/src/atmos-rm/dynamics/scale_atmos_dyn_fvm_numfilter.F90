@@ -94,6 +94,13 @@ module scale_atmos_dyn_fvm_numfilter
   integer :: I_COMM_QTRC_Z
   integer :: I_COMM_QTRC_X
   integer :: I_COMM_QTRC_Y
+  ! IDs of the exchanges of calc_numdiff (three from each; the values of upstream):
+  ! - in ATMOS_DYN_fvm_numfilter_flux, the exchanges of num_diff (registered with 1 to 15) are in progress
+  ! - in ATMOS_DYN_fvm_numfilter_flux_q, called in the loop of the tracers of the large step, the
+  !   exchanges of the tracers before (registered with IDs from 6) are in progress, and no exchange of
+  !   this module is
+  integer, parameter :: I_COMM_NUMDIFF   = 16
+  integer, parameter :: I_COMM_NUMDIFF_Q = 1
 
 contains
   !-----------------------------------------------------------------------------
@@ -176,22 +183,20 @@ contains
     call COMM_vars8_init( 'num_diff_QTRC_X', num_diff_q(:,:,:,XDIR), I_COMM_QTRC_X )
     call COMM_vars8_init( 'num_diff_QTRC_Y', num_diff_q(:,:,:,YDIR), I_COMM_QTRC_Y )
 
-    ! the three fluxes of each variable are posted consecutively (ATMOS_DYN_fvm_numfilter_flux and
-    ! ATMOS_DYN_fvm_numfilter_flux_q), and calc_numdiff waits between the variables: a group for
-    ! each variable (COMM_vars_group_init). The flux in x is not exchanged in 2-D
+    ! the fluxes of the five variables are posted before any of them is waited
+    ! (ATMOS_DYN_fvm_numfilter_flux): a group (COMM_vars_group_init). calc_numdiff waits for its own
+    ! exchanges between the variables, at the same place in all the processes. The three fluxes of
+    ! a tracer are another group (ATMOS_DYN_fvm_numfilter_flux_q). The flux in x is not exchanged in 2-D
     if ( PRC_TwoD ) then
-       call COMM_vars_group_init( 'DYN_numfilter_DENS', [ I_COMM_DENS_Z, I_COMM_DENS_Y ] )
-       call COMM_vars_group_init( 'DYN_numfilter_MOMZ', [ I_COMM_MOMZ_Z, I_COMM_MOMZ_Y ] )
-       call COMM_vars_group_init( 'DYN_numfilter_MOMX', [ I_COMM_MOMX_Z, I_COMM_MOMX_Y ] )
-       call COMM_vars_group_init( 'DYN_numfilter_MOMY', [ I_COMM_MOMY_Z, I_COMM_MOMY_Y ] )
-       call COMM_vars_group_init( 'DYN_numfilter_RHOT', [ I_COMM_RHOT_Z, I_COMM_RHOT_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter', &
+            [ I_COMM_DENS_Z, I_COMM_DENS_Y, I_COMM_MOMZ_Z, I_COMM_MOMZ_Y, I_COMM_MOMX_Z, I_COMM_MOMX_Y, &
+              I_COMM_MOMY_Z, I_COMM_MOMY_Y, I_COMM_RHOT_Z, I_COMM_RHOT_Y ] )
        call COMM_vars_group_init( 'DYN_numfilter_QTRC', [ I_COMM_QTRC_Z, I_COMM_QTRC_Y ] )
     else
-       call COMM_vars_group_init( 'DYN_numfilter_DENS', [ I_COMM_DENS_Z, I_COMM_DENS_X, I_COMM_DENS_Y ] )
-       call COMM_vars_group_init( 'DYN_numfilter_MOMZ', [ I_COMM_MOMZ_Z, I_COMM_MOMZ_X, I_COMM_MOMZ_Y ] )
-       call COMM_vars_group_init( 'DYN_numfilter_MOMX', [ I_COMM_MOMX_Z, I_COMM_MOMX_X, I_COMM_MOMX_Y ] )
-       call COMM_vars_group_init( 'DYN_numfilter_MOMY', [ I_COMM_MOMY_Z, I_COMM_MOMY_X, I_COMM_MOMY_Y ] )
-       call COMM_vars_group_init( 'DYN_numfilter_RHOT', [ I_COMM_RHOT_Z, I_COMM_RHOT_X, I_COMM_RHOT_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter', &
+            [ I_COMM_DENS_Z, I_COMM_DENS_X, I_COMM_DENS_Y, I_COMM_MOMZ_Z, I_COMM_MOMZ_X, I_COMM_MOMZ_Y, &
+              I_COMM_MOMX_Z, I_COMM_MOMX_X, I_COMM_MOMX_Y, I_COMM_MOMY_Z, I_COMM_MOMY_X, I_COMM_MOMY_Y, &
+              I_COMM_RHOT_Z, I_COMM_RHOT_X, I_COMM_RHOT_Y ] )
        call COMM_vars_group_init( 'DYN_numfilter_QTRC', [ I_COMM_QTRC_Z, I_COMM_QTRC_X, I_COMM_QTRC_Y ] )
     end if
 
@@ -694,7 +699,7 @@ contains
                        dens_diff,        & ! (in)
                        TwoD,             & ! (in)
                        ND_LAPLACIAN_NUM, & ! (in)
-                       0, 0, 0, KE )
+                       0, 0, 0, KE, I_COMM_NUMDIFF )
 
     call PROF_rapstart("NumFilter_Main", 3)
 
@@ -804,7 +809,7 @@ contains
                        VELZ,             & ! (in)
                        TwoD,             & ! (in)
                        ND_LAPLACIAN_NUM, & ! (in)
-                       1, 0, 0, KE-1 )
+                       1, 0, 0, KE-1, I_COMM_NUMDIFF )
 
     call PROF_rapstart("NumFilter_Main", 3)
 
@@ -931,7 +936,7 @@ contains
                        VELX,             & ! (in)
                        TwoD,             & ! (in)
                        ND_LAPLACIAN_NUM, & ! (in)
-                       0, 1, 0, KE )
+                       0, 1, 0, KE, I_COMM_NUMDIFF )
 
 
     call PROF_rapstart("NumFilter_Main", 3)
@@ -1073,7 +1078,7 @@ contains
                        VELY,             & ! (in)
                        TwoD,             & ! (in)
                        ND_LAPLACIAN_NUM, & ! (in)
-                       0, 0, 1, KE )
+                       0, 0, 1, KE, I_COMM_NUMDIFF )
 
     call PROF_rapstart("NumFilter_Main", 3)
 
@@ -1189,7 +1194,7 @@ contains
                        pott_diff,        & ! (in)
                        TwoD,             & ! (in)
                        ND_LAPLACIAN_NUM, & ! (in)
-                       0, 0, 0, KE )
+                       0, 0, 0, KE, I_COMM_NUMDIFF )
 
     call PROF_rapstart("NumFilter_Main", 3)
 
@@ -1496,7 +1501,7 @@ contains
                           qv_diff,          & ! (in)
                           TwoD,             & ! (in)
                           ND_LAPLACIAN_NUM, & ! (in)
-                          0, 0, 0, KE )
+                          0, 0, 0, KE, I_COMM_NUMDIFF_Q )
 
     else ! not qv
 
@@ -1504,7 +1509,7 @@ contains
                           QTRC,             & ! (in)
                           TwoD,             & ! (in)
                           ND_LAPLACIAN_NUM, & ! (in)
-                          0, 0, 0, KE )
+                          0, 0, 0, KE, I_COMM_NUMDIFF_Q )
 
     endif ! QV or not?
 
@@ -1763,7 +1768,8 @@ contains
        data,              &
        TwoD,              &
        nd_laplacian_num,  &
-       KO, IO, JO, KEE    )
+       KO, IO, JO, KEE,   &
+       vid                )
     use scale_prc, only: PRC_abort
     use scale_comm_cartesC, only: &
        COMM_vars8, &
@@ -1779,6 +1785,7 @@ contains
     integer,  intent(in)  :: IO
     integer,  intent(in)  :: JO
     integer,  intent(in)  :: KEE
+    integer,  intent(in)  :: vid !< the first of the three IDs of the halo exchanges (vid to vid+2)
 
     integer :: i_in, i_out, i_tmp
     integer :: no
@@ -1820,15 +1827,15 @@ contains
 
        call PROF_rapstart("NumFilter_Comm", 3)
 
-       call COMM_vars8( work(:,:,:,ZDIR,i_in),  16 )
+       call COMM_vars8( work(:,:,:,ZDIR,i_in),  vid   )
        if ( .not. TwoD ) &
-       call COMM_vars8( work(:,:,:,XDIR,i_in),  17 )
-       call COMM_vars8( work(:,:,:,YDIR,i_in),  18 )
+       call COMM_vars8( work(:,:,:,XDIR,i_in),  vid+1 )
+       call COMM_vars8( work(:,:,:,YDIR,i_in),  vid+2 )
 
-       call COMM_wait ( work(:,:,:,ZDIR,i_in),  16 )
+       call COMM_wait ( work(:,:,:,ZDIR,i_in),  vid   )
        if ( .not. TwoD ) &
-       call COMM_wait ( work(:,:,:,XDIR,i_in),  17 )
-       call COMM_wait ( work(:,:,:,YDIR,i_in),  18 )
+       call COMM_wait ( work(:,:,:,XDIR,i_in),  vid+1 )
+       call COMM_wait ( work(:,:,:,YDIR,i_in),  vid+2 )
 
        call PROF_rapend  ("NumFilter_Comm", 3)
 

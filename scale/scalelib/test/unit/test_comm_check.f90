@@ -20,11 +20,6 @@
 !!   pc_rel_nowait : COMM_vars_finalize is called while a persistent exchange is posted and not waited
 !! The groups of persistent variables (COMM_vars_group_init, issue #3594), with a group of two
 !! variables on grid 1 (vid1 and vid3):
-!!   grp_wait_out  : a persistent variable outside the group is waited after the first member is
-!!                   posted (the posts of the group are not complete)
-!!   grp_wait_grid : the same with a persistent variable on grid 2
-!!   grp_wait_np   : the same with a non-persistent exchange (3D)
-!!   grp_wait_2d   : the same with a 2D exchange
 !!   grp_wait_mem  : the member posted is waited before the other member is posted
 !!   grp_repost    : a member waited is posted again before the other member is waited
 !!   grp_rel_round : COMM_vars_finalize is called in a round of the group (a member not waited)
@@ -43,7 +38,7 @@
 !! wait_other, other_grid, foreign_array, pc_same_vid, pc_dir, pc_released and pc_rel_nowait need
 !! persistent IDs and must be run with persistent communication (comm_check_pc.conf); without a
 !! persistent ID they stop with a distinct error.
-!! The modes of the groups need persistent IDs too; the runtime checks (grp_wait_*, grp_repost,
+!! The modes of the groups need persistent IDs too; the runtime checks (grp_wait_mem, grp_repost,
 !! grp_rel_round, grp_in_flight) are made in both states of the group (checked: comm_check_pc.conf; in batch:
 !! comm_check_batch.conf).
 !! The checks are done in every build, so this program does not depend on -DDEBUG.
@@ -92,7 +87,6 @@ program test_comm_check
        .or. mode == 'other_grid' .or. mode == 'foreign_array' .or. mode == 'post_nowait' &
        .or. mode == 'wait_rank' .or. mode == 'wait_array' .or. mode == 'pc_same_vid' .or. mode == 'pc_dir' &
        .or. mode == 'pc_released' .or. mode == 'pc_rel_nowait' &
-       .or. mode == 'grp_wait_out' .or. mode == 'grp_wait_grid' .or. mode == 'grp_wait_np' .or. mode == 'grp_wait_2d' &
        .or. mode == 'grp_wait_mem' .or. mode == 'grp_repost' .or. mode == 'grp_rel_round' .or. mode == 'grp_same_pid' &
        .or. mode == 'grp_dup' .or. mode == 'grp_4dir' .or. mode == 'grp_range' .or. mode == 'grp_rank_n' &
        .or. mode == 'grp_rank_id' .or. mode == 'grp_in_flight' .or. mode == 'batch_nol2' )
@@ -243,29 +237,6 @@ program test_comm_check
      call COMM_vars8( a3d, vid1, gid=gid1 )
      call COMM_vars_finalize( gid1 )
      call COMM_wait ( a3d, vid1, .false., gid=gid1 )
-  case ( 'grp_wait_out' )
-     ! must abort at the wait of d3d: the posts of the group are not complete
-     call COMM_vars8( a3d, vid1, gid=gid1 )
-     call COMM_vars8( d3d, vid4, gid=gid1 )
-     call COMM_wait ( d3d, vid4, .false., gid=gid1 )
-     call COMM_vars8( c3d, vid3, gid=gid1 )
-     call COMM_wait ( a3d, vid1, .false., gid=gid1 )
-     call COMM_wait ( c3d, vid3, .false., gid=gid1 )
-  case ( 'grp_wait_grid' )
-     ! must abort at the wait of b3d on grid 2
-     call COMM_vars8( a3d, vid1, gid=gid1 )
-     call COMM_vars8( b3d, vid2, gid=gid2 )
-     call COMM_wait ( b3d, vid2, .false., gid=gid2 )
-  case ( 'grp_wait_np' )
-     ! must abort at the wait of the non-persistent exchange
-     call COMM_vars8( a3d, vid1, gid=gid1 )
-     call COMM_vars8( e3d, 5, gid=gid1 )
-     call COMM_wait ( e3d, 5, .false., gid=gid1 )
-  case ( 'grp_wait_2d' )
-     ! must abort at the wait of the 2D exchange
-     call COMM_vars8( a3d, vid1, gid=gid1 )
-     call COMM_vars8( c2d, 5, gid=gid1 )
-     call COMM_wait ( c2d, 5, .false., gid=gid1 )
   case ( 'grp_wait_mem' )
      ! must abort at the wait of a3d: c3d is not posted
      call COMM_vars8( a3d, vid1, gid=gid1 )

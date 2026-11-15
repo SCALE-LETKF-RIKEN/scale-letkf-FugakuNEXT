@@ -85,7 +85,7 @@ run: run-comm-check run-comm-order
 # run) use the layout 2 and the batch, and the files named comm_*.conf set both explicitly.
 COMM_CHECK_MODES = packbuf wait_nopost post_nowait wait_rank wait_array
 COMM_CHECK_PC_MODES = wait_other other_grid foreign_array pc_same_vid pc_dir pc_released pc_rel_nowait
-COMM_CHECK_GRP_RUN_MODES = grp_wait_out grp_wait_grid grp_wait_np grp_wait_2d grp_wait_mem grp_repost grp_rel_round grp_in_flight
+COMM_CHECK_GRP_RUN_MODES = grp_wait_mem grp_repost grp_rel_round grp_in_flight
 COMM_CHECK_GRP_DEF_MODES = grp_same_pid grp_dup grp_4dir grp_range grp_rank_n grp_rank_id
 COMM_CHECK_RUNS = $(foreach m,$(COMM_CHECK_MODES),run.conf:$(m)) $(foreach m,$(COMM_CHECK_PC_MODES),comm_check_pc.conf:$(m)) \
   $(foreach m,$(COMM_CHECK_GRP_RUN_MODES) $(COMM_CHECK_GRP_DEF_MODES),comm_check_pc.conf:$(m)) \
@@ -106,7 +106,6 @@ run-comm-check:
 	    pc_released) expected='vid is invalid: not initialized' ;; \
 	    pc_rel_nowait) expected='still active at the release' ;; \
 	    grp_wait_mem) expected='waited before all its members are posted' ;; \
-	    grp_wait_*)  expected='while the posts of a group are not complete' ;; \
 	    grp_repost)  expected='posted again before all the members are waited' ;; \
 	    grp_rel_round) expected='a round of the group is in progress at the release' ;; \
 	    grp_in_flight) expected='a member is in an exchange in progress' ;; \
