@@ -89,6 +89,7 @@ module mod_atmos_bnd_driver
   !
   !++ Private parameters & variables
   !
+  integer,  private, allocatable :: I_COMM_fillhalo(:) !< IDs of the exchanges of ATMOS_BOUNDARY_var_fillhalo and ATMOS_BOUNDARY_alpha_fillhalo (a group)
   character(len=H_SHORT), private :: ATMOS_BOUNDARY_TYPE         = 'NONE'
   character(len=H_LONG),  private :: ATMOS_BOUNDARY_IN_BASENAME  = ''
   logical,                private :: ATMOS_BOUNDARY_IN_BASENAME_ADD_NUM = .false.
@@ -176,6 +177,9 @@ contains
   !-----------------------------------------------------------------------------
   !> Setup
   subroutine ATMOS_BOUNDARY_driver_setup
+    use scale_comm_cartesC, only: &
+       COMM_vars8_init, &
+       COMM_vars_group_init
     use scale_prc, only: &
        PRC_abort
     use scale_const, only: &
@@ -340,6 +344,16 @@ contains
     ATMOS_BOUNDARY_POTT(:,:,:)   = UNDEF
     ATMOS_BOUNDARY_QTRC(:,:,:,:) = UNDEF
     !$acc enter data create(ATMOS_BOUNDARY_DENS, ATMOS_BOUNDARY_VELZ, ATMOS_BOUNDARY_VELX, ATMOS_BOUNDARY_VELY, ATMOS_BOUNDARY_POTT, ATMOS_BOUNDARY_QTRC)
+
+    ! the exchanges of ATMOS_BOUNDARY_var_fillhalo and of ATMOS_BOUNDARY_alpha_fillhalo are posted
+    ! consecutively: one group of IDs that are not bound to the arrays, used by both
+    if ( allocated( I_COMM_fillhalo ) ) deallocate( I_COMM_fillhalo )
+    allocate( I_COMM_fillhalo(5+BND_QA) )
+    do iq = 1, 5+BND_QA
+       I_COMM_fillhalo(iq) = iq
+       call COMM_vars8_init( 'ATMOS_BOUNDARY_fillhalo', I_COMM_fillhalo(iq) )
+    end do
+    call COMM_vars_group_init( 'ATMOS_BOUNDARY_fillhalo', I_COMM_fillhalo(:) )
 
     allocate( ATMOS_BOUNDARY_alpha_DENS(KA,IA,JA) )
     allocate( ATMOS_BOUNDARY_alpha_VELZ(KA,IA,JA) )
@@ -661,22 +675,22 @@ contains
 !!$    end do
 !!$    end do
 
-    call COMM_vars8( ATMOS_BOUNDARY_DENS(:,:,:),   1 )
-    call COMM_vars8( ATMOS_BOUNDARY_VELZ(:,:,:),   2 )
-    call COMM_vars8( ATMOS_BOUNDARY_VELX(:,:,:),   3 )
-    call COMM_vars8( ATMOS_BOUNDARY_VELY(:,:,:),   4 )
-    call COMM_vars8( ATMOS_BOUNDARY_POTT(:,:,:),   5 )
+    call COMM_vars8( ATMOS_BOUNDARY_DENS(:,:,:), I_COMM_fillhalo(1) )
+    call COMM_vars8( ATMOS_BOUNDARY_VELZ(:,:,:), I_COMM_fillhalo(2) )
+    call COMM_vars8( ATMOS_BOUNDARY_VELX(:,:,:), I_COMM_fillhalo(3) )
+    call COMM_vars8( ATMOS_BOUNDARY_VELY(:,:,:), I_COMM_fillhalo(4) )
+    call COMM_vars8( ATMOS_BOUNDARY_POTT(:,:,:), I_COMM_fillhalo(5) )
     do iq = 1, BND_QA
-       call COMM_vars8( ATMOS_BOUNDARY_QTRC(:,:,:,iq), 5+iq )
+       call COMM_vars8( ATMOS_BOUNDARY_QTRC(:,:,:,iq), I_COMM_fillhalo(5+iq) )
     end do
 
-    call COMM_wait ( ATMOS_BOUNDARY_DENS(:,:,:),   1, .false. )
-    call COMM_wait ( ATMOS_BOUNDARY_VELZ(:,:,:),   2, .false. )
-    call COMM_wait ( ATMOS_BOUNDARY_VELX(:,:,:),   3, .false. )
-    call COMM_wait ( ATMOS_BOUNDARY_VELY(:,:,:),   4, .false. )
-    call COMM_wait ( ATMOS_BOUNDARY_POTT(:,:,:),   5, .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_DENS(:,:,:), I_COMM_fillhalo(1), .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_VELZ(:,:,:), I_COMM_fillhalo(2), .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_VELX(:,:,:), I_COMM_fillhalo(3), .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_VELY(:,:,:), I_COMM_fillhalo(4), .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_POTT(:,:,:), I_COMM_fillhalo(5), .false. )
     do iq = 1, BND_QA
-       call COMM_wait ( ATMOS_BOUNDARY_QTRC(:,:,:,iq), 5+iq, .false. )
+       call COMM_wait ( ATMOS_BOUNDARY_QTRC(:,:,:,iq), I_COMM_fillhalo(5+iq), .false. )
     end do
 
     return
@@ -714,22 +728,22 @@ contains
 !!$    enddo
 !!$    enddo
 
-    call COMM_vars8( ATMOS_BOUNDARY_alpha_DENS(:,:,:),   1 )
-    call COMM_vars8( ATMOS_BOUNDARY_alpha_VELZ(:,:,:),   2 )
-    call COMM_vars8( ATMOS_BOUNDARY_alpha_VELX(:,:,:),   3 )
-    call COMM_vars8( ATMOS_BOUNDARY_alpha_VELY(:,:,:),   4 )
-    call COMM_vars8( ATMOS_BOUNDARY_alpha_POTT(:,:,:),   5 )
+    call COMM_vars8( ATMOS_BOUNDARY_alpha_DENS(:,:,:), I_COMM_fillhalo(1) )
+    call COMM_vars8( ATMOS_BOUNDARY_alpha_VELZ(:,:,:), I_COMM_fillhalo(2) )
+    call COMM_vars8( ATMOS_BOUNDARY_alpha_VELX(:,:,:), I_COMM_fillhalo(3) )
+    call COMM_vars8( ATMOS_BOUNDARY_alpha_VELY(:,:,:), I_COMM_fillhalo(4) )
+    call COMM_vars8( ATMOS_BOUNDARY_alpha_POTT(:,:,:), I_COMM_fillhalo(5) )
     do iq = 1, BND_QA
-       call COMM_vars8( ATMOS_BOUNDARY_alpha_QTRC(:,:,:,iq), 5+iq )
+       call COMM_vars8( ATMOS_BOUNDARY_alpha_QTRC(:,:,:,iq), I_COMM_fillhalo(5+iq) )
     end do
 
-    call COMM_wait ( ATMOS_BOUNDARY_alpha_DENS(:,:,:),   1, .false. )
-    call COMM_wait ( ATMOS_BOUNDARY_alpha_VELZ(:,:,:),   2, .false. )
-    call COMM_wait ( ATMOS_BOUNDARY_alpha_VELX(:,:,:),   3, .false. )
-    call COMM_wait ( ATMOS_BOUNDARY_alpha_VELY(:,:,:),   4, .false. )
-    call COMM_wait ( ATMOS_BOUNDARY_alpha_POTT(:,:,:),   5, .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_alpha_DENS(:,:,:), I_COMM_fillhalo(1), .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_alpha_VELZ(:,:,:), I_COMM_fillhalo(2), .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_alpha_VELX(:,:,:), I_COMM_fillhalo(3), .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_alpha_VELY(:,:,:), I_COMM_fillhalo(4), .false. )
+    call COMM_wait ( ATMOS_BOUNDARY_alpha_POTT(:,:,:), I_COMM_fillhalo(5), .false. )
     do iq = 1, BND_QA
-       call COMM_wait ( ATMOS_BOUNDARY_alpha_QTRC(:,:,:,iq), 5+iq, .false. )
+       call COMM_wait ( ATMOS_BOUNDARY_alpha_QTRC(:,:,:,iq), I_COMM_fillhalo(5+iq), .false. )
     end do
 
     !$acc update host(ATMOS_BOUNDARY_alpha_DENS,ATMOS_BOUNDARY_alpha_VELZ,ATMOS_BOUNDARY_alpha_VELX,ATMOS_BOUNDARY_alpha_VELY,ATMOS_BOUNDARY_alpha_POTT)

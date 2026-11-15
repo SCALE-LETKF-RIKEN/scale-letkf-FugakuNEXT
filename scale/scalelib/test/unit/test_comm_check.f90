@@ -33,11 +33,23 @@
 !!   batch_nol2    : COMM_USE_BATCH without COMM_USE_PC_LAYOUT2 (COMM_setup aborts; the mode does
 !!                   nothing itself): comm_check_batch_nolayout2.conf, and comm_check_batch_nopc.conf
 !!                   without persistent communication
+!!   npb_nobatch   : COMM_USE_NONPC_BATCH without COMM_USE_BATCH (COMM_setup aborts; the mode does
+!!                   nothing itself): comm_check_nonpc_batch_nobatch.conf
+!! The IDs not bound to arrays (COMM_vars8_init without the array, issue #3624), with a group of two
+!! such IDs on grid 1 (vid6 and vid7):
+!!   free_dir      : an unbound ID is posted with COMM_vars (it is for the 8-direction exchange)
+!!   free_2d       : an unbound ID is posted with a 2D array
+!!   free_wait_arr : an exchange posted with an unbound ID is waited with another array
+!!   free_same_vid : two unbound IDs reserved with the same vid (they share the packing buffer) are
+!!                   declared as a group
+!!   free_wait_mem : the member posted is waited before the other member is posted
 !! The configuration file (the first argument) gives the process layout and the communication mode.
 !! The valid uses of the IDs, which must pass the checks, are tested in test_comm (./unit).
 !! wait_other, other_grid, foreign_array, pc_same_vid, pc_dir, pc_released and pc_rel_nowait need
 !! persistent IDs and must be run with persistent communication (comm_check_pc.conf); without a
 !! persistent ID they stop with a distinct error.
+!! The modes of the unbound IDs (free_*) need persistent communication too; free_wait_arr and
+!! free_wait_mem are made in both states of the group (comm_check_pc.conf, comm_check_batch.conf).
 !! The modes of the groups need persistent IDs too; the runtime checks (grp_wait_mem, grp_repost,
 !! grp_rel_round, grp_in_flight) are made in both states of the group (checked: comm_check_pc.conf; in batch:
 !! comm_check_batch.conf).
@@ -66,6 +78,7 @@ program test_comm_check
      COMM_vars_init, &
      COMM_vars8_init, &
      COMM_vars_finalize, &
+     COMM_vars, &
      COMM_vars8, &
      COMM_wait, &
      COMM_vars_group_init
@@ -77,8 +90,8 @@ program test_comm_check
   real(RP), allocatable :: c2d(:,:)
   character(len=16) :: mode
   integer :: gid1, gid2
-  integer :: vid1, vid2, vid3, vid4, vid5
-  logical :: grp
+  integer :: vid1, vid2, vid3, vid4, vid5, vid6, vid7
+  logical :: grp, free
 
   call SCALE_init( "Unit test of the checks of COMM_cartesC" )
   call get_command_argument(2, mode)
@@ -89,8 +102,11 @@ program test_comm_check
        .or. mode == 'pc_released' .or. mode == 'pc_rel_nowait' &
        .or. mode == 'grp_wait_mem' .or. mode == 'grp_repost' .or. mode == 'grp_rel_round' .or. mode == 'grp_same_pid' &
        .or. mode == 'grp_dup' .or. mode == 'grp_4dir' .or. mode == 'grp_range' .or. mode == 'grp_rank_n' &
-       .or. mode == 'grp_rank_id' .or. mode == 'grp_in_flight' .or. mode == 'batch_nol2' )
+       .or. mode == 'grp_rank_id' .or. mode == 'grp_in_flight' .or. mode == 'batch_nol2' &
+       .or. mode == 'free_dir' .or. mode == 'free_2d' .or. mode == 'free_wait_arr' .or. mode == 'free_same_vid' &
+       .or. mode == 'free_wait_mem' .or. mode == 'npb_nobatch' )
   grp = mode(1:4) == 'grp_'
+  free = mode(1:5) == 'free_'
 
   call PRC_CARTESC_setup
   call ATMOS_GRID_CARTESC_INDEX_setup( KMAX=4, IMAX=6, JMAX=6 )
@@ -166,6 +182,21 @@ program test_comm_check
      case default
         call COMM_vars_group_init( 'check-group', (/ vid1, vid3 /), gid=gid1 )
      end select
+  end if
+  if ( free ) then
+     ! two IDs not bound to arrays on grid 1, and their group
+     vid6 = 6
+     vid7 = 7
+     if ( mode == 'free_same_vid' ) vid7 = 6
+     call COMM_vars8_init( 'check-f6', vid6, gid=gid1 )
+     call COMM_vars8_init( 'check-f7', vid7, gid=gid1 )
+     if ( vid6 <= 7 .or. vid7 <= 7 ) then
+        LOG_ERROR("test_comm_check",*) 'test error: no persistent ID is assigned', vid6, vid7
+        LOG_ERROR_CONT(*) '(this mode needs persistent communication)'
+        call PRC_abort
+     end if
+     ! free_same_vid must abort here
+     call COMM_vars_group_init( 'check-free', (/ vid6, vid7 /), gid=gid1 )
   end if
   if ( mode == 'pc_same_vid' ) then
      ! another persistent variable with the vid of a3d on grid 1
@@ -253,6 +284,23 @@ program test_comm_check
      call COMM_vars8( c3d, vid3, gid=gid1 )
      call COMM_wait ( a3d, vid1, .false., gid=gid1 )
      call COMM_vars_finalize( gid1 )
+  case ( 'free_dir' )
+     ! must abort at the post: an unbound ID is for the 8-direction exchange
+     call COMM_vars ( c3d, vid6, gid=gid1 )
+     call COMM_wait ( c3d, vid6, .false., gid=gid1 )
+  case ( 'free_2d' )
+     ! must abort at the post: the IDs above COMM_vsize_max are not for 2D arrays
+     call COMM_vars8( c2d, vid6, gid=gid1 )
+     call COMM_wait ( c2d, vid6, .false., gid=gid1 )
+  case ( 'free_wait_arr' )
+     ! must abort at the wait: the exchange of vid6 is of c3d
+     call COMM_vars8( c3d, vid6, gid=gid1 )
+     call COMM_vars8( d3d, vid7, gid=gid1 )
+     call COMM_wait ( e3d, vid6, .false., gid=gid1 )
+  case ( 'free_wait_mem' )
+     ! must abort at the wait of c3d: the other member is not posted
+     call COMM_vars8( c3d, vid6, gid=gid1 )
+     call COMM_wait ( c3d, vid6, .false., gid=gid1 )
   case ( 'grp_dup' )
      ! must abort here: c3d is in the group
      call COMM_vars_group_init( 'check-group2', (/ vid4, vid3 /), gid=gid1 )

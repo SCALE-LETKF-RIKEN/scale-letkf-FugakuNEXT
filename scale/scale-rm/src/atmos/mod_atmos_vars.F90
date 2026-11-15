@@ -152,6 +152,7 @@ module mod_atmos_vars
   !
   !++ Private parameters & variables
   !
+  integer,  private, allocatable :: I_COMM_fillhalo(:) !< IDs of the exchanges of ATMOS_vars_fillhalo (a group)
   logical,  private :: ATMOS_VARS_CHECKRANGE    = .false.
   real(RP), private :: ATMOS_VARS_CHECKCFL_SOFT = 1.0_RP  !> if Courant number exceeds this value, put the warning message
   real(RP), private :: ATMOS_VARS_CHECKCFL_HARD = 2.0_RP  !> if Courant number exceeds this value, put the error message and stop
@@ -465,6 +466,9 @@ contains
   !-----------------------------------------------------------------------------
   !> Setup
   subroutine ATMOS_vars_setup
+    use scale_comm_cartesC, only: &
+       COMM_vars8_init, &
+       COMM_vars_group_init
     use scale_const, only: &
        UNDEF => CONST_UNDEF
     use scale_prc, only: &
@@ -539,6 +543,15 @@ contains
     allocate( RHOT(KA,IA,JA)    )
     allocate( QTRC(KA,IA,JA,max(QA,1)) )
     !$acc enter data create(DENS, MOMZ, MOMX, MOMY, RHOT, QTRC)
+
+    ! the exchanges of ATMOS_vars_fillhalo are posted consecutively: a group of IDs that are not
+    ! bound to the arrays (the prognostic variables are registered by the dynamics for its own groups)
+    allocate( I_COMM_fillhalo(5+QA) )
+    do iv = 1, 5+QA
+       I_COMM_fillhalo(iv) = iv
+       call COMM_vars8_init( 'ATMOS_vars_fillhalo', I_COMM_fillhalo(iv) )
+    end do
+    call COMM_vars_group_init( 'ATMOS_vars_fillhalo', I_COMM_fillhalo(:) )
 
     if ( ATMOS_USE_AVERAGE ) then
        allocate( DENS_avw(KA,IA,JA)    )
@@ -922,22 +935,22 @@ contains
     !$acc end kernels
 #endif
 
-    call COMM_vars8( DENS(:,:,:), 1 )
-    call COMM_vars8( MOMZ(:,:,:), 2 )
-    call COMM_vars8( MOMX(:,:,:), 3 )
-    call COMM_vars8( MOMY(:,:,:), 4 )
-    call COMM_vars8( RHOT(:,:,:), 5 )
-    call COMM_wait ( DENS(:,:,:), 1, FILL_BND_ )
-    call COMM_wait ( MOMZ(:,:,:), 2, FILL_BND_ )
-    call COMM_wait ( MOMX(:,:,:), 3, FILL_BND_ )
-    call COMM_wait ( MOMY(:,:,:), 4, FILL_BND_ )
-    call COMM_wait ( RHOT(:,:,:), 5, FILL_BND_ )
-
+    ! all the members of the group are posted before they are waited
+    call COMM_vars8( DENS(:,:,:), I_COMM_fillhalo(1) )
+    call COMM_vars8( MOMZ(:,:,:), I_COMM_fillhalo(2) )
+    call COMM_vars8( MOMX(:,:,:), I_COMM_fillhalo(3) )
+    call COMM_vars8( MOMY(:,:,:), I_COMM_fillhalo(4) )
+    call COMM_vars8( RHOT(:,:,:), I_COMM_fillhalo(5) )
     do iq = 1, QA
-       call COMM_vars8( QTRC(:,:,:,iq), iq )
+       call COMM_vars8( QTRC(:,:,:,iq), I_COMM_fillhalo(5+iq) )
     enddo
+    call COMM_wait ( DENS(:,:,:), I_COMM_fillhalo(1), FILL_BND_ )
+    call COMM_wait ( MOMZ(:,:,:), I_COMM_fillhalo(2), FILL_BND_ )
+    call COMM_wait ( MOMX(:,:,:), I_COMM_fillhalo(3), FILL_BND_ )
+    call COMM_wait ( MOMY(:,:,:), I_COMM_fillhalo(4), FILL_BND_ )
+    call COMM_wait ( RHOT(:,:,:), I_COMM_fillhalo(5), FILL_BND_ )
     do iq = 1, QA
-       call COMM_wait ( QTRC(:,:,:,iq), iq, FILL_BND_ )
+       call COMM_wait ( QTRC(:,:,:,iq), I_COMM_fillhalo(5+iq), FILL_BND_ )
     enddo
 
     return
@@ -3914,6 +3927,7 @@ contains
     endif
 
     !$acc exit data delete(DENS, MOMZ, MOMX, MOMY, RHOT, QTRC)
+    deallocate( I_COMM_fillhalo )
     deallocate( DENS )
     deallocate( MOMZ )
     deallocate( MOMX )
