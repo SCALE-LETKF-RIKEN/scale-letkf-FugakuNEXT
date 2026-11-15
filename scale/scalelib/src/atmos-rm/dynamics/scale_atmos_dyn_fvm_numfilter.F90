@@ -106,7 +106,8 @@ contains
     use scale_prc_cartesC, only: &
        PRC_TwoD
     use scale_comm_cartesC, only: &
-       COMM_vars8_init
+       COMM_vars8_init, &
+       COMM_vars_group_init
     implicit none
     real(RP), intent(inout) :: num_diff(KA,IA,JA,5,3)
     real(RP), intent(inout) :: num_diff_q(KA,IA,JA,3)
@@ -174,6 +175,25 @@ contains
     call COMM_vars8_init( 'num_diff_QTRC_Z', num_diff_q(:,:,:,ZDIR), I_COMM_QTRC_Z )
     call COMM_vars8_init( 'num_diff_QTRC_X', num_diff_q(:,:,:,XDIR), I_COMM_QTRC_X )
     call COMM_vars8_init( 'num_diff_QTRC_Y', num_diff_q(:,:,:,YDIR), I_COMM_QTRC_Y )
+
+    ! the three fluxes of each variable are posted consecutively (ATMOS_DYN_fvm_numfilter_flux and
+    ! ATMOS_DYN_fvm_numfilter_flux_q), and calc_numdiff waits between the variables: a group for
+    ! each variable (COMM_vars_group_init). The flux in x is not exchanged in 2-D
+    if ( PRC_TwoD ) then
+       call COMM_vars_group_init( 'DYN_numfilter_DENS', [ I_COMM_DENS_Z, I_COMM_DENS_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_MOMZ', [ I_COMM_MOMZ_Z, I_COMM_MOMZ_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_MOMX', [ I_COMM_MOMX_Z, I_COMM_MOMX_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_MOMY', [ I_COMM_MOMY_Z, I_COMM_MOMY_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_RHOT', [ I_COMM_RHOT_Z, I_COMM_RHOT_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_QTRC', [ I_COMM_QTRC_Z, I_COMM_QTRC_Y ] )
+    else
+       call COMM_vars_group_init( 'DYN_numfilter_DENS', [ I_COMM_DENS_Z, I_COMM_DENS_X, I_COMM_DENS_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_MOMZ', [ I_COMM_MOMZ_Z, I_COMM_MOMZ_X, I_COMM_MOMZ_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_MOMX', [ I_COMM_MOMX_Z, I_COMM_MOMX_X, I_COMM_MOMX_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_MOMY', [ I_COMM_MOMY_Z, I_COMM_MOMY_X, I_COMM_MOMY_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_RHOT', [ I_COMM_RHOT_Z, I_COMM_RHOT_X, I_COMM_RHOT_Y ] )
+       call COMM_vars_group_init( 'DYN_numfilter_QTRC', [ I_COMM_QTRC_Z, I_COMM_QTRC_X, I_COMM_QTRC_Y ] )
+    end if
 
 #ifdef DEBUG
     CNX1(:,:)   = UNDEF

@@ -138,7 +138,8 @@ contains
        OHM => CONST_OHM, &
        UNDEF => CONST_UNDEF
     use scale_comm_cartesC, only: &
-       COMM_vars8_init
+       COMM_vars8_init, &
+       COMM_vars_group_init
     use scale_file_history, only: &
        FILE_HISTORY_reg, &
        FILE_HISTORY_put
@@ -215,6 +216,11 @@ contains
        call COMM_vars8_init( 'PROG', PROG(:,:,:,iv), I_COMM_PROG(iv) )
     end do
 
+    ! the groups of the persistent exchanges posted consecutively in ATMOS_DYN_Tstep_large_fvm_heve
+    ! (COMM_vars_group_init): the prognostic variables, and PROG after them
+    call COMM_vars_group_init( 'DYN_large_heve_state', [ I_COMM_DENS, I_COMM_MOMZ, I_COMM_MOMX, I_COMM_MOMY, I_COMM_RHOT ] )
+    call COMM_vars_group_init( 'DYN_large_heve_PROG', I_COMM_PROG(1:VA) )
+
     I_COMM_DENS_t = 1
     I_COMM_MOMZ_t = 2
     I_COMM_MOMX_t = 3
@@ -242,6 +248,12 @@ contains
     call COMM_vars8_init( 'mflx_Z', mflx(:,:,:,ZDIR), I_COMM_mflx_z )
     call COMM_vars8_init( 'mflx_X', mflx(:,:,:,XDIR), I_COMM_mflx_x )
     call COMM_vars8_init( 'mflx_Y', mflx(:,:,:,YDIR), I_COMM_mflx_y )
+    ! the mass flux in x is not exchanged in 2-D
+    if ( PRC_TwoD ) then
+       call COMM_vars_group_init( 'DYN_large_heve_mflx', [ I_COMM_mflx_z, I_COMM_mflx_y ] )
+    else
+       call COMM_vars_group_init( 'DYN_large_heve_mflx', [ I_COMM_mflx_z, I_COMM_mflx_x, I_COMM_mflx_y ] )
+    end if
 
     allocate( ZERO(KA,IA,JA) )
     ZERO(:,:,:) = 0.0_RP
