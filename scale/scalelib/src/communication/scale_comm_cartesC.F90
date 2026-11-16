@@ -81,6 +81,11 @@ module scale_comm_cartesC
   public :: COMM_get_pc_info
   public :: COMM_vars_group_init
 
+  interface COMM_vars8_init
+     module procedure COMM_vars8_init_var
+     module procedure COMM_vars8_init_free
+  end interface COMM_vars8_init
+
   interface COMM_address
      module procedure COMM_address_2D
      module procedure COMM_address_3D
@@ -175,6 +180,18 @@ module scale_comm_cartesC
   !! The default is set in COMM_setup: .true. with OpenACC, and .false. otherwise, where the
   !! packing of the members costs more than the messages saved (issue #3615)
   logical,  private              :: COMM_USE_BATCH
+  !> layout 2 of the non-persistent 8-direction exchange of 3-D variables (issue #3624): the same
+  !! messages as with COMM_USE_PC_LAYOUT2 (16 requests at most, instead of 12 JHALO + 4), packed
+  !! and unpacked in one kernel each. The messages are told apart by the ID and the direction, as
+  !! in the current layout. Not used with one-sided communication and in a grid with PRC_TwoD and
+  !! IHALO > 0. The default is set in COMM_setup: .true. with OpenACC, and .false. otherwise
+  logical,  private              :: COMM_USE_NONPC_LAYOUT2
+  !> batch of the groups with members not bound to an array (COMM_vars8_init without the array,
+  !! issue #3624). With .false., such a group is checked only. It requires COMM_USE_BATCH
+  !! (COMM_setup aborts otherwise). The default is set in COMM_setup as that of COMM_USE_BATCH
+  !! (.true. with OpenACC, and .false. otherwise); it does not follow COMM_USE_BATCH given in the
+  !! namelist, so that both are switched off together
+  logical,  private              :: COMM_USE_NONPC_BATCH
 
   ! directions of the messages of a group, by the direction in which they travel: a message to
   ! the neighbor in N is received from the neighbor in S, and so on
@@ -231,6 +248,7 @@ module scale_comm_cartesC
      integer              :: size2D_4C            !< 2D data size (corner HALO,   8-direction comm.)
      integer              :: vars_num = 0         !< numbers of variables for persistent comm.
      logical              :: pc_layout2 = .false. !< the persistent 8-direction variables use the layout 2 (COMM_USE_PC_LAYOUT2)
+     logical              :: np_layout2 = .false. !< the non-persistent 8-direction exchange of 3-D variables uses the layout 2 (COMM_USE_NONPC_LAYOUT2)
      integer              :: size_L2 = 0          !< size of the packing buffer of the layout 2 for a vid
      real(RP),    pointer, contiguous :: recvpack_L2(:,:) => null() !< packing buffer of the layout 2 (receive, from W, E and the corners)
      real(RP),    pointer, contiguous :: sendpack_L2(:,:) => null() !< packing buffer of the layout 2 (send,    to   W, E and the corners)
@@ -241,11 +259,13 @@ module scale_comm_cartesC
      logical,     allocatable :: put_corner(:)    !< the corners are put in the exchange (8-direction)
      integer,     allocatable :: req_cnt (:)      !< request ID of each MPI send/recv
      integer,     allocatable :: send_cnt(:)      !< # of elements sent by each MPI send/recv
+     logical,     allocatable :: req_L2(:)        !< the 3-D exchange in progress with the vid is in the layout 2
      integer,     allocatable :: preq_cnt (:)     !< request ID of each MPI PC
      integer,     allocatable :: psend_cnt(:)     !< # of elements sent by each MPI PC
      integer,     allocatable :: packid(:)        !< ID of pack
      integer(c_intptr_t), allocatable :: pc_addr(:) !< address of the array registered for MPI PC
      integer,     allocatable :: pc_ndir(:)       !< 4 or 8: the exchange registered for MPI PC (COMM_vars(8)_init)
+     logical,     allocatable :: pc_free(:)       !< the ID is not bound to an array (COMM_vars8_init without the array)
      integer,     allocatable :: pc_group(:)      !< group of the persistent variable (0: none)
      integer,     allocatable :: pc_slot(:)       !< slot of the persistent variable in its group
      integer,     allocatable :: pc_gstat(:)      !< in the round of its group: 0 not posted, 1 posted, 2 waited
@@ -313,7 +333,9 @@ contains
        COMM_USE_MPI_PC, &
        COMM_USE_MPI_ONESIDED, &
        COMM_USE_PC_LAYOUT2, &
-       COMM_USE_BATCH
+       COMM_USE_BATCH, &
+       COMM_USE_NONPC_LAYOUT2, &
+       COMM_USE_NONPC_BATCH
 
     integer         :: ranks(8)
 #ifdef NO_MPI08
@@ -350,9 +372,13 @@ contains
     COMM_USE_MPI_ONESIDED = .false.
     COMM_USE_PC_LAYOUT2   = .true.
     COMM_USE_BATCH        = .true.
+    COMM_USE_NONPC_LAYOUT2 = .true.
+    COMM_USE_NONPC_BATCH   = .true.
 #else
     COMM_USE_PC_LAYOUT2   = .false.
     COMM_USE_BATCH        = .false.
+    COMM_USE_NONPC_LAYOUT2 = .false.
+    COMM_USE_NONPC_BATCH   = .false.
 #endif
 
     !--- read namelist
@@ -372,6 +398,13 @@ contains
        LOG_ERROR("COMM_setup",*) 'COMM_USE_BATCH = .true. requires COMM_USE_PC_LAYOUT2 = .true.'
 #ifdef _OPENACC
        LOG_ERROR_CONT(*) 'COMM_USE_BATCH is .true. by default with OpenACC: set it to .false. together with COMM_USE_PC_LAYOUT2.'
+#endif
+       call PRC_abort
+    end if
+    if ( COMM_USE_NONPC_BATCH .and. .not. COMM_USE_BATCH ) then
+       LOG_ERROR("COMM_setup",*) 'COMM_USE_NONPC_BATCH = .true. requires COMM_USE_BATCH = .true.'
+#ifdef _OPENACC
+       LOG_ERROR_CONT(*) 'COMM_USE_NONPC_BATCH is .true. by default with OpenACC: set it to .false. together with COMM_USE_BATCH.'
 #endif
        call PRC_abort
     end if
@@ -574,11 +607,14 @@ contains
     LOG_INFO_CONT(*)         'All side is periodic?                       : ', COMM_IsAllPeriodic
     LOG_INFO_CONT(*)         'Upper bound of the message tags             : ', COMM_tag_ub
     LOG_INFO_CONT(*)         'Layout 2 of the persistent exchange?        : ', COMM_USE_MPI_PC .and. COMM_USE_PC_LAYOUT2
+    LOG_INFO_CONT(*)         'Layout 2 of the non-persistent exchange?    : ', COMM_USE_NONPC_LAYOUT2 .and. .not. COMM_USE_MPI_ONESIDED
     LOG_INFO_CONT(*)         'Batch of the groups of persistent variables?: ', COMM_USE_MPI_PC .and. COMM_USE_BATCH &
                                                                                .and. .not. PRC_TwoD
     if ( COMM_USE_MPI_PC .and. COMM_USE_BATCH .and. PRC_TwoD ) then
        LOG_INFO_CONT(*)      'COMM_USE_BATCH is not used in 2-D: the groups are checked only'
     end if
+    LOG_INFO_CONT(*)         'Batch of the groups with unbound members?   : ', COMM_USE_MPI_PC .and. COMM_USE_BATCH &
+                                                                               .and. COMM_USE_NONPC_BATCH .and. .not. PRC_TwoD
 
     initialized = .true.
 
@@ -749,8 +785,10 @@ contains
        allocate( ginfo(gid)%req_cnt (                     COMM_vsize_max) )
        allocate( ginfo(gid)%send_cnt(                     COMM_vsize_max) )
        allocate( ginfo(gid)%req_list(ginfo(gid)%nreq_MAX, COMM_vsize_max) )
+       allocate( ginfo(gid)%req_L2  (                     COMM_vsize_max) )
        ginfo(gid)%req_cnt (:)   = -1
        ginfo(gid)%send_cnt(:)   = 0
+       ginfo(gid)%req_L2  (:)   = .false.
        ginfo(gid)%req_list(:,:) = MPI_REQUEST_NULL
 
        ! each grid has its own communicators, which separate the message tags between the
@@ -783,19 +821,22 @@ contains
 
     end if
 
-    ! the layout 2 of the persistent 8-direction exchange. In 2-D (PRC_TwoD) the exchange in x is
-    ! skipped, which the whole rows in y would not keep (IHALO > 0): the current layout is used.
+    ! the layout 2 of the 8-direction exchange, persistent and non-persistent. In 2-D (PRC_TwoD)
+    ! the exchange in x is skipped, which the whole rows in y would not keep (IHALO > 0): the
+    ! current layout is used.
     ! The buffers are allocated (with size 0 where they are not used) and freed in COMM_finalize
-    ! on the same condition, which only COMM_setup changes
+    ! on the same condition (COMM_L2_buffers), which only COMM_setup changes
     ginfo(gid)%pc_layout2 = COMM_USE_MPI_PC .and. COMM_USE_PC_LAYOUT2 .and. .not. ( PRC_TwoD .and. IHALO > 0 )
+    ginfo(gid)%np_layout2 = COMM_USE_NONPC_LAYOUT2 .and. ( .not. COMM_USE_MPI_ONESIDED ) &
+                            .and. .not. ( PRC_TwoD .and. IHALO > 0 )
     ginfo(gid)%size_L2 = 0
-    if ( COMM_USE_MPI_PC .and. COMM_USE_PC_LAYOUT2 ) then
+    if ( COMM_L2_buffers() ) then
        if ( associated( ginfo(gid)%sendpack_L2 ) .or. associated( ginfo(gid)%recvpack_L2 ) ) then
           LOG_ERROR("COMM_regist",*) 'the packing buffers of the layout 2 are not freed: grid', gid
           call PRC_abort
        end if
        ! W and E (JA rows at most), and the four corners
-       if ( ginfo(gid)%pc_layout2 ) ginfo(gid)%size_L2 = KA * IHALO * ( 2 * JA + 4 * JHALO )
+       if ( ginfo(gid)%pc_layout2 .or. ginfo(gid)%np_layout2 ) ginfo(gid)%size_L2 = KA * IHALO * ( 2 * JA + 4 * JHALO )
        allocate( ginfo(gid)%sendpack_L2(ginfo(gid)%size_L2, COMM_vsize_max) )
        allocate( ginfo(gid)%recvpack_L2(ginfo(gid)%size_L2, COMM_vsize_max) )
        !$acc enter data create(ginfo(gid)%sendpack_L2, ginfo(gid)%recvpack_L2)
@@ -811,6 +852,7 @@ contains
     LOG_INFO_CONT(*)          'Data size of halo                    [byte] : ', datasize_k*(2*IA*JHALO+2*JMAX*IHALO)
     LOG_INFO_CONT(*)          'Ratio of halo against the whole 3D grid     : ', real(2*IA*JHALO+2*JMAX*IHALO) / real(IA*JA)
     LOG_INFO_CONT(*)          'Layout 2 of the persistent 8-dir. exchange? : ', ginfo(gid)%pc_layout2
+    LOG_INFO_CONT(*)          'Layout 2 of the non-pers. 8-dir. exchange?  : ', ginfo(gid)%np_layout2
 
     return
   end subroutine COMM_regist
@@ -896,6 +938,7 @@ contains
              deallocate( ginfo(gid)%packid )
              deallocate( ginfo(gid)%pc_addr )
              deallocate( ginfo(gid)%pc_ndir )
+             deallocate( ginfo(gid)%pc_free )
              deallocate( ginfo(gid)%pc_group )
              deallocate( ginfo(gid)%pc_slot )
              deallocate( ginfo(gid)%pc_gstat )
@@ -918,14 +961,7 @@ contains
                 ginfo(gid)%comm_grp_dup = .false.
              end if
 
-             if ( COMM_USE_PC_LAYOUT2 ) then ! the condition of the allocation in COMM_regist
-                !$acc exit data delete(ginfo(gid)%sendpack_L2, ginfo(gid)%recvpack_L2)
-                deallocate( ginfo(gid)%sendpack_L2 )
-                deallocate( ginfo(gid)%recvpack_L2 )
-                nullify( ginfo(gid)%sendpack_L2, ginfo(gid)%recvpack_L2 )
-             end if
              ginfo(gid)%pc_layout2 = .false.
-             ginfo(gid)%size_L2    = 0
 
           end if
 
@@ -934,11 +970,21 @@ contains
           deallocate( ginfo(gid)%req_cnt )
           deallocate( ginfo(gid)%send_cnt )
           deallocate( ginfo(gid)%req_list )
+          deallocate( ginfo(gid)%req_L2 )
 
           !$acc exit data delete(ginfo(gid)%recvpack_WE2P)
           deallocate( ginfo(gid)%recvpack_WE2P )
 
        end if
+
+       if ( COMM_L2_buffers() ) then ! the condition of the allocation in COMM_regist
+          !$acc exit data delete(ginfo(gid)%sendpack_L2, ginfo(gid)%recvpack_L2)
+          deallocate( ginfo(gid)%sendpack_L2 )
+          deallocate( ginfo(gid)%recvpack_L2 )
+          nullify( ginfo(gid)%sendpack_L2, ginfo(gid)%recvpack_L2 )
+       end if
+       ginfo(gid)%np_layout2 = .false.
+       ginfo(gid)%size_L2    = 0
 
        !$acc exit data delete(ginfo(gid)%sendpack_P2WE)
        deallocate( ginfo(gid)%sendpack_P2WE )
@@ -1005,7 +1051,7 @@ contains
 
   !-----------------------------------------------------------------------------
   !> Register a variable for the persistent 8-direction exchange (COMM_vars8); see COMM_vars_init
-  subroutine COMM_vars8_init( &
+  subroutine COMM_vars8_init_var( &
        varname, &
        var,     &
        vid,     &
@@ -1022,7 +1068,77 @@ contains
     call COMM_pc_regist( "COMM_vars8_init", varname, var, vid, gid, .true. )
 
     return
-  end subroutine COMM_vars8_init
+  end subroutine COMM_vars8_init_var
+
+  !-----------------------------------------------------------------------------
+  !> Register an ID for the 8-direction exchange (COMM_vars8) of 3-D variables that is not bound to
+  !! an array (issue #3624): any 3-D array of the grid may be given with the ID, a different one in
+  !! each exchange (the same one to COMM_vars8 and to its COMM_wait). No persistent request is made
+  !! for the ID. It is used to put exchanges of arrays that cannot be registered (dummy arguments,
+  !! arrays that change) in a group (COMM_vars_group_init):
+  !!   - in a group in batch, the array is packed into and unpacked from the buffer of the group,
+  !!     as a registered variable;
+  !!   - otherwise (not in a group, or in a group that is checked only) it is exchanged alone as
+  !!     with the vid given here, which is the ID of its packing buffer.
+  !! On return, vid is the ID (> COMM_vsize_max), or unchanged if persistent communication is not
+  !! used. The ID lives until COMM_vars_finalize or COMM_finalize, as that of a registered variable.
+  subroutine COMM_vars8_init_free( &
+       varname, &
+       vid,     &
+       gid      )
+    use scale_prc, only: &
+       PRC_abort
+    implicit none
+
+    character(len=*), intent(in)    :: varname    !< name of the exchange
+    integer,          intent(inout) :: vid        !< variable ID
+
+    integer,          intent(in), optional :: gid
+
+    integer :: gid_
+    integer :: vars_id
+    !---------------------------------------------------------------------------
+
+    gid_ = 1
+    if ( present(gid) ) gid_ = gid
+    if ( gid_ < 1 .or. gid_ > COMM_gid ) then
+       LOG_ERROR("COMM_vars8_init",*) 'gid is invalid', gid_, COMM_gid
+       call PRC_abort
+    end if
+
+    if ( vid < 1 .or. vid > COMM_vsize_max ) then
+       LOG_ERROR("COMM_vars8_init",*) 'vid is invalid', vid, COMM_vsize_max, gid_
+       call PRC_abort
+    end if
+
+    if ( .not. COMM_USE_MPI_PC ) return
+
+    ! outside of a batch the exchange uses the tags of vid, which COMM_check_vid checks only for
+    ! the IDs up to COMM_vsize_max
+    if ( .not. COMM_USE_MPI_ONESIDED ) then
+       if ( COMM_tag_base( vid ) + COMM_tag_width - 1 > COMM_tag_ub ) then
+          LOG_ERROR("COMM_vars8_init",*) 'message tags exceed MPI_TAG_UB: ID, MPI_TAG_UB = ', vid, COMM_tag_ub
+          call PRC_abort
+       end if
+    end if
+
+    ginfo(gid_)%vars_num = ginfo(gid_)%vars_num + 1
+    if ( ginfo(gid_)%vars_num > size(ginfo(gid_)%packid) ) call COMM_grow_pc( gid_ )
+
+    vars_id = ginfo(gid_)%vars_num
+    ginfo(gid_)%packid  (vars_id) = vid
+    ginfo(gid_)%pc_addr (vars_id) = 0
+    ginfo(gid_)%pc_ndir (vars_id) = 8
+    ginfo(gid_)%pc_free (vars_id) = .true.
+    ginfo(gid_)%preq_cnt(vars_id) = 0
+
+    vid = vars_id + COMM_vsize_max
+
+    LOG_INFO("COMM_vars8_init",'(1x,A,I3.3,A,I0,3A)') 'Initialize variable (grid ID = ', gid_, '): ID = ', vid, &
+                                                      ', name = ', trim(varname), ' (not bound to an array)'
+
+    return
+  end subroutine COMM_vars8_init_free
 
   !-----------------------------------------------------------------------------
   !> Release the persistent variables (COMM_vars_init, COMM_vars8_init) of a grid, or of all the
@@ -1098,6 +1214,7 @@ contains
        if ( COMM_USE_MPI_ONESIDED ) then
           call vars_3D_mpi_onesided(var, gid_, vid)
        else
+          ginfo(gid_)%req_L2(vid) = .false.
           call vars_3D_mpi(var, gid_, vid)
        end if
        call PROF_rapend  ('COMM_vars', 2)
@@ -1121,6 +1238,7 @@ contains
     integer :: gid_
     integer :: pid
     integer(c_intptr_t) :: addr
+    logical :: pers
     !---------------------------------------------------------------------------
 
     gid_ = 1
@@ -1135,17 +1253,26 @@ contains
     call COMM_check_vid( "COMM_vars8_3D", vid, gid_, .true., 8, addr, pid )
     call COMM_packbuf_acquire( "COMM_vars8_3D", gid_, pid, vid, 3, addr )
 
+    pers = COMM_pers_item( gid_, vid )
     if ( vid > COMM_vsize_max ) then
-       call PROF_rapstart('COMM_vars_pers', 2)
+       if ( pers ) then
+          call PROF_rapstart('COMM_vars_pers', 2)
+       else
+          call PROF_rapstart('COMM_vars', 2)
+       end if
        call vars_3D_mpi_pc(var, gid_, vid-COMM_vsize_max, pid)
-       call PROF_rapend  ('COMM_vars_pers', 2)
+       if ( pers ) then
+          call PROF_rapend  ('COMM_vars_pers', 2)
+       else
+          call PROF_rapend  ('COMM_vars', 2)
+       end if
     else
        call PROF_rapstart('COMM_vars', 2)
        !$acc wait
        if ( COMM_USE_MPI_ONESIDED ) then
           call vars8_3D_mpi_onesided(var, gid_, vid)
        else
-          call vars8_3D_mpi(var, gid_, vid)
+          call vars8_3D_nonpc(var, gid_, vid)
        end if
        call PROF_rapend  ('COMM_vars', 2)
     end if
@@ -1170,6 +1297,7 @@ contains
     integer :: gid_
     integer :: pid
     integer(c_intptr_t) :: addr
+    logical :: pers
     !---------------------------------------------------------------------------
 
     FILL_BND_ = .true.
@@ -1188,11 +1316,15 @@ contains
     if ( COMM_grp_posting > 0 ) call COMM_group_wait_check( "COMM_wait_3D", vid, gid_ )
     call COMM_packbuf_release( "COMM_wait_3D", gid_, pid, vid, 3, addr )
 
-    if ( vid > COMM_vsize_max ) then
+    pers = COMM_pers_item( gid_, vid )
+    if ( pers ) then
        call PROF_rapstart('COMM_wait_pers', 2)
-       call wait_3D_mpi_pc(var, gid_, vid-COMM_vsize_max, pid)
     else
        call PROF_rapstart('COMM_wait', 2)
+    end if
+    if ( vid > COMM_vsize_max ) then
+       call wait_3D_mpi_pc(var, gid_, vid-COMM_vsize_max, pid)
+    else
        if ( COMM_USE_MPI_ONESIDED ) then
           call wait_3D_mpi_onesided(var, gid_, vid)
        else
@@ -1210,7 +1342,7 @@ contains
        end if
     end if
 
-    if ( vid > COMM_vsize_max ) then
+    if ( pers ) then
        call PROF_rapend  ('COMM_wait_pers', 2)
     else
        call PROF_rapend  ('COMM_wait', 2)
@@ -2050,7 +2182,7 @@ contains
        else if ( vid - COMM_vsize_max > ginfo(gid)%vars_num ) then
           LOG_ERROR(routine_name,*) 'vid is invalid: not initialized', vid, COMM_vsize_max, ginfo(gid)%vars_num, gid
           call PRC_abort
-       else if ( addr /= ginfo(gid)%pc_addr(vid-COMM_vsize_max) ) then
+       else if ( addr /= ginfo(gid)%pc_addr(vid-COMM_vsize_max) .and. .not. ginfo(gid)%pc_free(vid-COMM_vsize_max) ) then
           LOG_ERROR(routine_name,*) 'vid is invalid: the array is not the one registered with this ID', vid, gid
           LOG_ERROR_CONT(*) '(an ID of another grid, or a non-persistent vid above COMM_vsize_max)'
           call PRC_abort
@@ -2067,6 +2199,28 @@ contains
   end subroutine COMM_check_vid
 
   !-----------------------------------------------------------------------------
+  !> The exchange with the ID (checked by COMM_check_vid) is counted in the items of the
+  !! persistent communication (COMM_vars_pers, COMM_wait_pers): not an ID up to COMM_vsize_max,
+  !! and not an ID not bound to an array. The latter is counted in COMM_vars and COMM_wait also
+  !! in a batch (unlike the upstream SCALE, which counts it in the persistent items there), so
+  !! that the number of calls and the time of the items do not move between them with
+  !! COMM_USE_NONPC_BATCH
+  function COMM_pers_item( gid, vid ) result(pers)
+    implicit none
+
+    integer, intent(in) :: gid
+    integer, intent(in) :: vid
+    logical :: pers
+
+    !---------------------------------------------------------------------------
+
+    pers = vid > COMM_vsize_max
+    if ( pers ) pers = .not. ginfo(gid)%pc_free(vid-COMM_vsize_max)
+
+    return
+  end function COMM_pers_item
+
+  !-----------------------------------------------------------------------------
   !> Allocate the arrays for the persistent variables of the grid (COMM_vsize_max_pc), or extend
   !! them to twice the size. The request handles are copied as values;
   !! the persistent requests are bound to the registered arrays and the packing buffers,
@@ -2079,6 +2233,7 @@ contains
     integer,           allocatable :: packid(:)
     integer(c_intptr_t), allocatable :: pc_addr(:)
     integer,           allocatable :: pc_ndir  (:)
+    logical,           allocatable :: pc_free  (:)
     integer,           allocatable :: pc_group (:)
     integer,           allocatable :: pc_slot  (:)
     integer,           allocatable :: pc_gstat (:)
@@ -2104,6 +2259,7 @@ contains
     allocate( packid   (                      nnew) )
     allocate( pc_addr  (                      nnew) )
     allocate( pc_ndir  (                      nnew) )
+    allocate( pc_free  (                      nnew) )
     allocate( pc_group (                      nnew) )
     allocate( pc_slot  (                      nnew) )
     allocate( pc_gstat (                      nnew) )
@@ -2115,6 +2271,7 @@ contains
        packid   (     1:nold) = ginfo(gid)%packid   (     1:nold)
        pc_addr  (     1:nold) = ginfo(gid)%pc_addr  (     1:nold)
        pc_ndir  (     1:nold) = ginfo(gid)%pc_ndir  (     1:nold)
+       pc_free  (     1:nold) = ginfo(gid)%pc_free  (     1:nold)
        pc_group (     1:nold) = ginfo(gid)%pc_group (     1:nold)
        pc_slot  (     1:nold) = ginfo(gid)%pc_slot  (     1:nold)
        pc_gstat (     1:nold) = ginfo(gid)%pc_gstat (     1:nold)
@@ -2127,6 +2284,7 @@ contains
     packid   (  nold+1:nnew) = 0
     pc_addr  (  nold+1:nnew) = 0
     pc_ndir  (  nold+1:nnew) = 0
+    pc_free  (  nold+1:nnew) = .false.
     pc_group (  nold+1:nnew) = 0
     pc_slot  (  nold+1:nnew) = 0
     pc_gstat (  nold+1:nnew) = 0
@@ -2137,6 +2295,7 @@ contains
     call move_alloc( packid,    ginfo(gid)%packid    )
     call move_alloc( pc_addr,   ginfo(gid)%pc_addr   )
     call move_alloc( pc_ndir,   ginfo(gid)%pc_ndir   )
+    call move_alloc( pc_free,   ginfo(gid)%pc_free   )
     call move_alloc( pc_group,  ginfo(gid)%pc_group  )
     call move_alloc( pc_slot,   ginfo(gid)%pc_slot   )
     call move_alloc( pc_gstat,  ginfo(gid)%pc_gstat  )
@@ -2366,6 +2525,7 @@ contains
 
     integer :: gid_
     integer :: n, m, m2, seq, ig, state
+    logical :: unbound
     integer :: hdr(2), hdr_min(2), hdr_max(2)
     integer, allocatable :: key(:), key_min(:), key_max(:)
     integer(int64) :: bytes
@@ -2485,7 +2645,12 @@ contains
 
     ! not in batch in 2-D: only the N/S halos are exchanged, from and to the variables without
     ! packing, and the packing of the batch costs more than the messages saved (issue #3615)
-    if ( COMM_USE_BATCH .and. n >= 2 .and. .not. PRC_TwoD ) then
+    ! a group with a member not bound to an array is in batch only with COMM_USE_NONPC_BATCH
+    unbound = .false.
+    do m = 1, n
+       if ( ginfo(gid_)%pc_free(vids(m)-COMM_vsize_max) ) unbound = .true.
+    end do
+    if ( COMM_USE_BATCH .and. n >= 2 .and. .not. PRC_TwoD .and. ( COMM_USE_NONPC_BATCH .or. .not. unbound ) ) then
        state = COMM_PC_GROUP_BATCH
     else
        state = COMM_PC_GROUP_CHECK
@@ -3129,6 +3294,7 @@ contains
     ginfo(gid)%packid   (  1:nvars) = 0
     ginfo(gid)%pc_addr  (  1:nvars) = 0
     ginfo(gid)%pc_ndir  (  1:nvars) = 0
+    ginfo(gid)%pc_free  (  1:nvars) = .false.
     ginfo(gid)%pc_group (  1:nvars) = 0
     ginfo(gid)%pc_slot  (  1:nvars) = 0
     ginfo(gid)%pc_gstat (  1:nvars) = 0
@@ -3837,6 +4003,19 @@ contains
   end subroutine vars8_init_mpi_pc
 
   !-----------------------------------------------------------------------------
+  !> The packing buffers of the layout 2 are allocated (COMM_regist, COMM_finalize): the layout 2
+  !! is used in the persistent or in the non-persistent exchange
+  function COMM_L2_buffers() result(used)
+    implicit none
+    logical :: used
+
+    used = ( COMM_USE_MPI_PC .and. COMM_USE_PC_LAYOUT2 ) &
+      .or. ( COMM_USE_NONPC_LAYOUT2 .and. .not. COMM_USE_MPI_ONESIDED )
+
+    return
+  end function COMM_L2_buffers
+
+  !-----------------------------------------------------------------------------
   !> Range in y of the W/E halos exchanged in the layout 2: the inner rows on the side with a
   !! neighbor in y (its halo rows come with the whole rows from that neighbor and the corners from
   !! the diagonal one), and the halo rows too on the side without it. The neighbors in x have the
@@ -3880,26 +4059,38 @@ contains
   end subroutine L2_offsets
 
   !-----------------------------------------------------------------------------
-  !> Persistent requests of the 8-direction exchange in the layout 2 (COMM_USE_PC_LAYOUT2):
+  !> Requests of the 8-direction exchange in the layout 2, persistent (COMM_USE_PC_LAYOUT2) and
+  !! non-persistent (COMM_USE_NONPC_LAYOUT2):
   !! N/S: the whole JHALO rows (i = 1:IA) from and to the variable, without packing;
   !! W/E: one packed message (rows in L2_range_WE); corners: one packed IHALO x JHALO block, only
   !! from and to the diagonal neighbors (where the neighbors in x and in y exist).
   !! The tags are those of the current layout without the row offset, one for each direction of
   !! the message, so that a neighbor in more than one direction (e.g., the process itself) is
   !! told apart. The W/E halos and the corners are unpacked after all the requests complete
-  !! (wait_3D_mpi_pc): the N/S messages also write the corners, which the corner blocks overwrite.
-  subroutine vars8_init_mpi_pc_L2(var, gid, seqid, pid)
+  !! (wait_3D_mpi_pc, wait_3D_mpi): the N/S messages also write the corners, which the corner
+  !! blocks overwrite.
+  !! The persistent requests are only made here; the non-persistent ones are started, and the
+  !! W/E halos and the corners are packed between the receives and the sends
+  subroutine L2_requests(var, rbuf, sbuf, gid, persistent, tag, req, nreq, nsend)
     implicit none
 
-    real(RP), intent(inout) :: var(:,:,:)
-    integer,  intent(in) :: gid
-    integer,  intent(in) :: seqid
-    integer,  intent(in) :: pid   !< ID of the packing buffer
+    ! explicit shape: the elements of var, rbuf and sbuf are given to L2_request as arrays
+    ! (not allowed for the elements of an assumed-shape or a pointer array)
+    integer,  intent(in)    :: gid
+    real(RP), intent(inout) :: var (ginfo(gid)%KA,ginfo(gid)%IA,ginfo(gid)%JA)
+    real(RP), intent(inout) :: rbuf(ginfo(gid)%size_L2) !< packing buffer of the layout 2 (receive)
+    real(RP), intent(inout) :: sbuf(ginfo(gid)%size_L2) !< packing buffer of the layout 2 (send)
+    logical,  intent(in)    :: persistent !< persistent requests
+    integer,  intent(in)    :: tag        !< base of the tags
+#ifdef NO_MPI08
+    integer,           intent(inout) :: req(:)
+#else
+    type(MPI_Request), intent(inout) :: req(:)
+#endif
+    integer,  intent(out)   :: nreq       !< number of the requests
+    integer,  intent(out)   :: nsend      !< # of elements sent
 
-    integer :: ireq, tag
-    integer :: ierr
-    integer :: nsend
-    logical :: flag
+    integer :: ireq
 
     integer :: KA
     integer :: IHALO
@@ -3907,11 +4098,10 @@ contains
     integer :: jw0, jw1
     integer :: n_NS, n_WE, n_C
     integer :: off_E, off_NW, off_NE, off_SW, off_SE
+    integer :: off(G_NDIR)
 
-    integer :: nreq
-    integer :: i
-
-    real(RP), pointer, contiguous :: ptr(:)
+    logical :: flag_device
+    !---------------------------------------------------------------------------
 
     KA    = ginfo(gid)%KA
     IHALO = ginfo(gid)%IHALO
@@ -3926,9 +4116,214 @@ contains
     n_WE = KA * IHALO * ( jw1 - jw0 + 1 )
     n_C  = KA * IHALO * JHALO
 
-    tag  = COMM_tag_base( seqid )
     ireq = 1
     nsend = 0
+
+#ifdef _OPENACC
+    flag_device = acc_is_present(var)
+#else
+    flag_device = .false.
+#endif
+
+    !$acc host_data use_device(var) if(flag_device)
+
+    !--- receive
+    ! From S
+    if ( PRC_HAS_S ) then
+       call L2_request( persistent, .true. , var(1,1,1), n_NS, PRC_next(PRC_S), tag+40, gid, req(ireq) )
+       ireq = ireq + 1
+    end if
+    ! From N
+    if ( PRC_HAS_N ) then
+       call L2_request( persistent, .true. , var(1,1,JE+1), n_NS, PRC_next(PRC_N), tag+50, gid, req(ireq) )
+       ireq = ireq + 1
+    end if
+
+    !$acc end host_data
+
+    if ( IHALO > 0 ) then
+       !$acc host_data use_device(rbuf) if(flag_device)
+       ! From E
+       if ( PRC_HAS_E ) then
+          call L2_request( persistent, .true. , rbuf(off_E+1), n_WE, PRC_next(PRC_E), tag+60, gid, req(ireq) )
+          ireq = ireq + 1
+       end if
+       ! From W
+       if ( PRC_HAS_W ) then
+          call L2_request( persistent, .true. , rbuf(1), n_WE, PRC_next(PRC_W), tag+70, gid, req(ireq) )
+          ireq = ireq + 1
+       end if
+       ! From NW
+       if ( PRC_HAS_N .and. PRC_HAS_W ) then
+          call L2_request( persistent, .true. , rbuf(off_NW+1), n_C, PRC_next(PRC_NW), tag+30, gid, req(ireq) )
+          ireq = ireq + 1
+       end if
+       ! From NE
+       if ( PRC_HAS_N .and. PRC_HAS_E ) then
+          call L2_request( persistent, .true. , rbuf(off_NE+1), n_C, PRC_next(PRC_NE), tag+20, gid, req(ireq) )
+          ireq = ireq + 1
+       end if
+       ! From SW
+       if ( PRC_HAS_S .and. PRC_HAS_W ) then
+          call L2_request( persistent, .true. , rbuf(off_SW+1), n_C, PRC_next(PRC_SW), tag+10, gid, req(ireq) )
+          ireq = ireq + 1
+       end if
+       ! From SE
+       if ( PRC_HAS_S .and. PRC_HAS_E ) then
+          call L2_request( persistent, .true. , rbuf(off_SE+1), n_C, PRC_next(PRC_SE), tag+0, gid, req(ireq) )
+          ireq = ireq + 1
+       end if
+       !$acc end host_data
+    end if
+
+    if ( .not. persistent .and. IHALO > 0 ) then
+       ! the W/E halos and the corners (the N/S rows are sent from the variable)
+       off(G_N:G_W) = 0
+       off(G_E ) = off_E
+       off(G_NW) = off_NW
+       off(G_NE) = off_NE
+       off(G_SW) = off_SW
+       off(G_SE) = off_SE
+       call PROF_rapend  ('COMM_mpi_post', 3, disable_barrier=.true.)
+       call pack8_3D( KA, ginfo(gid)%IA, ginfo(gid)%IS, ginfo(gid)%IE, JA, JS, JE, &
+                      IHALO, JHALO, &
+                      var, sbuf, ginfo(gid)%size_L2, &
+                      gid, .false., off )
+#ifdef _OPENACC
+       ! the packing kernel is waited before the messages are started
+       call PROF_rapstart('COMM_pack_wait', 3, disable_barrier=.true.)
+       !$acc wait
+       call PROF_rapend  ('COMM_pack_wait', 3, disable_barrier=.true.)
+#endif
+       call PROF_rapstart('COMM_mpi_post', 3, disable_barrier=.true.)
+    end if
+
+    !--- send
+    !$acc host_data use_device(var) if(flag_device)
+    ! To N
+    if ( PRC_HAS_N ) then
+       call L2_request( persistent, .false., var(1,1,JE-JHALO+1), n_NS, PRC_next(PRC_N), tag+40, gid, req(ireq) )
+       nsend = nsend + n_NS
+       ireq = ireq + 1
+    end if
+    ! To S
+    if ( PRC_HAS_S ) then
+       call L2_request( persistent, .false., var(1,1,JS), n_NS, PRC_next(PRC_S), tag+50, gid, req(ireq) )
+       nsend = nsend + n_NS
+       ireq = ireq + 1
+    end if
+    !$acc end host_data
+
+    if ( IHALO > 0 ) then
+       !$acc host_data use_device(sbuf) if(flag_device)
+       ! To W
+       if ( PRC_HAS_W ) then
+          call L2_request( persistent, .false., sbuf(1), n_WE, PRC_next(PRC_W), tag+60, gid, req(ireq) )
+          nsend = nsend + n_WE
+          ireq = ireq + 1
+       end if
+       ! To E
+       if ( PRC_HAS_E ) then
+          call L2_request( persistent, .false., sbuf(off_E+1), n_WE, PRC_next(PRC_E), tag+70, gid, req(ireq) )
+          nsend = nsend + n_WE
+          ireq = ireq + 1
+       end if
+       ! To NW
+       if ( PRC_HAS_N .and. PRC_HAS_W ) then
+          call L2_request( persistent, .false., sbuf(off_NW+1), n_C, PRC_next(PRC_NW), tag+0, gid, req(ireq) )
+          nsend = nsend + n_C
+          ireq = ireq + 1
+       end if
+       ! To NE
+       if ( PRC_HAS_N .and. PRC_HAS_E ) then
+          call L2_request( persistent, .false., sbuf(off_NE+1), n_C, PRC_next(PRC_NE), tag+10, gid, req(ireq) )
+          nsend = nsend + n_C
+          ireq = ireq + 1
+       end if
+       ! To SW
+       if ( PRC_HAS_S .and. PRC_HAS_W ) then
+          call L2_request( persistent, .false., sbuf(off_SW+1), n_C, PRC_next(PRC_SW), tag+20, gid, req(ireq) )
+          nsend = nsend + n_C
+          ireq = ireq + 1
+       end if
+       ! To SE
+       if ( PRC_HAS_S .and. PRC_HAS_E ) then
+          call L2_request( persistent, .false., sbuf(off_SE+1), n_C, PRC_next(PRC_SE), tag+30, gid, req(ireq) )
+          nsend = nsend + n_C
+          ireq = ireq + 1
+       end if
+       !$acc end host_data
+    end if
+
+    nreq = ireq - 1
+
+    return
+  end subroutine L2_requests
+
+  !-----------------------------------------------------------------------------
+  !> A request of L2_requests: persistent (made, not started) or non-persistent (started), to
+  !! receive or to send n elements from buf. buf is the array itself (an element of the variable or
+  !! of the packing buffer is given: no copy is made), on the device inside host_data
+  subroutine L2_request( persistent, recv, buf, n, rank, tag, gid, req )
+    implicit none
+
+    logical,  intent(in)    :: persistent
+    logical,  intent(in)    :: recv
+    integer,  intent(in)    :: n
+    real(RP), intent(inout) :: buf(n)
+#ifdef _OPENACC
+    ! buf is given inside host_data (an address on the device), and passed on to MPI as it is
+    !dir$ ignore_tkr (d) buf
+#endif
+    integer,  intent(in)    :: rank !< neighbor
+    integer,  intent(in)    :: tag
+    integer,  intent(in)    :: gid
+#ifdef NO_MPI08
+    integer,           intent(inout) :: req
+#else
+    type(MPI_Request), intent(inout) :: req
+#endif
+
+    integer :: ierr
+    !---------------------------------------------------------------------------
+
+    if ( persistent ) then
+       if ( recv ) then
+          call MPI_RECV_INIT( buf, n, COMM_datatype_t, rank, tag, ginfo(gid)%comm_pc, req, ierr )
+       else
+          call MPI_SEND_INIT( buf, n, COMM_datatype_t, rank, tag, ginfo(gid)%comm_pc, req, ierr )
+       end if
+    else
+       if ( recv ) then
+          call MPI_IRECV( buf, n, COMM_datatype_t, rank, tag, ginfo(gid)%comm, req, ierr )
+       else
+          call MPI_ISEND( buf, n, COMM_datatype_t, rank, tag, ginfo(gid)%comm, req, ierr )
+       end if
+    end if
+
+    return
+  end subroutine L2_request
+
+  !-----------------------------------------------------------------------------
+  !> Persistent requests of the 8-direction exchange in the layout 2 (see L2_requests)
+  subroutine vars8_init_mpi_pc_L2(var, gid, seqid, pid)
+    implicit none
+
+    real(RP), intent(inout) :: var(:,:,:)
+    integer,  intent(in) :: gid
+    integer,  intent(in) :: seqid
+    integer,  intent(in) :: pid   !< ID of the packing buffer
+
+    integer :: tag
+    integer :: ierr
+    integer :: nsend
+    logical :: flag
+
+    integer :: nreq
+    integer :: i
+    !---------------------------------------------------------------------------
+
+    tag = COMM_tag_base( seqid )
 
     !$acc host_data use_device(var)
 
@@ -3938,135 +4333,15 @@ contains
                         MPI_PROC_NULL, tag, ginfo(gid)%comm_pc,                 &
                         ginfo(gid)%preq_list(ginfo(gid)%nreq_max+1,seqid), ierr )
 
-    !--- receive
-    ! From S
-    if ( PRC_HAS_S ) then
-       call MPI_RECV_INIT( var(1,1,1), n_NS, COMM_datatype_t,                                                &
-                           PRC_next(PRC_S), tag+40, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-       ireq = ireq + 1
-    end if
-    ! From N
-    if ( PRC_HAS_N ) then
-       call MPI_RECV_INIT( var(1,1,JE+1), n_NS, COMM_datatype_t,                                             &
-                           PRC_next(PRC_N), tag+50, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-       ireq = ireq + 1
-    end if
-
     !$acc end host_data
 
-    if ( IHALO > 0 ) then
-       ptr => ginfo(gid)%recvpack_L2(:,pid)
-       !$acc host_data use_device(ptr)
-       ! From E
-       if ( PRC_HAS_E ) then
-          call MPI_RECV_INIT( ptr(off_E+1), n_WE, COMM_datatype_t,                                              &
-                              PRC_next(PRC_E), tag+60, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          ireq = ireq + 1
-       end if
-       ! From W
-       if ( PRC_HAS_W ) then
-          call MPI_RECV_INIT( ptr(1), n_WE, COMM_datatype_t,                                                    &
-                              PRC_next(PRC_W), tag+70, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          ireq = ireq + 1
-       end if
-       ! From NW
-       if ( PRC_HAS_N .and. PRC_HAS_W ) then
-          call MPI_RECV_INIT( ptr(off_NW+1), n_C, COMM_datatype_t,                                            &
-                              PRC_next(PRC_NW), tag+30, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          ireq = ireq + 1
-       end if
-       ! From NE
-       if ( PRC_HAS_N .and. PRC_HAS_E ) then
-          call MPI_RECV_INIT( ptr(off_NE+1), n_C, COMM_datatype_t,                                            &
-                              PRC_next(PRC_NE), tag+20, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          ireq = ireq + 1
-       end if
-       ! From SW
-       if ( PRC_HAS_S .and. PRC_HAS_W ) then
-          call MPI_RECV_INIT( ptr(off_SW+1), n_C, COMM_datatype_t,                                            &
-                              PRC_next(PRC_SW), tag+10, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          ireq = ireq + 1
-       end if
-       ! From SE
-       if ( PRC_HAS_S .and. PRC_HAS_E ) then
-          call MPI_RECV_INIT( ptr(off_SE+1), n_C, COMM_datatype_t,                                            &
-                              PRC_next(PRC_SE), tag+0,  ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          ireq = ireq + 1
-       end if
-       !$acc end host_data
-    end if
+    call L2_requests( var, ginfo(gid)%recvpack_L2(:,pid), ginfo(gid)%sendpack_L2(:,pid), gid, .true., tag, &
+                      ginfo(gid)%preq_list(:,seqid), nreq, nsend )
 
-    !--- send
-    !$acc host_data use_device(var)
-    ! To N
-    if ( PRC_HAS_N ) then
-       call MPI_SEND_INIT( var(1,1,JE-JHALO+1), n_NS, COMM_datatype_t,                                       &
-                           PRC_next(PRC_N), tag+40, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-       nsend = nsend + n_NS
-       ireq = ireq + 1
-    end if
-    ! To S
-    if ( PRC_HAS_S ) then
-       call MPI_SEND_INIT( var(1,1,JS), n_NS, COMM_datatype_t,                                               &
-                           PRC_next(PRC_S), tag+50, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-       nsend = nsend + n_NS
-       ireq = ireq + 1
-    end if
-    !$acc end host_data
-
-    if ( IHALO > 0 ) then
-       ptr => ginfo(gid)%sendpack_L2(:,pid)
-       !$acc host_data use_device(ptr)
-       ! To W
-       if ( PRC_HAS_W ) then
-          call MPI_SEND_INIT( ptr(1), n_WE, COMM_datatype_t,                                                    &
-                              PRC_next(PRC_W), tag+60, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          nsend = nsend + n_WE
-          ireq = ireq + 1
-       end if
-       ! To E
-       if ( PRC_HAS_E ) then
-          call MPI_SEND_INIT( ptr(off_E+1), n_WE, COMM_datatype_t,                                              &
-                              PRC_next(PRC_E), tag+70, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          nsend = nsend + n_WE
-          ireq = ireq + 1
-       end if
-       ! To NW
-       if ( PRC_HAS_N .and. PRC_HAS_W ) then
-          call MPI_SEND_INIT( ptr(off_NW+1), n_C, COMM_datatype_t,                                            &
-                              PRC_next(PRC_NW), tag+0,  ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          nsend = nsend + n_C
-          ireq = ireq + 1
-       end if
-       ! To NE
-       if ( PRC_HAS_N .and. PRC_HAS_E ) then
-          call MPI_SEND_INIT( ptr(off_NE+1), n_C, COMM_datatype_t,                                            &
-                              PRC_next(PRC_NE), tag+10, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          nsend = nsend + n_C
-          ireq = ireq + 1
-       end if
-       ! To SW
-       if ( PRC_HAS_S .and. PRC_HAS_W ) then
-          call MPI_SEND_INIT( ptr(off_SW+1), n_C, COMM_datatype_t,                                            &
-                              PRC_next(PRC_SW), tag+20, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          nsend = nsend + n_C
-          ireq = ireq + 1
-       end if
-       ! To SE
-       if ( PRC_HAS_S .and. PRC_HAS_E ) then
-          call MPI_SEND_INIT( ptr(off_SE+1), n_C, COMM_datatype_t,                                            &
-                              PRC_next(PRC_SE), tag+30, ginfo(gid)%comm_pc, ginfo(gid)%preq_list(ireq,seqid), ierr )
-          nsend = nsend + n_C
-          ireq = ireq + 1
-       end if
-       !$acc end host_data
-    end if
-
-    ginfo(gid)%preq_cnt(seqid) = ireq - 1
+    ginfo(gid)%preq_cnt(seqid) = nreq
     ginfo(gid)%psend_cnt(seqid) = nsend
 
     ! to finish initial processes of MPI
-    nreq = ginfo(gid)%preq_cnt(seqid)
     do i = 1, 32
        call MPI_TESTALL( nreq, ginfo(gid)%preq_list(1:nreq,seqid), &
                          flag, MPI_STATUSES_IGNORE, ierr         )
@@ -4074,6 +4349,53 @@ contains
 
     return
   end subroutine vars8_init_mpi_pc_L2
+
+  !-----------------------------------------------------------------------------
+  !> Non-persistent two-sided 8-direction exchange of a 3-D variable with the vid, in the layout of
+  !! the grid (COMM_USE_NONPC_LAYOUT2), which wait_3D_mpi takes from req_L2
+  subroutine vars8_3D_nonpc(var, gid, vid)
+    implicit none
+
+    real(RP), intent(inout) :: var(:,:,:)
+    integer,  intent(in)    :: gid
+    integer,  intent(in)    :: vid
+    !---------------------------------------------------------------------------
+
+    ginfo(gid)%req_L2(vid) = ginfo(gid)%np_layout2
+    if ( ginfo(gid)%np_layout2 ) then
+       call vars8_3D_mpi_L2(var, gid, vid)
+    else
+       call vars8_3D_mpi(var, gid, vid)
+    end if
+
+    return
+  end subroutine vars8_3D_nonpc
+
+  !-----------------------------------------------------------------------------
+  !> Non-persistent 8-direction exchange of a 3-D variable in the layout 2 (see L2_requests):
+  !! the requests are waited and the halos unpacked in wait_3D_mpi
+  subroutine vars8_3D_mpi_L2(var, gid, vid)
+    implicit none
+
+    real(RP), intent(inout) :: var(:,:,:)
+    integer,  intent(in)    :: gid
+    integer,  intent(in)    :: vid
+
+    integer :: nreq, nsend
+    !---------------------------------------------------------------------------
+
+    call PROF_rapstart('COMM_mpi_post', 3)
+
+    call L2_requests( var, ginfo(gid)%recvpack_L2(:,vid), ginfo(gid)%sendpack_L2(:,vid), gid, .false., &
+                      COMM_tag_base( vid ), ginfo(gid)%req_list(:,vid), nreq, nsend )
+
+    call PROF_rapend  ('COMM_mpi_post', 3)
+
+    ginfo(gid)%req_cnt (vid) = nreq
+    ginfo(gid)%send_cnt(vid) = nsend ! counted in COMM_wait
+
+    return
+  end subroutine vars8_3D_mpi_L2
 
   subroutine vars_3D_mpi(var, gid, vid)
     use scale_prc, only: &
@@ -6551,15 +6873,24 @@ contains
           if ( ginfo(gid)%grp(ig)%nposted == ginfo(gid)%grp(ig)%nmem ) then
              ! the packing kernels of all the members are waited once, before the messages are started
              ! (COMM_pack of pack8_3D is the time to queue the kernel only)
+#ifdef _OPENACC
              call PROF_rapstart('COMM_pack_wait', 3)
              !$acc wait
              call PROF_rapend  ('COMM_pack_wait', 3)
+#endif
              call PROF_rapstart('COMM_mpi_post', 3)
              call MPI_STARTALL( ginfo(gid)%grp(ig)%nreq, ginfo(gid)%grp(ig)%req(1:ginfo(gid)%grp(ig)%nreq), ierr )
              call PROF_rapend  ('COMM_mpi_post', 3)
           end if
           return
        end if
+    end if
+
+    if ( ginfo(gid)%pc_free(vid) ) then
+       ! not bound to an array and not in batch: exchanged alone as with the vid of its packing buffer
+       !$acc wait
+       call vars8_3D_nonpc(var, gid, pid)
+       return
     end if
 
     if ( ginfo(gid)%pc_layout2 .and. ginfo(gid)%pc_ndir(vid) == 8 ) then
@@ -6578,9 +6909,11 @@ contains
                        var, gid, pid)
     end if
 
+#ifdef _OPENACC
     call PROF_rapstart('COMM_pack_wait', 3)
     !$acc wait
     call PROF_rapend  ('COMM_pack_wait', 3)
+#endif
     call PROF_rapstart('COMM_mpi_post', 3)
     call MPI_STARTALL(ginfo(gid)%preq_cnt(vid), ginfo(gid)%preq_list(1:ginfo(gid)%preq_cnt(vid),vid), ierr)
     call PROF_rapend  ('COMM_mpi_post', 3)
@@ -6600,6 +6933,7 @@ contains
     integer :: IA, IS, IE
     integer :: JA, JS, JE
     integer :: IHALO
+    integer :: off(G_NDIR) ! offsets of the sections of the packed exchange
 
     integer :: ierr
     !---------------------------------------------------------------------------
@@ -6613,7 +6947,18 @@ contains
     call PROF_rapend  ('COMM_mpi_wait', 3)
 
     call count_bytes( 'COMM_wait', 'COMM_mpi_wait', ginfo(gid)%send_cnt(vid) )
-    if ( .not. PRC_TwoD ) then
+    if ( ginfo(gid)%req_L2(vid) ) then
+       ! all the requests have completed: the N/S halos (whole rows) are in var
+       if ( ginfo(gid)%IHALO > 0 ) then
+          off(G_N:G_W) = 0
+          call L2_offsets( gid, off(G_E), off(G_NW), off(G_NE), off(G_SW), off(G_SE) )
+          call unpack8_3D( ginfo(gid)%KA, ginfo(gid)%IA, ginfo(gid)%IS, ginfo(gid)%IE, &
+                           ginfo(gid)%JA, ginfo(gid)%JS, ginfo(gid)%JE,                &
+                           ginfo(gid)%IHALO, ginfo(gid)%JHALO,                         &
+                           var, ginfo(gid)%recvpack_L2(:,vid), ginfo(gid)%size_L2,     &
+                           gid, .false., off                                           )
+       end if
+    else if ( .not. PRC_TwoD ) then
        KA = ginfo(gid)%KA
        IA = ginfo(gid)%IA
        IS = ginfo(gid)%IS
@@ -6820,7 +7165,12 @@ contains
                                MPI_STATUSES_IGNORE,                              &
                                ierr                                              )
              call PROF_rapend  ('COMM_mpi_wait', 3)
-             call count_bytes( 'COMM_wait_pers', 'COMM_mpi_wait', ginfo(gid)%grp(ig)%nsend )
+             ! in the item of the member waited first (see COMM_pers_item)
+             if ( ginfo(gid)%pc_free(vid) ) then
+                call count_bytes( 'COMM_wait',      'COMM_mpi_wait', ginfo(gid)%grp(ig)%nsend )
+             else
+                call count_bytes( 'COMM_wait_pers', 'COMM_mpi_wait', ginfo(gid)%grp(ig)%nsend )
+             end if
              ginfo(gid)%grp(ig)%arrived = .true.
           end if
           call G_offsets( gid, ginfo(gid)%grp(ig)%nmem, ginfo(gid)%pc_slot(vid), .true., off )
@@ -6833,6 +7183,12 @@ contains
           return
        end if
        call COMM_group_waited( gid, vid, ig )
+    end if
+
+    if ( ginfo(gid)%pc_free(vid) ) then
+       ! not bound to an array and not in batch (see vars_3D_mpi_pc)
+       call wait_3D_mpi(var, gid, pid)
+       return
     end if
 
     !--- wait packets
@@ -6972,9 +7328,9 @@ contains
   !! halos are the rows of L2_range_WE, and the corners are IHALO x JHALO blocks to the diagonal
   !! neighbors. The sections are those of pack8_sections, as in the requests.
   !! The kernel is left in the queue: the caller waits for it before the messages are started (one
-  !! wait for all the members of a batch). The variable and the buffer are on the device (a
-  !! persistent variable, and the buffers of the layout 2 and of a group), where the data region
-  !! below copies nothing
+  !! wait for all the members of a batch). The buffer is on the device (those of the layout 2 and
+  !! of a group) where the kernel runs there; a variable that is not on the device (possible with
+  !! an ID not bound to an array) is copied for the kernel, which is then waited here
   subroutine pack8_3D( KA, IA, IS, IE, JA, JS, JE, &
                        IHALO, JHALO, &
                        var, buf, nbuf, gid, with_NS, off )
@@ -6994,8 +7350,18 @@ contains
     integer :: i0, i1, ni, jw0, jw1
     logical :: with_x, has_N, has_S, has_W, has_E, do_N, do_S
     integer :: ngang
+    logical :: on_dev, var_dev
     integer :: k, i, j
     !---------------------------------------------------------------------------
+
+    ! on the device: the variable is there, or the buffer is that of a group (with_NS), to which the
+    ! requests are bound on the device (a variable that is not there is copied for the kernel)
+    on_dev  = .false.
+    var_dev = .false.
+#ifdef _OPENACC
+    var_dev = acc_is_present(var)
+    on_dev  = var_dev .or. with_NS
+#endif
 
     ! local copies used in the compute region
     oN  = off(G_N )
@@ -7018,14 +7384,16 @@ contains
     if ( with_NS ) ngang = max( ngang, JHALO * ni )
     if ( with_x  ) ngang = max( ngang, ( jw1 - jw0 + 1 ) * IHALO, JHALO * IHALO )
 
-    !$acc data copyin(var) copy(buf) if(acc_is_present(var))
+    ! present, not copy: the kernel below is not waited here, so the buffer must stay on the device.
+    ! A variable that is not on the device is copied for the kernel, which is then waited here
+    !$acc data copyin(var) present(buf) if(on_dev)
 
     call PROF_rapstart('COMM_pack', 3)
 
     ! one kernel for all the directions: the blocks write disjoint ranges.
     ! The number of gangs is given explicitly: without it, the compiler takes it from one of the loops
     ! (e.g., a corner block, JHALO*IHALO gangs), and the larger loops run on a few gangs
-    !$acc parallel num_gangs(ngang) if(acc_is_present(var)) async
+    !$acc parallel num_gangs(ngang) if(on_dev) async
     if ( do_N ) then
        !--- to N
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)
@@ -7141,6 +7509,13 @@ contains
 
     call PROF_rapend('COMM_pack', 3)
 
+#ifdef _OPENACC
+    if ( on_dev .and. .not. var_dev ) then
+       ! the copy of the variable is removed at the end of the data region
+       !$acc wait
+    end if
+#endif
+
     !$acc end data
 
     return
@@ -7173,8 +7548,16 @@ contains
     integer :: i0, i1, ni, iu0, iu1, jw0, jw1
     logical :: with_x, has_N, has_S, has_W, has_E, do_N, do_S
     integer :: ngang
+    logical :: on_dev
     integer :: k, i, j
     !---------------------------------------------------------------------------
+
+    ! on the device: the variable is there, or the buffer is that of a group (with_NS), to which the
+    ! requests are bound on the device (a variable that is not there is copied for the kernel)
+    on_dev = .false.
+#ifdef _OPENACC
+    on_dev = acc_is_present(var) .or. with_NS
+#endif
 
     ! local copies used in the compute region
     oN  = off(G_N )
@@ -7202,13 +7585,13 @@ contains
     if ( with_NS ) ngang = max( ngang, JHALO * ( iu1 - iu0 + 1 ) )
     if ( with_x  ) ngang = max( ngang, ( jw1 - jw0 + 1 ) * IHALO, JHALO * IHALO )
 
-    !$acc data copy(var) copyin(buf) if(acc_is_present(var))
+    !$acc data copy(var) copyin(buf) if(on_dev)
 
     call PROF_rapstart('COMM_unpack', 3)
 
     ! one kernel for all the directions: the blocks write disjoint ranges.
     ! The number of gangs is given explicitly (the largest loop; see pack8_3D)
-    !$acc parallel num_gangs(ngang) if(acc_is_present(var)) async
+    !$acc parallel num_gangs(ngang) if(on_dev) async
     if ( do_S ) then
        !--- from S
        !$omp parallel do private(i,j,k) OMP_SCHEDULE_ collapse(2)

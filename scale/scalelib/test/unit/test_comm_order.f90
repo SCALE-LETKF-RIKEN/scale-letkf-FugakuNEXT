@@ -181,6 +181,8 @@ program test_comm_order
   integer, parameter   :: g1(1) = (/ V_Q4 /)
   integer, parameter   :: gb(3) = (/ V_A2, V_B2, V_Z2 /)
   logical :: batch              !< COMM_USE_BATCH of the configuration
+  logical :: batch_nonpc        !< COMM_USE_NONPC_BATCH of the configuration
+  logical :: unbound = .false.  !< phase C: the members of the groups are IDs not bound to the arrays
   logical :: skip_case4         !< skip case 4 (SKIP_ASYMMETRIC of PARAM_TEST_COMM_ORDER)
 
   character(len=H_LONG) :: comm_conf
@@ -282,6 +284,21 @@ program test_comm_order
      call run_group_cases
      fill_bnd = .true.
      call run_group_cases
+
+     ! phase C: the same groups, with IDs that are not bound to the arrays (issue #3624). The IDs
+     ! of the first two members of the first group are swapped after the declaration (in all the
+     ! processes): an ID is given with an array other than that of its registration
+     call COMM_vars_finalize
+     unbound = .true.
+     call setup_groups
+     f = fld(ga(1))%vid
+     fld(ga(1))%vid = fld(ga(2))%vid
+     fld(ga(2))%vid = f
+     fill_bnd = .false.
+     call run_group_cases
+     fill_bnd = .true.
+     call run_group_cases
+     unbound = .false.
 
      call COMM_vars_finalize
      call COMM_finalize
@@ -424,14 +441,16 @@ contains
     logical, intent(out) :: layout2
 
     integer :: COMM_vsize_max, COMM_vsize_max_pc
-    logical :: COMM_USE_MPI_PC, COMM_USE_MPI_ONESIDED, COMM_USE_PC_LAYOUT2, COMM_USE_BATCH
+    logical :: COMM_USE_MPI_PC, COMM_USE_MPI_ONESIDED, COMM_USE_PC_LAYOUT2, COMM_USE_BATCH, COMM_USE_NONPC_LAYOUT2, COMM_USE_NONPC_BATCH
     namelist / PARAM_COMM_CARTESC / &
        COMM_vsize_max, &
        COMM_vsize_max_pc, &
        COMM_USE_MPI_PC, &
        COMM_USE_MPI_ONESIDED, &
        COMM_USE_PC_LAYOUT2, &
-       COMM_USE_BATCH
+       COMM_USE_BATCH, &
+       COMM_USE_NONPC_LAYOUT2, &
+       COMM_USE_NONPC_BATCH
     integer :: ierr
 
     COMM_USE_MPI_PC = .true.
@@ -439,9 +458,13 @@ contains
 #ifdef _OPENACC
     COMM_USE_PC_LAYOUT2 = .true.
     COMM_USE_BATCH = .true.
+    COMM_USE_NONPC_LAYOUT2 = .true.
+    COMM_USE_NONPC_BATCH = .true.
 #else
     COMM_USE_PC_LAYOUT2 = .false.
     COMM_USE_BATCH = .false.
+    COMM_USE_NONPC_LAYOUT2 = .false.
+    COMM_USE_NONPC_BATCH = .false.
 #endif
     rewind( IO_FID_CONF )
     read( IO_FID_CONF, nml=PARAM_COMM_CARTESC, iostat=ierr )
@@ -450,6 +473,7 @@ contains
     end if
     layout2 = COMM_USE_PC_LAYOUT2 .and. COMM_USE_MPI_PC .and. .not. COMM_USE_MPI_ONESIDED
     batch   = COMM_USE_BATCH .and. layout2 .and. .not. PRC_TwoD ! the batch is not used in 2-D
+    batch_nonpc = COMM_USE_NONPC_BATCH
   end subroutine read_layout2
 
   !-----------------------------------------------------------------------------
@@ -526,7 +550,10 @@ contains
     integer, intent(inout) :: nreg(2)
 
     fld(f)%vid = fld(f)%pid
-    if ( fld(f)%ndir == 8 ) then
+    if ( is_unbound( f ) ) then
+       ! an ID that is not bound to the array (issue #3624)
+       call COMM_vars8_init( fld(f)%name, fld(f)%vid, gid=grd(fld(f)%grid)%gid )
+    else if ( fld(f)%ndir == 8 ) then
        call COMM_vars8_init( fld(f)%name, fld(f)%v, fld(f)%vid, gid=grd(fld(f)%grid)%gid )
     else
        call COMM_vars_init ( fld(f)%name, fld(f)%v, fld(f)%vid, gid=grd(fld(f)%grid)%gid )
@@ -535,6 +562,14 @@ contains
     call AssertEqual( "ID of "//fld(f)%name//" registered with the groups ("//trim(comm_conf)//")", &
                       COMM_get_vsize_max() + nreg(fld(f)%grid), fld(f)%vid )
   end subroutine regist_field
+
+  !> the field is registered with an ID not bound to its array: the members of the groups of two
+  !! or more in phase C
+  logical function is_unbound( f )
+    integer, intent(in) :: f
+
+    is_unbound = unbound .and. group_size( f ) >= 2
+  end function is_unbound
 
   !> number of the members of the group of a field in phase B (0 if not in a group)
   function group_size( f ) result(n)
@@ -565,7 +600,7 @@ contains
        n = group_size( f )
        if ( n == 0 ) then
           state_ex = COMM_PC_GROUP_NONE
-       else if ( batch .and. n >= 2 ) then
+       else if ( batch .and. n >= 2 .and. ( batch_nonpc .or. .not. is_unbound( f ) ) ) then
           state_ex = COMM_PC_GROUP_BATCH
        else
           state_ex = COMM_PC_GROUP_CHECK
@@ -581,10 +616,14 @@ contains
        call AssertEqual( "members of the group of "//trim(label), n, nmem_group )
        call AssertEqual( "requests of the group of "//trim(label), nreq_ex, nreq_group )
        call AssertEqual( "requests of the group of "//trim(label)//" at most", .true., nreq_group <= NREQ_GROUP_MAX )
-       call AssertEqual( "number of the persistent requests of "//trim(label)//" with the groups", &
-                         expected_nreq( f, read_layout2_value() ), nreq )
+       if ( is_unbound( f ) ) then
+          call AssertEqual( "number of the persistent requests of "//trim(label)//" (not bound to the array)", 0, nreq )
+       else
+          call AssertEqual( "number of the persistent requests of "//trim(label)//" with the groups", &
+                            expected_nreq( f, read_layout2_value() ), nreq )
+       end if
     end do
-    if ( batch .and. nbatch == 0 ) then
+    if ( batch .and. ( batch_nonpc .or. .not. unbound ) .and. nbatch == 0 ) then
        call AssertEqual( "variables in a group in batch ("//trim(comm_conf)//")", 1, 0 )
     end if
   end subroutine check_groups
@@ -638,11 +677,14 @@ contains
                     (/ perm(ga), lone, -wa(1), V_D1, -V_D1, -wa(2:), -lone /) )
 
     ! exchanges of other variables posted and waited between the posts of a group, at the same
-    ! place in all the processes (a 4-direction persistent variable, a non-persistent one, and the
-    ! group of grid 2); the first member posted depends on the process
+    ! place in all the processes (a 4-direction persistent variable, a non-persistent one, the
+    ! 8-direction persistent variables of another group of the grid, 2-D exchanges with the packing
+    ! buffer of the non-persistent one, and the group of grid 2); the first member posted depends on
+    ! the process
     pa = perm(ga)
     call run_gcase( "exchanges between the posts of a group", &
-                    (/ pa(1), V_D1, -V_D1, V_N1, -V_N1, perm(gb), -perm(gb), pa(2:), lone, -perm(ga), -lone /) )
+                    (/ pa(1), V_D1, -V_D1, V_N1, -V_N1, perm(gp), -perm(gp), OP_2D, perm(gb), -perm(gb), pa(2:), lone, &
+                       -perm(ga), -lone /) )
 
     ! two rounds of a group in a case
     call run_gcase( "two rounds of a group", &
@@ -663,7 +705,7 @@ contains
 
     used(:) = .false.
     do n = 1, size(ops)
-       used(abs(ops(n))) = .true.
+       if ( abs(ops(n)) <= NF ) used(abs(ops(n))) = .true.
     end do
     ib = merge( 1, 0, fill_bnd )
 
@@ -693,7 +735,10 @@ contains
        ! the case
        call fill_all( r, used )
        do n = 1, size(ops)
-          if ( ops(n) > 0 ) then
+          if ( ops(n) == OP_2D ) then
+             ! with the packing buffer of n1 (that of a1 may be in use: a1 is a member of ga)
+             call exchange_2d( r, fld(V_N1)%pid )
+          else if ( ops(n) > 0 ) then
              call post( ops(n) )
           else
              call wait( -ops(n) )
@@ -856,19 +901,23 @@ contains
   !-----------------------------------------------------------------------------
   !> 2-D exchanges (8- and 4-direction) of s1 with the packing buffer of a1 (OP_2D in a case),
   !! checked with the source cells
-  subroutine exchange_2d( r )
+  subroutine exchange_2d( r, pid )
     integer, intent(in) :: r
-    integer :: ndir
+    integer, intent(in), optional :: pid !< packing buffer (default: that of a1)
+    integer :: ndir, pid_
+
+    pid_ = fld(V_A1)%pid
+    if ( present(pid) ) pid_ = pid
 
     do ndir = 8, 4, -4
        call fill_2d( r )
        !$acc update device(s1)
        if ( ndir == 8 ) then
-          call COMM_vars8( s1, fld(V_A1)%pid, gid=grd(1)%gid )
+          call COMM_vars8( s1, pid_, gid=grd(1)%gid )
        else
-          call COMM_vars ( s1, fld(V_A1)%pid, gid=grd(1)%gid )
+          call COMM_vars ( s1, pid_, gid=grd(1)%gid )
        end if
-       call COMM_wait( s1, fld(V_A1)%pid, fill_bnd, gid=grd(1)%gid )
+       call COMM_wait( s1, pid_, fill_bnd, gid=grd(1)%gid )
        !$acc wait
        !$acc update host(s1)
        call check_2d( r, ndir )

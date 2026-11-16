@@ -1,5 +1,36 @@
 = Release History
 
+== 2026-11-16 (SCALE-LETKF local changes)
+* Improvements:
+  * Port scale-met/scale#3634 (f621b9fdb, on top of #3633 42dc673da): new
+    switches COMM_USE_NONPC_LAYOUT2 and COMM_USE_NONPC_BATCH in
+    PARAM_COMM_CARTESC for the non-persistent halo exchange, .true. by
+    default in OpenACC builds and .false. otherwise. COMM_USE_NONPC_LAYOUT2
+    uses the layout 2 for the non-persistent 8-direction exchange of a 3-D
+    variable (at most 16 requests instead of 12*JHALO+4; not with
+    COMM_USE_MPI_ONESIDED). COMM_vars8_init without the array reserves an
+    ID that is not bound to an array; such IDs can be declared as a group
+    (COMM_vars_group_init), so that dummy arguments and arrays whose address
+    is not fixed are exchanged in a batch (COMM_USE_NONPC_BATCH, which
+    requires COMM_USE_BATCH: both must be switched off together in an
+    OpenACC build). ATMOS_vars_fillhalo (5+QA), the fillhalo of the boundary
+    variables and of their damping coefficients (5+BND_QA) and the
+    tendencies exchanged in ATMOS_DYN_driver (4+QA) declare such groups.
+    ATMOS_vars_fillhalo now posts all the variables before the waits, so
+    COMM_vsize_max must be 5+QA or larger (the default is). In a batch the
+    groups keep send and receive buffers for all the halos of their members.
+    scale_comm_cartesC.F90 is the upstream file of f621b9fdb except for
+    count_bytes, which does nothing here (no data size statistics of PROF).
+    With it pack8_3D copies a variable that is not on the device for its
+    kernel and waits for it there (#3633). The unit tests of upstream are
+    imported except those of run-comm-dyn (unit_atmos_dyn_average is not in
+    this tree). Upstream timings are not measurements of this port.
+  * PROF items of the halo exchange, local change (not in upstream): an
+    exchange with an ID that is not bound to an array is counted in COMM_vars
+    and COMM_wait also when its group is exchanged in a batch. Upstream
+    counts it in COMM_vars_pers and COMM_wait_pers there, so that the number
+    of calls and the time move between the items with COMM_USE_NONPC_BATCH.
+
 == 2026-11-15 (SCALE-LETKF local changes)
 * Improvements:
   * Port scale-met/scale#3622 (c16a0141b) and #3623 (51afc9959): new

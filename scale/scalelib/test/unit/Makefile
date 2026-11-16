@@ -80,17 +80,26 @@ run: run-comm-check run-comm-order
 # runtime checks also with comm_check_batch.conf (the group in batch). batch_nol2 is rejected in
 # COMM_setup by the configuration (COMM_USE_BATCH without COMM_USE_PC_LAYOUT2), also without
 # persistent communication.
+# The modes of the IDs not bound to arrays (free_*, issue #3624) are run with comm_check_pc.conf, and
+# the runtime checks of their group also with comm_check_batch.conf (in batch: COMM_USE_NONPC_BATCH).
+# npb_nobatch is rejected in COMM_setup by the configuration (COMM_USE_NONPC_BATCH without
+# COMM_USE_BATCH, comm_check_nonpc_batch_nobatch.conf).
 # COMM_USE_PC_LAYOUT2 and COMM_USE_BATCH are .true. by default with OpenACC (issue #3615): there
 # the runs with run.conf and the other files that do not set them (here, in run-average and in
 # run) use the layout 2 and the batch, and the files named comm_*.conf set both explicitly.
 COMM_CHECK_MODES = packbuf wait_nopost post_nowait wait_rank wait_array
 COMM_CHECK_PC_MODES = wait_other other_grid foreign_array pc_same_vid pc_dir pc_released pc_rel_nowait
 COMM_CHECK_GRP_RUN_MODES = grp_wait_mem grp_repost grp_rel_round grp_in_flight
+COMM_CHECK_FREE_MODES = free_dir free_2d free_same_vid
+COMM_CHECK_FREE_RUN_MODES = free_wait_arr free_wait_mem
 COMM_CHECK_GRP_DEF_MODES = grp_same_pid grp_dup grp_4dir grp_range grp_rank_n grp_rank_id
 COMM_CHECK_RUNS = $(foreach m,$(COMM_CHECK_MODES),run.conf:$(m)) $(foreach m,$(COMM_CHECK_PC_MODES),comm_check_pc.conf:$(m)) \
   $(foreach m,$(COMM_CHECK_GRP_RUN_MODES) $(COMM_CHECK_GRP_DEF_MODES),comm_check_pc.conf:$(m)) \
   $(foreach m,$(COMM_CHECK_GRP_RUN_MODES),comm_check_batch.conf:$(m)) \
-  comm_check_batch_nolayout2.conf:batch_nol2 comm_check_batch_nopc.conf:batch_nol2
+  $(foreach m,$(COMM_CHECK_FREE_MODES) $(COMM_CHECK_FREE_RUN_MODES),comm_check_pc.conf:$(m)) \
+  $(foreach m,$(COMM_CHECK_FREE_RUN_MODES),comm_check_batch.conf:$(m)) \
+  comm_check_batch_nolayout2.conf:batch_nol2 comm_check_batch_nopc.conf:batch_nol2 \
+  comm_check_nonpc_batch_nobatch.conf:npb_nobatch
 
 run-comm-check:
 	@set -eu; for run in $(COMM_CHECK_RUNS); do \
@@ -105,6 +114,11 @@ run-comm-check:
 	    pc_dir)      expected='registered for the other direction' ;; \
 	    pc_released) expected='vid is invalid: not initialized' ;; \
 	    pc_rel_nowait) expected='still active at the release' ;; \
+	    free_dir)    expected='registered for the other direction' ;; \
+	    free_2d)     expected='vid is invalid' ;; \
+	    free_wait_arr) expected='not the array posted' ;; \
+	    free_same_vid) expected='two members share the packing buffer' ;; \
+	    free_wait_mem) expected='waited before all its members are posted' ;; \
 	    grp_wait_mem) expected='waited before all its members are posted' ;; \
 	    grp_repost)  expected='posted again before all the members are waited' ;; \
 	    grp_rel_round) expected='a round of the group is in progress at the release' ;; \
@@ -115,6 +129,7 @@ run-comm-check:
 	    grp_range)   expected='vid of a member is invalid' ;; \
 	    grp_rank_n)  expected='the group differs among the processes' ;; \
 	    grp_rank_id) expected='IDs of the members differ among the processes' ;; \
+	    npb_nobatch) expected='COMM_USE_NONPC_BATCH = .true. requires COMM_USE_BATCH' ;; \
 	    batch_nol2)  expected='COMM_USE_BATCH = .true. requires COMM_USE_PC_LAYOUT2' ;; \
 	    *)           expected='not the one registered' ;; \
 	  esac; \
@@ -131,6 +146,8 @@ run-comm-check:
 # comm_order_pc_layout2.conf uses the layout 2 of the persistent 8-direction exchange
 # (COMM_USE_PC_LAYOUT2), with the same small capacity; the number of the persistent requests of
 # each variable is checked against the layout that each configuration selects.
+# comm_order_nonpc_layout2.conf uses the layout 2 of the non-persistent 8-direction exchange of 3-D
+# variables (COMM_USE_NONPC_LAYOUT2, issue #3624) only, and comm_order_pc_batch.conf uses it too.
 # comm_order_pc_batch.conf adds the batch of the groups of persistent variables (COMM_USE_BATCH),
 # which is not used in 2-D (run_comm_2d.conf, run_comm_2d_edge.conf: the groups are checked only).
 # In each configuration, the cases are run again with groups declared (COMM_vars_group_init),
@@ -147,10 +164,10 @@ run-comm-check:
 # 4-direction exchange in y is 26,624 B, and a corner is 512 B (twice as large in double precision).
 COMM_ORDER_TIMEOUT ?= 120
 COMM_ORDER_RUN = OMP_NUM_THREADS=$(OMP_NUM_THREADS) $(RUBY) $(TOPDIR)/scalelib/test/unit/run_with_timeout.rb $(COMM_ORDER_TIMEOUT) $(MPIRUN)
-COMM_ORDER_CONFS = comm_order_pc.conf comm_order_pc_extend.conf comm_order_pc_layout2.conf comm_order_pc_batch.conf
+COMM_ORDER_CONFS = comm_order_pc.conf comm_order_pc_extend.conf comm_order_pc_layout2.conf comm_order_nonpc_layout2.conf comm_order_pc_batch.conf
 # run_comm_large.conf takes long, so it is run without comm_order_pc_extend.conf (the capacity is
 # extended in comm_order_pc_layout2.conf too)
-COMM_ORDER_CONFS_LARGE = comm_order_pc.conf comm_order_pc_layout2.conf comm_order_pc_batch.conf
+COMM_ORDER_CONFS_LARGE = comm_order_pc.conf comm_order_pc_layout2.conf comm_order_nonpc_layout2.conf comm_order_pc_batch.conf
 COMM_ORDER_LAYOUTS = periodic:4 corner:4 corner_xy:4 empty_we:2 empty_all:1 2d:2 2d_edge:3 3columns:3 self_we:2 self_all:1 halo_x:4 barrier:4 large:4
 
 run-comm-order:

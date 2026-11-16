@@ -62,6 +62,8 @@ module mod_atmos_dyn_driver
   !
   !++ Private parameters & variables
   !
+  integer,  private, allocatable :: I_COMM_tp(:) !< IDs of the exchanges of the tendencies in ATMOS_DYN_driver (a group): RHOU_tp, RHOV_tp, MOMZ_tp, RHOT_tp, and RHOQ_tp
+
   ! Numerical filter
   integer,  private :: ATMOS_DYN_NUMERICAL_DIFF_LAPLACIAN_NUM
   real(RP), private :: ATMOS_DYN_NUMERICAL_DIFF_coef          ! nondimensional numerical diffusion
@@ -90,6 +92,11 @@ contains
   subroutine ATMOS_DYN_driver_setup
     use scale_prc, only: &
        PRC_abort
+    use scale_prc_cartesC, only: &
+       PRC_TwoD
+    use scale_comm_cartesC, only: &
+       COMM_vars8_init, &
+       COMM_vars_group_init
     use scale_atmos_grid_cartesC, only: &
        DOMAIN_CENTER_Y => ATMOS_GRID_CARTESC_DOMAIN_CENTER_Y, &
        CY  => ATMOS_GRID_CARTESC_CY,  &
@@ -152,6 +159,7 @@ contains
 
     real(RP) :: DT
     integer  :: ierr
+    integer  :: iq
     !---------------------------------------------------------------------------
 
     LOG_NEWLINE
@@ -228,6 +236,20 @@ contains
                              ATMOS_DYN_wdamp_height,             & ! [IN]
                              FZ,                                 & ! [IN]
                              none = ATMOS_DYN_TYPE=='NONE'       ) ! [IN]
+
+       ! the tendencies are posted consecutively in ATMOS_DYN_driver: a group of IDs that are not
+       ! bound to the arrays. RHOU_tp is not exchanged in 2-D
+       if ( allocated( I_COMM_tp ) ) deallocate( I_COMM_tp )
+       allocate( I_COMM_tp(4+QA) )
+       do iq = 1, 4+QA
+          I_COMM_tp(iq) = iq
+          call COMM_vars8_init( 'ATMOS_DYN_tp', I_COMM_tp(iq) )
+       end do
+       if ( PRC_TwoD ) then
+          call COMM_vars_group_init( 'ATMOS_DYN_tp', I_COMM_tp(2:) )
+       else
+          call COMM_vars_group_init( 'ATMOS_DYN_tp', I_COMM_tp(:) )
+       end if
     endif
 
     return
@@ -364,12 +386,13 @@ contains
        !$acc        atmos_boundary_mflux_offset_x,atmos_boundary_mflux_offset_y)
 
 
+       ! the members of the group: no exchange is waited before RHOT_tp, the last one, is posted
        if ( .not. PRC_TwoD ) &
-       call COMM_vars8( RHOU_tp, 1 )
-       call COMM_vars8( RHOV_tp, 2 )
-       call COMM_vars8( MOMZ_tp, 3 )
+       call COMM_vars8( RHOU_tp, I_COMM_tp(1) )
+       call COMM_vars8( RHOV_tp, I_COMM_tp(2) )
+       call COMM_vars8( MOMZ_tp, I_COMM_tp(3) )
        do iq = 1, QA
-          call COMM_vars8( RHOQ_tp(:,:,:,iq), 4+iq)
+          call COMM_vars8( RHOQ_tp(:,:,:,iq), I_COMM_tp(4+iq) )
        end do
 
        !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
@@ -386,7 +409,7 @@ contains
        end do
        end do
        !$acc end kernels
-       call COMM_vars8( RHOT_tp, 4 )
+       call COMM_vars8( RHOT_tp, I_COMM_tp(4) )
 
        if ( PRC_TwoD ) then
           !$omp parallel do default(none) OMP_SCHEDULE_ &
@@ -401,7 +424,7 @@ contains
           end do
           !$acc end kernels
        else
-          call COMM_wait ( RHOU_tp, 1 )
+          call COMM_wait ( RHOU_tp, I_COMM_tp(1) )
           !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
           !$omp private(k,i,j) &
           !$omp shared (KA,KS,KE,IS,IE,JS,JE, &
@@ -419,7 +442,7 @@ contains
           call COMM_vars8( MOMX_tp, 1 )
        end if
 
-       call COMM_wait ( RHOV_tp, 2 )
+       call COMM_wait ( RHOV_tp, I_COMM_tp(2) )
        !$omp parallel do default(none) OMP_SCHEDULE_ collapse(2) &
        !$omp private(k,i,j) &
        !$omp shared (KA,KS,KE,IS,IE,JS,JE, &
@@ -436,10 +459,10 @@ contains
        !$acc end kernels
        call COMM_vars8( MOMY_tp, 2 )
 
-       call COMM_wait ( MOMZ_tp, 3 )
-       call COMM_wait ( RHOT_tp, 4, .false. )
+       call COMM_wait ( MOMZ_tp, I_COMM_tp(3) )
+       call COMM_wait ( RHOT_tp, I_COMM_tp(4), .false. )
        do iq = 1, QA
-          call COMM_wait ( RHOQ_tp(:,:,:,iq), 4+iq, .false. )
+          call COMM_wait ( RHOQ_tp(:,:,:,iq), I_COMM_tp(4+iq), .false. )
        end do
        if ( .not. PRC_TwoD ) &
        call COMM_wait ( MOMX_tp, 1 )
