@@ -9,6 +9,11 @@
 !! arrays, callers must wait before host access/transfers or work on another
 !! queue; calls between kernels on the same queue preserve their order.
 !!
+!! The fluxZJ routines use the boundary treatment and map factors of upstream
+!! e016ebc73 (#3754). The separate routines retain this branch's earlier formulae
+!! for the tracer and low-order FCT paths. References below to equivalent separate
+!! routines describe the upstream version.
+!!
 !! @author Team SCALE
 !!
 !<
@@ -66,6 +71,10 @@ module scale_atmos_dyn_fvm_flux_ud3Koren1993
   public :: ATMOS_DYN_FVM_fluxJ23_XVZ_ud3Koren1993
   public :: ATMOS_DYN_FVM_fluxX_XVZ_ud3Koren1993
   public :: ATMOS_DYN_FVM_fluxY_XVZ_ud3Koren1993
+
+  public :: ATMOS_DYN_FVM_fluxZJ_XYW_ud3Koren1993
+  public :: ATMOS_DYN_FVM_fluxZJ_UYZ_ud3Koren1993
+  public :: ATMOS_DYN_FVM_fluxZJ_XVZ_ud3Koren1993
 
   !-----------------------------------------------------------------------------
   !
@@ -636,6 +645,365 @@ contains
 
     return
   end subroutine ATMOS_DYN_FVM_fluxJ23_XYW_ud3Koren1993
+  !-----------------------------------------------------------------------------
+  !> calculation of the vertical flux at XYW: the three parts with one face value
+  !!
+  !! The three parts of the vertical flux of rho*w, those of ATMOS_DYN_FVM_fluxZ_XYW_ud3Koren1993 (flux),
+  !! ATMOS_DYN_FVM_fluxJ13_XYW_ud3Koren1993 (fluxJ13) and ATMOS_DYN_FVM_fluxJ23_XYW_ud3Koren1993 (fluxJ23), are computed
+  !! with one face value, whose upwind side is taken by the sign of the total contravariant vertical velocity
+  !! J33G w + m_x J13G u + m_y J23G v, the sum of the velocities that multiply the face value in the three parts
+  !! (issue #3754). The sum of the parts is then the flux of the total velocity at every level, including those
+  !! where the order is reduced, and it vanishes for flow along the coordinate surfaces.
+  !! Each part is the flux of the separate routine when its own velocity has the sign of the total one.
+  !! The orders at the levels are those of ATMOS_DYN_FVM_fluxZ_XYW_ud3Koren1993, and the fluxes at the full levels KS and KE,
+  !! whose face value does not depend on the direction, are those of the separate routines.
+  !! With TwoD, the part of J13G is not computed (fluxJ13 is not changed), and momx is not used.
+  subroutine ATMOS_DYN_FVM_fluxZJ_XYW_ud3Koren1993( &
+       flux, fluxJ13, fluxJ23,   &
+       momz, momx, momy, val,    &
+       DENS, GSQRT,              &
+       J33G, J13G, J23G, MAPF,   &
+       num_diff,                 &
+       CDZ, FDZ, dtrk, TwoD,     &
+       IIS, IIE, JJS, JJE        )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+    real(RP), intent(in)  :: momz    (KA,IA,JA)
+    real(RP), intent(in)  :: momx    (KA,IA,JA)
+    real(RP), intent(in)  :: momy    (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: J33G
+    real(RP), intent(in)  :: J13G    (KA,IA,JA)
+    real(RP), intent(in)  :: J23G    (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    real(RP), intent(in)  :: FDZ     (KA-1)
+    real(RP), intent(in)  :: dtrk
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    real(RP) :: vz, vx, vy ! velocities of the parts: J33G w, m_x J13G u, m_y J23G v
+    real(RP) :: vt         ! total contravariant vertical velocity
+    real(RP) :: fv         ! face value
+    real(RP) :: wlo, wup ! weights of the extrapolation of the face values at KS and KE
+    real(RP) :: cl(3), cu(3) ! weights of the velocities at KS and KE
+    real(RP) :: cl1, cl2, cl3, cu1, cu2, cu3 ! the same as scalars, passed to the async kernel by value
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    call bnd_face_weights( CDZ, wlo, wup )
+    call bnd_extrap_weights( CDZ, cl, cu )
+    cl1 = cl(1); cl2 = cl(2); cl3 = cl(3)
+    cu1 = cu(1); cu2 = cu(2); cu3 = cu(3)
+
+    !$omp parallel default(none) private(i,j,k,vel,vz,vx,vy,vt,fv) &
+    !$omp shared(wlo,wup) &
+    !$omp shared(cl1,cl2,cl3,cu1,cu2,cu3,TwoD) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,momz,momx,momy,val,DENS,GSQRT,J33G,J13G,J23G,MAPF,num_diff) &
+    !$omp shared(flux,fluxJ13,fluxJ23)
+
+    !$acc data copy(flux, fluxJ13, fluxJ23) &
+    !$acc      copyin(momz, momx, momy, val, DENS, GSQRT, J13G, J23G, MAPF, num_diff, CDZ, FDZ)
+
+    if ( .not. TwoD ) then
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc parallel loop collapse(3) async
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS+2, max( KE-2, KS+1 )
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k-1,i,j) )
+       call CHECK( __LINE__, momz(k  ,i,j) )
+       call CHECK( __LINE__, momx(k,i  ,j) )
+       call CHECK( __LINE__, momx(k,i-1,j) )
+       call CHECK( __LINE__, momy(k,i,j  ) )
+       call CHECK( __LINE__, momy(k,i,j-1) )
+       call CHECK( __LINE__, val(k-1,i,j) )
+       call CHECK( __LINE__, val(k,i,j) )
+       call CHECK( __LINE__, val(k-2,i,j) )
+       call CHECK( __LINE__, val(k+1,i,j) )
+#endif
+       vel = ( 0.5_RP * ( momz(k-1,i,j) &
+                               + momz(k,i,j) ) ) &
+           / DENS(k,i,j)
+       vz = J33G * vel
+       vx = ( 0.5_RP * ( momx(k,i,j)+momx(k,i-1,j) ) ) &
+          / DENS(k,i,j)
+       vx = vx * J13G(k,i,j)
+       vx = vx * MAPF(i,j,1)
+       vy = ( 0.5_RP * ( momy(k,i,j)+momy(k,i,j-1) ) ) &
+          / DENS(k,i,j)
+       vy = vy * J23G(k,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vx + vy
+       fv = flux3k_upwind( vt, val(k-2,i,j), val(k-1,i,j), val(k,i,j), val(k+1,i,j) )
+       flux(k-1,i,j) = vz * fv &
+                          + GSQRT(k,i,j) * num_diff(k,i,j)
+       fluxJ13(k-1,i,j) = vx * fv
+       fluxJ23(k-1,i,j) = vy * fv
+    enddo
+    enddo
+    enddo
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels async
+    !$acc loop independent collapse(2)
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+       call CHECK( __LINE__, val(KS,i,j) )
+       call CHECK( __LINE__, val(KS+1,i,j) )
+       call CHECK( __LINE__, val(KS+2,i,j) )
+       call CHECK( __LINE__, val(KE-3,i,j) )
+       call CHECK( __LINE__, val(KE-2,i,j) )
+       call CHECK( __LINE__, val(KE-1,i,j) )
+#endif
+       ! The fluxes at KS and KE are set last: the boundary levels overlap them when KMAX is small.
+       ! k = KS+1
+       vel = ( 0.5_RP * ( momz(KS,i,j) &
+                               + momz(KS+1,i,j) ) ) &
+           / DENS(KS+1,i,j)
+       vz = J33G * vel
+       vx = ( 0.5_RP * ( momx(KS+1,i,j)+momx(KS+1,i-1,j) ) ) &
+          / DENS(KS+1,i,j)
+       vx = vx * J13G(KS+1,i,j)
+       vx = vx * MAPF(i,j,1)
+       vy = ( 0.5_RP * ( momy(KS+1,i,j)+momy(KS+1,i,j-1) ) ) &
+          / DENS(KS+1,i,j)
+       vy = vy * J23G(KS+1,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vx + vy
+       fv = merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
+                              ( val(KS+1,i,j) &
+                              + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
+                              vt >= 0.0_RP )
+       flux(KS,i,j) = vz * fv &
+                          + GSQRT(KS+1,i,j) * num_diff(KS+1,i,j)
+       fluxJ13(KS,i,j) = vx * fv
+       fluxJ23(KS,i,j) = vy * fv
+       ! this level is left to the bottom block when the blocks overlap (KMAX < 4)
+       if ( KE-2 > KS ) then
+          ! k = KE-1
+          vel = ( 0.5_RP * ( momz(KE-2,i,j) &
+                                  + momz(KE-1,i,j) ) ) &
+              / DENS(KE-1,i,j)
+          vz = J33G * vel
+          vx = ( 0.5_RP * ( momx(KE-1,i,j)+momx(KE-1,i-1,j) ) ) &
+             / DENS(KE-1,i,j)
+          vx = vx * J13G(KE-1,i,j)
+          vx = vx * MAPF(i,j,1)
+          vy = ( 0.5_RP * ( momy(KE-1,i,j)+momy(KE-1,i,j-1) ) ) &
+             / DENS(KE-1,i,j)
+          vy = vy * J23G(KE-1,i,j)
+          vy = vy * MAPF(i,j,2)
+          vt = vz + vx + vy
+          fv = merge( ( val(KE-2,i,j) &
+                                 + 0.5_RP * phi_dv(val(KE-1,i,j),val(KE-2,i,j),val(KE-3,i,j)) ), &
+                                 F2 * ( val(KE-1,i,j)+val(KE-2,i,j) ), &
+                                 vt >= 0.0_RP )
+          flux(KE-2,i,j) = vz * fv &
+                             + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
+          fluxJ13(KE-2,i,j) = vx * fv
+          fluxJ23(KE-2,i,j) = vy * fv
+       end if
+       ! k = KS and KE: as ATMOS_DYN_FVM_fluxZ_XYW_ud3Koren1993 and ATMOS_DYN_FVM_fluxJ13_XYW_ud3Koren1993
+       if ( KE - KS >= 2 ) then
+#ifdef DEBUG
+          call CHECK( __LINE__, momz(KS  ,i,j) )
+          call CHECK( __LINE__, momz(KE-1,i,j) )
+          call CHECK( __LINE__, val(KS  ,i,j) )
+          call CHECK( __LINE__, val(KS+1,i,j) )
+          call CHECK( __LINE__, val(KE-1,i,j) )
+          call CHECK( __LINE__, val(KE-2,i,j) )
+#endif
+          fv = val(KS,i,j) + wlo * ( val(KS,i,j) - val(KS+1,i,j) )
+          vel = 0.5_RP * momz(KS,i,j) / DENS(KS,i,j)
+          flux(KS-1,i,j) = J33G * vel * fv ! k = KS
+          vel = ( cl1 * J13G(KS  ,i,j) * ( 0.5_RP * ( momx(KS,i,j)+momx(KS,i-1,j) ) ) &
+                + cl2 * J13G(KS+1,i,j) * ( 0.5_RP * ( momx(KS+1,i,j)+momx(KS+1,i-1,j) ) ) &
+                + cl3 * J13G(KS+2,i,j) * ( 0.5_RP * ( momx(KS+2,i,j)+momx(KS+2,i-1,j) ) ) ) &
+              / DENS(KS,i,j)
+          fluxJ13(KS-1,i,j) = vel * MAPF(i,j,1) * fv
+          vel = ( cl1 * J23G(KS  ,i,j) * ( 0.5_RP * ( momy(KS,i,j)+momy(KS,i,j-1) ) ) &
+                + cl2 * J23G(KS+1,i,j) * ( 0.5_RP * ( momy(KS+1,i,j)+momy(KS+1,i,j-1) ) ) &
+                + cl3 * J23G(KS+2,i,j) * ( 0.5_RP * ( momy(KS+2,i,j)+momy(KS+2,i,j-1) ) ) ) &
+              / DENS(KS,i,j)
+          fluxJ23(KS-1,i,j) = vel * MAPF(i,j,2) * fv
+          fv = val(KE-1,i,j) + wup * ( val(KE-1,i,j) - val(KE-2,i,j) )
+          vel = 0.5_RP * momz(KE-1,i,j) / DENS(KE,i,j)
+          flux(KE-1,i,j) = J33G * vel * fv ! k = KE
+          vel = ( cu1 * J13G(KE  ,i,j) * ( 0.5_RP * ( momx(KE,i,j)+momx(KE,i-1,j) ) ) &
+                + cu2 * J13G(KE-1,i,j) * ( 0.5_RP * ( momx(KE-1,i,j)+momx(KE-1,i-1,j) ) ) &
+                + cu3 * J13G(KE-2,i,j) * ( 0.5_RP * ( momx(KE-2,i,j)+momx(KE-2,i-1,j) ) ) ) &
+              / DENS(KE,i,j)
+          fluxJ13(KE-1,i,j) = vel * MAPF(i,j,1) * fv
+          vel = ( cu1 * J23G(KE  ,i,j) * ( 0.5_RP * ( momy(KE,i,j)+momy(KE,i,j-1) ) ) &
+                + cu2 * J23G(KE-1,i,j) * ( 0.5_RP * ( momy(KE-1,i,j)+momy(KE-1,i,j-1) ) ) &
+                + cu3 * J23G(KE-2,i,j) * ( 0.5_RP * ( momy(KE-2,i,j)+momy(KE-2,i,j-1) ) ) ) &
+              / DENS(KE,i,j)
+          fluxJ23(KE-1,i,j) = vel * MAPF(i,j,2) * fv
+       else
+          flux   (KS-1,i,j) = 0.0_RP ! k = KS
+          flux   (KE-1,i,j) = 0.0_RP ! k = KE
+          fluxJ13(KS-1,i,j) = 0.0_RP
+          fluxJ13(KE-1,i,j) = 0.0_RP
+          fluxJ23(KS-1,i,j) = 0.0_RP
+          fluxJ23(KE-1,i,j) = 0.0_RP
+       end if
+       flux(KE  ,i,j) = 0.0_RP ! k = KE+1
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    else ! TwoD: without the part of J13G
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc parallel loop collapse(3) async
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS+2, max( KE-2, KS+1 )
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k-1,i,j) )
+       call CHECK( __LINE__, momz(k  ,i,j) )
+       call CHECK( __LINE__, momy(k,i,j  ) )
+       call CHECK( __LINE__, momy(k,i,j-1) )
+       call CHECK( __LINE__, val(k-1,i,j) )
+       call CHECK( __LINE__, val(k,i,j) )
+       call CHECK( __LINE__, val(k-2,i,j) )
+       call CHECK( __LINE__, val(k+1,i,j) )
+#endif
+       vel = ( 0.5_RP * ( momz(k-1,i,j) &
+                               + momz(k,i,j) ) ) &
+           / DENS(k,i,j)
+       vz = J33G * vel
+       vy = ( 0.5_RP * ( momy(k,i,j)+momy(k,i,j-1) ) ) &
+          / DENS(k,i,j)
+       vy = vy * J23G(k,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vy
+       fv = flux3k_upwind( vt, val(k-2,i,j), val(k-1,i,j), val(k,i,j), val(k+1,i,j) )
+       flux(k-1,i,j) = vz * fv &
+                          + GSQRT(k,i,j) * num_diff(k,i,j)
+       fluxJ23(k-1,i,j) = vy * fv
+    enddo
+    enddo
+    enddo
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels async
+    !$acc loop independent collapse(2)
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+       call CHECK( __LINE__, val(KS,i,j) )
+       call CHECK( __LINE__, val(KS+1,i,j) )
+       call CHECK( __LINE__, val(KS+2,i,j) )
+       call CHECK( __LINE__, val(KE-3,i,j) )
+       call CHECK( __LINE__, val(KE-2,i,j) )
+       call CHECK( __LINE__, val(KE-1,i,j) )
+#endif
+       ! The fluxes at KS and KE are set last: the boundary levels overlap them when KMAX is small.
+       ! k = KS+1
+       vel = ( 0.5_RP * ( momz(KS,i,j) &
+                               + momz(KS+1,i,j) ) ) &
+           / DENS(KS+1,i,j)
+       vz = J33G * vel
+       vy = ( 0.5_RP * ( momy(KS+1,i,j)+momy(KS+1,i,j-1) ) ) &
+          / DENS(KS+1,i,j)
+       vy = vy * J23G(KS+1,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vy
+       fv = merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
+                              ( val(KS+1,i,j) &
+                              + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
+                              vt >= 0.0_RP )
+       flux(KS,i,j) = vz * fv &
+                          + GSQRT(KS+1,i,j) * num_diff(KS+1,i,j)
+       fluxJ23(KS,i,j) = vy * fv
+       ! this level is left to the bottom block when the blocks overlap (KMAX < 4)
+       if ( KE-2 > KS ) then
+          ! k = KE-1
+          vel = ( 0.5_RP * ( momz(KE-2,i,j) &
+                                  + momz(KE-1,i,j) ) ) &
+              / DENS(KE-1,i,j)
+          vz = J33G * vel
+          vy = ( 0.5_RP * ( momy(KE-1,i,j)+momy(KE-1,i,j-1) ) ) &
+             / DENS(KE-1,i,j)
+          vy = vy * J23G(KE-1,i,j)
+          vy = vy * MAPF(i,j,2)
+          vt = vz + vy
+          fv = merge( ( val(KE-2,i,j) &
+                                 + 0.5_RP * phi_dv(val(KE-1,i,j),val(KE-2,i,j),val(KE-3,i,j)) ), &
+                                 F2 * ( val(KE-1,i,j)+val(KE-2,i,j) ), &
+                                 vt >= 0.0_RP )
+          flux(KE-2,i,j) = vz * fv &
+                             + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
+          fluxJ23(KE-2,i,j) = vy * fv
+       end if
+       ! k = KS and KE: as ATMOS_DYN_FVM_fluxZ_XYW_ud3Koren1993 and ATMOS_DYN_FVM_fluxJ13_XYW_ud3Koren1993
+       if ( KE - KS >= 2 ) then
+#ifdef DEBUG
+          call CHECK( __LINE__, momz(KS  ,i,j) )
+          call CHECK( __LINE__, momz(KE-1,i,j) )
+          call CHECK( __LINE__, val(KS  ,i,j) )
+          call CHECK( __LINE__, val(KS+1,i,j) )
+          call CHECK( __LINE__, val(KE-1,i,j) )
+          call CHECK( __LINE__, val(KE-2,i,j) )
+#endif
+          fv = val(KS,i,j) + wlo * ( val(KS,i,j) - val(KS+1,i,j) )
+          vel = 0.5_RP * momz(KS,i,j) / DENS(KS,i,j)
+          flux(KS-1,i,j) = J33G * vel * fv ! k = KS
+          vel = ( cl1 * J23G(KS  ,i,j) * ( 0.5_RP * ( momy(KS,i,j)+momy(KS,i,j-1) ) ) &
+                + cl2 * J23G(KS+1,i,j) * ( 0.5_RP * ( momy(KS+1,i,j)+momy(KS+1,i,j-1) ) ) &
+                + cl3 * J23G(KS+2,i,j) * ( 0.5_RP * ( momy(KS+2,i,j)+momy(KS+2,i,j-1) ) ) ) &
+              / DENS(KS,i,j)
+          fluxJ23(KS-1,i,j) = vel * MAPF(i,j,2) * fv
+          fv = val(KE-1,i,j) + wup * ( val(KE-1,i,j) - val(KE-2,i,j) )
+          vel = 0.5_RP * momz(KE-1,i,j) / DENS(KE,i,j)
+          flux(KE-1,i,j) = J33G * vel * fv ! k = KE
+          vel = ( cu1 * J23G(KE  ,i,j) * ( 0.5_RP * ( momy(KE,i,j)+momy(KE,i,j-1) ) ) &
+                + cu2 * J23G(KE-1,i,j) * ( 0.5_RP * ( momy(KE-1,i,j)+momy(KE-1,i,j-1) ) ) &
+                + cu3 * J23G(KE-2,i,j) * ( 0.5_RP * ( momy(KE-2,i,j)+momy(KE-2,i,j-1) ) ) ) &
+              / DENS(KE,i,j)
+          fluxJ23(KE-1,i,j) = vel * MAPF(i,j,2) * fv
+       else
+          flux   (KS-1,i,j) = 0.0_RP ! k = KS
+          flux   (KE-1,i,j) = 0.0_RP ! k = KE
+          fluxJ23(KS-1,i,j) = 0.0_RP
+          fluxJ23(KE-1,i,j) = 0.0_RP
+       end if
+       flux(KE  ,i,j) = 0.0_RP ! k = KE+1
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    end if
+
+    !$acc end data
+
+    !$omp end parallel
+
+    return
+  end subroutine ATMOS_DYN_FVM_fluxZJ_XYW_ud3Koren1993
+
 
 
   !-----------------------------------------------------------------------------
@@ -1349,6 +1717,372 @@ contains
     !$omp end parallel
     return
   end subroutine ATMOS_DYN_FVM_fluxJ23_UYZ_ud3Koren1993
+  !-----------------------------------------------------------------------------
+  !> calculation of the vertical flux at UYZ: the three parts with one face value
+  !!
+  !! The three parts of the vertical flux, those of ATMOS_DYN_FVM_fluxZ_UYZ_ud3Koren1993 (flux),
+  !! ATMOS_DYN_FVM_fluxJ13_UYZ_ud3Koren1993 (fluxJ13) and ATMOS_DYN_FVM_fluxJ23_UYZ_ud3Koren1993 (fluxJ23), are computed
+  !! with one face value, whose upwind side is taken by the sign of the total contravariant vertical velocity
+  !! J33G w + m_x J13G u + m_y J23G v, the sum of the velocities that multiply the face value in the three parts
+  !! (issue #3754): with GSQRT (the weights of J33G w) and F2HW (those of the metric parts) as passed to the separate routines.
+  !! Each part is the flux of the separate routine when its own velocity has the sign of the total one.
+  !! With TwoD, the part of J13G is not computed (fluxJ13 is not changed), and momx is not used;
+  !! the velocities are those of the separate routines in 2-D.
+  subroutine ATMOS_DYN_FVM_fluxZJ_UYZ_ud3Koren1993( &
+       flux, fluxJ13, fluxJ23,   &
+       momz, momx, momy, val,    &
+       DENS, GSQRT, F2HW,        &
+       J33G, J13G, J23G, MAPF,   &
+       num_diff,                 &
+       CDZ, TwoD,                &
+       IIS, IIE, JJS, JJE        )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+    real(RP), intent(in)  :: momz    (KA,IA,JA)
+    real(RP), intent(in)  :: momx    (KA,IA,JA)
+    real(RP), intent(in)  :: momy    (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: F2HW    (KA,IA,JA) !< F2H weight of the full level k+1 (metric parts)
+    real(RP), intent(in)  :: J33G
+    real(RP), intent(in)  :: J13G    (KA,IA,JA)
+    real(RP), intent(in)  :: J23G    (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vz, vx, vy ! velocities of the parts: J33G w, m_x J13G u, m_y J23G v
+    real(RP) :: vt         ! total contravariant vertical velocity
+    real(RP) :: dj         ! density of the metric parts
+    real(RP) :: fv         ! face value
+    real(RP) :: f2h1_UYZ_k, f2h2_UYZ_k
+    real(RP) :: f2h1_UYZ_KS, f2h2_UYZ_KS
+    real(RP) :: f2h1_UYZ_KEm1, f2h2_UYZ_KEm1
+    real(RP) :: f2h1_XYZ_k, f2h2_XYZ_k
+    real(RP) :: f2h1_XYZ_KS, f2h2_XYZ_KS
+    real(RP) :: f2h1_XYZ_KEm1, f2h2_XYZ_KEm1
+    real(RP) :: fjh1_UYZ_k, fjh2_UYZ_k
+    real(RP) :: fjh1_UYZ_KS, fjh2_UYZ_KS
+    real(RP) :: fjh1_UYZ_KEm1, fjh2_UYZ_KEm1
+    real(RP) :: fjh1_XYZ_k, fjh2_XYZ_k
+    real(RP) :: fjh1_XYZ_KS, fjh2_XYZ_KS
+    real(RP) :: fjh1_XYZ_KEm1, fjh2_XYZ_KEm1
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel default(none) private(i,j,k,vz,vx,vy,vt,dj,fv) &
+    !$omp private(f2h1_UYZ_k,f2h2_UYZ_k,f2h1_UYZ_KS,f2h2_UYZ_KS) &
+    !$omp private(f2h1_UYZ_KEm1,f2h2_UYZ_KEm1,f2h1_XYZ_k,f2h2_XYZ_k) &
+    !$omp private(f2h1_XYZ_KS,f2h2_XYZ_KS,f2h1_XYZ_KEm1,f2h2_XYZ_KEm1) &
+    !$omp private(fjh1_UYZ_k,fjh2_UYZ_k,fjh1_UYZ_KS,fjh2_UYZ_KS) &
+    !$omp private(fjh1_UYZ_KEm1,fjh2_UYZ_KEm1,fjh1_XYZ_k,fjh2_XYZ_k) &
+    !$omp private(fjh1_XYZ_KS,fjh2_XYZ_KS,fjh1_XYZ_KEm1,fjh2_XYZ_KEm1) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,momz,momx,momy,val,DENS,GSQRT,F2HW,J33G,J13G,J23G,MAPF,num_diff) &
+    !$omp shared(flux,fluxJ13,fluxJ23,CDZ,TwoD)
+
+    !$acc data copy(flux, fluxJ13, fluxJ23) &
+    !$acc      copyin(momz, momx, momy, val, DENS, GSQRT, F2HW, J13G, J23G, MAPF, num_diff, CDZ)
+
+    if ( .not. TwoD ) then
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc parallel loop collapse(3) async
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS+1, max( KE-2, KS )
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k,i,j) )
+       call CHECK( __LINE__, momz(k,i+1,j) )
+       call CHECK( __LINE__, momx(k+1,i,j) )
+       call CHECK( __LINE__, momx(k,i,j) )
+       call CHECK( __LINE__, momy(k+1,i,j) )
+       call CHECK( __LINE__, momy(k+1,i+1,j) )
+       call CHECK( __LINE__, momy(k+1,i,j-1) )
+       call CHECK( __LINE__, momy(k+1,i+1,j-1) )
+       call CHECK( __LINE__, momy(k,i,j) )
+       call CHECK( __LINE__, momy(k,i+1,j) )
+       call CHECK( __LINE__, momy(k,i,j-1) )
+       call CHECK( __LINE__, momy(k,i+1,j-1) )
+       call CHECK( __LINE__, val(k,i,j) )
+       call CHECK( __LINE__, val(k+1,i,j) )
+       call CHECK( __LINE__, val(k-1,i,j) )
+       call CHECK( __LINE__, val(k+2,i,j) )
+#endif
+       f2h1_UYZ_k = CDZ(k)*GSQRT(k,i,j)
+       f2h2_UYZ_k = CDZ(k+1)*GSQRT(k+1,i,j)
+       fjh1_UYZ_k = F2HW(k,i,j)
+       fjh2_UYZ_k = 1.0_RP - fjh1_UYZ_k
+       vz = ( 0.5_RP * ( momz(k,i,j)+momz(k,i+1,j) ) ) * ( f2h1_UYZ_k+f2h2_UYZ_k ) &
+                  / ( f2h1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+                    + f2h2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       vz = J33G * vz
+       dj = ( fjh1_UYZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i+1,j) ) &
+                    + fjh2_UYZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i+1,j) ) )
+       vx = ( fjh1_UYZ_k * momx(k+1,i,j) &
+                    + fjh2_UYZ_k * momx(k,i,j) ) &
+          / dj
+       vx = vx * J13G(k,i,j)
+       vx = vx * MAPF(i,j,1)
+       vy = ( fjh1_UYZ_k * 0.25_RP * ( momy(k+1,i,j)+momy(k+1,i+1,j)+momy(k+1,i,j-1)+momy(k+1,i+1,j-1) ) &
+                    + fjh2_UYZ_k * 0.25_RP * ( momy(k,i,j)+momy(k,i+1,j)+momy(k,i,j-1)+momy(k,i+1,j-1) ) ) &
+          / dj
+       vy = vy * J23G(k,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vx + vy
+       fv = flux3k_upwind( vt, val(k-1,i,j), val(k,i,j), val(k+1,i,j), val(k+2,i,j) )
+       flux(k,i,j) = vz * fv &
+                          + GSQRT(k,i,j) * num_diff(k,i,j)
+       fluxJ13(k,i,j) = vx * fv
+       fluxJ23(k,i,j) = vy * fv
+    enddo
+    enddo
+    enddo
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels async
+    !$acc loop independent collapse(2)
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(KS,i,j) )
+       call CHECK( __LINE__, val(KS+1,i,j) )
+       call CHECK( __LINE__, val(KS,i,j) )
+       call CHECK( __LINE__, momx(KS+1,i,j) )
+       call CHECK( __LINE__, momx(KS,i,j) )
+       call CHECK( __LINE__, momy(KS+1,i,j) )
+       call CHECK( __LINE__, momy(KS+1,i+1,j) )
+       call CHECK( __LINE__, momy(KS+1,i,j-1) )
+       call CHECK( __LINE__, momy(KS+1,i+1,j-1) )
+       call CHECK( __LINE__, momy(KS,i,j) )
+       call CHECK( __LINE__, momy(KS,i+1,j) )
+       call CHECK( __LINE__, momy(KS,i,j-1) )
+       call CHECK( __LINE__, momy(KS,i+1,j-1) )
+       call CHECK( __LINE__, momx(KE,i,j) )
+       call CHECK( __LINE__, momx(KE-1,i,j) )
+       call CHECK( __LINE__, momy(KE,i,j) )
+       call CHECK( __LINE__, momy(KE,i+1,j) )
+       call CHECK( __LINE__, momy(KE,i,j-1) )
+       call CHECK( __LINE__, momy(KE,i+1,j-1) )
+       call CHECK( __LINE__, momy(KE-1,i,j) )
+       call CHECK( __LINE__, momy(KE-1,i+1,j) )
+       call CHECK( __LINE__, momy(KE-1,i,j-1) )
+       call CHECK( __LINE__, momy(KE-1,i+1,j-1) )
+#endif
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux   (KS-1,i,j) = 0.0_RP
+       fluxJ13(KS-1,i,j) = 0.0_RP
+       fluxJ23(KS-1,i,j) = 0.0_RP
+       f2h1_UYZ_KS = CDZ(KS)*GSQRT(KS,i,j)
+       f2h2_UYZ_KS = CDZ(KS+1)*GSQRT(KS+1,i,j)
+       fjh1_UYZ_KS = F2HW(KS,i,j)
+       fjh2_UYZ_KS = 1.0_RP - fjh1_UYZ_KS
+       vz = ( 0.5_RP * ( momz(KS,i,j)+momz(KS,i+1,j) ) ) * ( f2h1_UYZ_KS+f2h2_UYZ_KS ) &
+                  / ( f2h1_UYZ_KS * 0.5_RP * ( DENS(KS+1,i,j)+DENS(KS+1,i+1,j) ) &
+                    + f2h2_UYZ_KS * 0.5_RP * ( DENS(KS,i,j)+DENS(KS,i+1,j) ) )
+       vz = J33G * vz
+       dj = ( fjh1_UYZ_KS * 0.5_RP * ( DENS(KS+1,i,j)+DENS(KS+1,i+1,j) ) &
+                    + fjh2_UYZ_KS * 0.5_RP * ( DENS(KS,i,j)+DENS(KS,i+1,j) ) )
+       vx = ( fjh1_UYZ_KS * momx(KS+1,i,j) &
+                    + fjh2_UYZ_KS * momx(KS,i,j) ) &
+          / dj
+       vx = vx * J13G(KS,i,j)
+       vx = vx * MAPF(i,j,1)
+       vy = ( fjh1_UYZ_KS * 0.25_RP * ( momy(KS+1,i,j)+momy(KS+1,i+1,j)+momy(KS+1,i,j-1)+momy(KS+1,i+1,j-1) ) &
+                    + fjh2_UYZ_KS * 0.25_RP * ( momy(KS,i,j)+momy(KS,i+1,j)+momy(KS,i,j-1)+momy(KS,i+1,j-1) ) ) &
+          / dj
+       vy = vy * J23G(KS,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vx + vy
+       fv = merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
+                              ( val(KS+1,i,j) &
+                              + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
+                              vt >= 0.0_RP )
+       flux(KS,i,j) = vz * fv &
+                          + GSQRT(KS,i,j) * num_diff(KS,i,j)
+       fluxJ13(KS,i,j) = vx * fv
+       fluxJ23(KS,i,j) = vy * fv
+       f2h1_UYZ_KEm1 = CDZ(KE-1)*GSQRT(KE-1,i,j)
+       f2h2_UYZ_KEm1 = CDZ(KE-1+1)*GSQRT(KE-1+1,i,j)
+       fjh1_UYZ_KEm1 = F2HW(KE-1,i,j)
+       fjh2_UYZ_KEm1 = 1.0_RP - fjh1_UYZ_KEm1
+       vz = ( 0.5_RP * ( momz(KE-1,i,j)+momz(KE-1,i+1,j) ) ) * ( f2h1_UYZ_KEm1+f2h2_UYZ_KEm1 ) &
+                  / ( f2h1_UYZ_KEm1 * 0.5_RP * ( DENS(KE,i,j)+DENS(KE,i+1,j) ) &
+                    + f2h2_UYZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i+1,j) ) )
+       vz = J33G * vz
+       dj = ( fjh1_UYZ_KEm1 * 0.5_RP * ( DENS(KE,i,j)+DENS(KE,i+1,j) ) &
+                    + fjh2_UYZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i+1,j) ) )
+       vx = ( fjh1_UYZ_KEm1 * momx(KE,i,j) &
+                    + fjh2_UYZ_KEm1 * momx(KE-1,i,j) ) &
+          / dj
+       vx = vx * J13G(KE-1,i,j)
+       vx = vx * MAPF(i,j,1)
+       vy = ( fjh1_UYZ_KEm1 * 0.25_RP * ( momy(KE,i,j)+momy(KE,i+1,j)+momy(KE,i,j-1)+momy(KE,i+1,j-1) ) &
+                    + fjh2_UYZ_KEm1 * 0.25_RP * ( momy(KE-1,i,j)+momy(KE-1,i+1,j)+momy(KE-1,i,j-1)+momy(KE-1,i+1,j-1) ) ) &
+          / dj
+       vy = vy * J23G(KE-1,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vx + vy
+       fv = merge( ( val(KE-1,i,j) &
+                              + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
+                              F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
+                              vt >= 0.0_RP )
+       flux(KE-1,i,j) = vz * fv &
+                          + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
+       fluxJ13(KE-1,i,j) = vx * fv
+       fluxJ23(KE-1,i,j) = vy * fv
+       flux   (KE,i,j) = 0.0_RP
+       fluxJ13(KE,i,j) = 0.0_RP
+       fluxJ23(KE,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    else ! TwoD: without the part of J13G
+
+    !$omp do OMP_SCHEDULE_
+    !$acc kernels async
+    !$acc loop independent collapse(2) private(i)
+    do j = JJS, JJE
+    do k = KS+1, max( KE-2, KS )
+       i = IIS
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k,i,j) )
+       call CHECK( __LINE__, momy(k+1,i,j) )
+       call CHECK( __LINE__, momy(k+1,i,j-1) )
+       call CHECK( __LINE__, momy(k,i,j) )
+       call CHECK( __LINE__, momy(k,i,j-1) )
+       call CHECK( __LINE__, val(k,i,j) )
+       call CHECK( __LINE__, val(k+1,i,j) )
+       call CHECK( __LINE__, val(k-1,i,j) )
+       call CHECK( __LINE__, val(k+2,i,j) )
+#endif
+       f2h1_XYZ_k = CDZ(k)*GSQRT(k,i,j)
+       f2h2_XYZ_k = CDZ(k+1)*GSQRT(k+1,i,j)
+       fjh1_XYZ_k = F2HW(k,i,j)
+       fjh2_XYZ_k = 1.0_RP - fjh1_XYZ_k
+       vz = ( momz(k,i,j) ) * ( f2h1_XYZ_k+f2h2_XYZ_k ) &
+                  / ( f2h1_XYZ_k * DENS(k+1,i,j) &
+                    + f2h2_XYZ_k * DENS(k,i,j) )
+       vz = J33G * vz
+       dj = ( fjh1_XYZ_k * DENS(k+1,i,j) &
+                    + fjh2_XYZ_k * DENS(k,i,j) )
+       vy = ( fjh1_XYZ_k * 0.5_RP * ( momy(k+1,i,j)+momy(k+1,i,j-1) ) &
+                    + fjh2_XYZ_k * 0.5_RP * ( momy(k,i,j)+momy(k,i,j-1) ) ) &
+          / dj
+       vy = vy * J23G(k,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vy
+       fv = flux3k_upwind( vt, val(k-1,i,j), val(k,i,j), val(k+1,i,j), val(k+2,i,j) )
+       flux(k,i,j) = vz * fv &
+                          + GSQRT(k,i,j) * num_diff(k,i,j)
+       fluxJ23(k,i,j) = vy * fv
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_
+    !$acc kernels async
+    !$acc loop independent private(i)
+    do j = JJS, JJE
+       i = IIS
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(KS,i,j) )
+       call CHECK( __LINE__, val(KS+1,i,j) )
+       call CHECK( __LINE__, val(KS,i,j) )
+       call CHECK( __LINE__, momy(KS+1,i,j) )
+       call CHECK( __LINE__, momy(KS+1,i,j-1) )
+       call CHECK( __LINE__, momy(KS,i,j) )
+       call CHECK( __LINE__, momy(KS,i,j-1) )
+       call CHECK( __LINE__, momy(KE,i,j) )
+       call CHECK( __LINE__, momy(KE,i,j-1) )
+       call CHECK( __LINE__, momy(KE-1,i,j) )
+       call CHECK( __LINE__, momy(KE-1,i,j-1) )
+#endif
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux   (KS-1,i,j) = 0.0_RP
+       fluxJ23(KS-1,i,j) = 0.0_RP
+       f2h1_XYZ_KS = CDZ(KS)*GSQRT(KS,i,j)
+       f2h2_XYZ_KS = CDZ(KS+1)*GSQRT(KS+1,i,j)
+       fjh1_XYZ_KS = F2HW(KS,i,j)
+       fjh2_XYZ_KS = 1.0_RP - fjh1_XYZ_KS
+       vz = ( momz(KS,i,j) ) * ( f2h1_XYZ_KS+f2h2_XYZ_KS ) &
+                  / ( f2h1_XYZ_KS * DENS(KS+1,i,j) &
+                    + f2h2_XYZ_KS * DENS(KS,i,j) )
+       vz = J33G * vz
+       dj = ( fjh1_XYZ_KS * DENS(KS+1,i,j) &
+                    + fjh2_XYZ_KS * DENS(KS,i,j) )
+       vy = ( fjh1_XYZ_KS * 0.5_RP * ( momy(KS+1,i,j)+momy(KS+1,i,j-1) ) &
+                    + fjh2_XYZ_KS * 0.5_RP * ( momy(KS,i,j)+momy(KS,i,j-1) ) ) &
+          / dj
+       vy = vy * J23G(KS,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vy
+       fv = merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
+                              ( val(KS+1,i,j) &
+                              + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
+                              vt >= 0.0_RP )
+       flux(KS,i,j) = vz * fv &
+                          + GSQRT(KS,i,j) * num_diff(KS,i,j)
+       fluxJ23(KS,i,j) = vy * fv
+       f2h1_XYZ_KEm1 = CDZ(KE-1)*GSQRT(KE-1,i,j)
+       f2h2_XYZ_KEm1 = CDZ(KE-1+1)*GSQRT(KE-1+1,i,j)
+       fjh1_XYZ_KEm1 = F2HW(KE-1,i,j)
+       fjh2_XYZ_KEm1 = 1.0_RP - fjh1_XYZ_KEm1
+       vz = ( momz(KE-1,i,j) ) * ( f2h1_XYZ_KEm1+f2h2_XYZ_KEm1 ) &
+                  / ( f2h1_XYZ_KEm1 * DENS(KE,i,j) &
+                    + f2h2_XYZ_KEm1 * DENS(KE-1,i,j) )
+       vz = J33G * vz
+       dj = ( fjh1_XYZ_KEm1 * DENS(KE,i,j) &
+                    + fjh2_XYZ_KEm1 * DENS(KE-1,i,j) )
+       vy = ( fjh1_XYZ_KEm1 * 0.5_RP * ( momy(KE,i,j)+momy(KE,i,j-1) ) &
+                    + fjh2_XYZ_KEm1 * 0.5_RP * ( momy(KE-1,i,j)+momy(KE-1,i,j-1) ) ) &
+          / dj
+       vy = vy * J23G(KE-1,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vy
+       fv = merge( ( val(KE-1,i,j) &
+                              + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
+                              F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
+                              vt >= 0.0_RP )
+       flux(KE-1,i,j) = vz * fv &
+                          + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
+       fluxJ23(KE-1,i,j) = vy * fv
+       flux   (KE,i,j) = 0.0_RP
+       fluxJ23(KE,i,j) = 0.0_RP
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    end if
+
+    !$acc end data
+
+    !$omp end parallel
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    return
+  end subroutine ATMOS_DYN_FVM_fluxZJ_UYZ_ud3Koren1993
 
   !-----------------------------------------------------------------------------
   !> calculation X-flux at UY
@@ -1854,6 +2588,358 @@ contains
     !$omp end parallel
     return
   end subroutine ATMOS_DYN_FVM_fluxJ23_XVZ_ud3Koren1993
+  !-----------------------------------------------------------------------------
+  !> calculation of the vertical flux at XVZ: the three parts with one face value
+  !!
+  !! The three parts of the vertical flux, those of ATMOS_DYN_FVM_fluxZ_XVZ_ud3Koren1993 (flux),
+  !! ATMOS_DYN_FVM_fluxJ13_XVZ_ud3Koren1993 (fluxJ13) and ATMOS_DYN_FVM_fluxJ23_XVZ_ud3Koren1993 (fluxJ23), are computed
+  !! with one face value, whose upwind side is taken by the sign of the total contravariant vertical velocity
+  !! J33G w + m_x J13G u + m_y J23G v, the sum of the velocities that multiply the face value in the three parts
+  !! (issue #3754): with GSQRT (the weights of J33G w) and F2HW (those of the metric parts) as passed to the separate routines.
+  !! Each part is the flux of the separate routine when its own velocity has the sign of the total one.
+  !! With TwoD, the part of J13G is not computed (fluxJ13 is not changed), and momx is not used.
+  subroutine ATMOS_DYN_FVM_fluxZJ_XVZ_ud3Koren1993( &
+       flux, fluxJ13, fluxJ23,   &
+       momz, momx, momy, val,    &
+       DENS, GSQRT, F2HW,        &
+       J33G, J13G, J23G, MAPF,   &
+       num_diff,                 &
+       CDZ, TwoD,                &
+       IIS, IIE, JJS, JJE        )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+    real(RP), intent(in)  :: momz    (KA,IA,JA)
+    real(RP), intent(in)  :: momx    (KA,IA,JA)
+    real(RP), intent(in)  :: momy    (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: F2HW    (KA,IA,JA) !< F2H weight of the full level k+1 (metric parts)
+    real(RP), intent(in)  :: J33G
+    real(RP), intent(in)  :: J13G    (KA,IA,JA)
+    real(RP), intent(in)  :: J23G    (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vz, vx, vy ! velocities of the parts: J33G w, m_x J13G u, m_y J23G v
+    real(RP) :: vt         ! total contravariant vertical velocity
+    real(RP) :: dj         ! density of the metric parts
+    real(RP) :: fv         ! face value
+    real(RP) :: f2h1_XVZ_k, f2h2_XVZ_k
+    real(RP) :: f2h1_XVZ_KS, f2h2_XVZ_KS
+    real(RP) :: f2h1_XVZ_KEm1, f2h2_XVZ_KEm1
+    real(RP) :: fjh1_XVZ_k, fjh2_XVZ_k
+    real(RP) :: fjh1_XVZ_KS, fjh2_XVZ_KS
+    real(RP) :: fjh1_XVZ_KEm1, fjh2_XVZ_KEm1
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel default(none) private(i,j,k,vz,vx,vy,vt,dj,fv) &
+    !$omp private(f2h1_XVZ_k,f2h2_XVZ_k,f2h1_XVZ_KS,f2h2_XVZ_KS) &
+    !$omp private(f2h1_XVZ_KEm1,f2h2_XVZ_KEm1) &
+    !$omp private(fjh1_XVZ_k,fjh2_XVZ_k,fjh1_XVZ_KS,fjh2_XVZ_KS) &
+    !$omp private(fjh1_XVZ_KEm1,fjh2_XVZ_KEm1) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,momz,momx,momy,val,DENS,GSQRT,F2HW,J33G,J13G,J23G,MAPF,num_diff) &
+    !$omp shared(flux,fluxJ13,fluxJ23,CDZ,TwoD)
+
+    !$acc data copy(flux, fluxJ13, fluxJ23) &
+    !$acc      copyin(momz, momx, momy, val, DENS, GSQRT, F2HW, J13G, J23G, MAPF, num_diff, CDZ)
+
+    if ( .not. TwoD ) then
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc parallel loop collapse(3) async
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS+1, max( KE-2, KS )
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k,i,j) )
+       call CHECK( __LINE__, momz(k,i,j+1) )
+       call CHECK( __LINE__, momx(k+1,i,j) )
+       call CHECK( __LINE__, momx(k+1,i-1,j) )
+       call CHECK( __LINE__, momx(k+1,i,j+1) )
+       call CHECK( __LINE__, momx(k+1,i-1,j+1) )
+       call CHECK( __LINE__, momx(k,i,j) )
+       call CHECK( __LINE__, momx(k,i-1,j) )
+       call CHECK( __LINE__, momx(k,i,j+1) )
+       call CHECK( __LINE__, momx(k,i-1,j+1) )
+       call CHECK( __LINE__, momy(k+1,i,j) )
+       call CHECK( __LINE__, momy(k,i,j) )
+       call CHECK( __LINE__, val(k,i,j) )
+       call CHECK( __LINE__, val(k+1,i,j) )
+       call CHECK( __LINE__, val(k-1,i,j) )
+       call CHECK( __LINE__, val(k+2,i,j) )
+#endif
+       f2h1_XVZ_k = CDZ(k)*GSQRT(k,i,j)
+       f2h2_XVZ_k = CDZ(k+1)*GSQRT(k+1,i,j)
+       fjh1_XVZ_k = F2HW(k,i,j)
+       fjh2_XVZ_k = 1.0_RP - fjh1_XVZ_k
+       vz = ( 0.5_RP * ( momz(k,i,j)+momz(k,i,j+1) ) ) * ( f2h1_XVZ_k+f2h2_XVZ_k ) &
+                  / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+                    + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       vz = J33G * vz
+       dj = ( fjh1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+                    + fjh2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       vx = ( fjh1_XVZ_k * 0.25_RP * ( momx(k+1,i,j)+momx(k+1,i-1,j)+momx(k+1,i,j+1)+momx(k+1,i-1,j+1) ) &
+                    + fjh2_XVZ_k * 0.25_RP * ( momx(k,i,j)+momx(k,i-1,j)+momx(k,i,j+1)+momx(k,i-1,j+1) ) ) &
+          / dj
+       vx = vx * J13G(k,i,j)
+       vx = vx * MAPF(i,j,1)
+       vy = ( fjh1_XVZ_k * momy(k+1,i,j) &
+                    + fjh2_XVZ_k * momy(k,i,j) ) &
+          / dj
+       vy = vy * J23G(k,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vx + vy
+       fv = flux3k_upwind( vt, val(k-1,i,j), val(k,i,j), val(k+1,i,j), val(k+2,i,j) )
+       flux(k,i,j) = vz * fv &
+                          + GSQRT(k,i,j) * num_diff(k,i,j)
+       fluxJ13(k,i,j) = vx * fv
+       fluxJ23(k,i,j) = vy * fv
+    enddo
+    enddo
+    enddo
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels async
+    !$acc loop independent collapse(2)
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(KS,i,j) )
+       call CHECK( __LINE__, val(KS+1,i,j) )
+       call CHECK( __LINE__, val(KS,i,j) )
+       call CHECK( __LINE__, momx(KS+1,i,j) )
+       call CHECK( __LINE__, momx(KS+1,i-1,j) )
+       call CHECK( __LINE__, momx(KS+1,i,j+1) )
+       call CHECK( __LINE__, momx(KS+1,i-1,j+1) )
+       call CHECK( __LINE__, momx(KS,i,j) )
+       call CHECK( __LINE__, momx(KS,i-1,j) )
+       call CHECK( __LINE__, momx(KS,i,j+1) )
+       call CHECK( __LINE__, momx(KS,i-1,j+1) )
+       call CHECK( __LINE__, momy(KS+1,i,j) )
+       call CHECK( __LINE__, momy(KS,i,j) )
+       call CHECK( __LINE__, momx(KE,i,j) )
+       call CHECK( __LINE__, momx(KE,i-1,j) )
+       call CHECK( __LINE__, momx(KE,i,j+1) )
+       call CHECK( __LINE__, momx(KE,i-1,j+1) )
+       call CHECK( __LINE__, momx(KE-1,i,j) )
+       call CHECK( __LINE__, momx(KE-1,i-1,j) )
+       call CHECK( __LINE__, momx(KE-1,i,j+1) )
+       call CHECK( __LINE__, momx(KE-1,i-1,j+1) )
+       call CHECK( __LINE__, momy(KE,i,j) )
+       call CHECK( __LINE__, momy(KE-1,i,j) )
+#endif
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux   (KS-1,i,j) = 0.0_RP
+       fluxJ13(KS-1,i,j) = 0.0_RP
+       fluxJ23(KS-1,i,j) = 0.0_RP
+       f2h1_XVZ_KS = CDZ(KS)*GSQRT(KS,i,j)
+       f2h2_XVZ_KS = CDZ(KS+1)*GSQRT(KS+1,i,j)
+       fjh1_XVZ_KS = F2HW(KS,i,j)
+       fjh2_XVZ_KS = 1.0_RP - fjh1_XVZ_KS
+       vz = ( 0.5_RP * ( momz(KS,i,j)+momz(KS,i,j+1) ) ) * ( f2h1_XVZ_KS+f2h2_XVZ_KS ) &
+                  / ( f2h1_XVZ_KS * 0.5_RP * ( DENS(KS+1,i,j)+DENS(KS+1,i,j+1) ) &
+                    + f2h2_XVZ_KS * 0.5_RP * ( DENS(KS,i,j)+DENS(KS,i,j+1) ) )
+       vz = J33G * vz
+       dj = ( fjh1_XVZ_KS * 0.5_RP * ( DENS(KS+1,i,j)+DENS(KS+1,i,j+1) ) &
+                    + fjh2_XVZ_KS * 0.5_RP * ( DENS(KS,i,j)+DENS(KS,i,j+1) ) )
+       vx = ( fjh1_XVZ_KS * 0.25_RP * ( momx(KS+1,i,j)+momx(KS+1,i-1,j)+momx(KS+1,i,j+1)+momx(KS+1,i-1,j+1) ) &
+                    + fjh2_XVZ_KS * 0.25_RP * ( momx(KS,i,j)+momx(KS,i-1,j)+momx(KS,i,j+1)+momx(KS,i-1,j+1) ) ) &
+          / dj
+       vx = vx * J13G(KS,i,j)
+       vx = vx * MAPF(i,j,1)
+       vy = ( fjh1_XVZ_KS * momy(KS+1,i,j) &
+                    + fjh2_XVZ_KS * momy(KS,i,j) ) &
+          / dj
+       vy = vy * J23G(KS,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vx + vy
+       fv = merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
+                              ( val(KS+1,i,j) &
+                              + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
+                              vt >= 0.0_RP )
+       flux(KS,i,j) = vz * fv &
+                          + GSQRT(KS,i,j) * num_diff(KS,i,j)
+       fluxJ13(KS,i,j) = vx * fv
+       fluxJ23(KS,i,j) = vy * fv
+       f2h1_XVZ_KEm1 = CDZ(KE-1)*GSQRT(KE-1,i,j)
+       f2h2_XVZ_KEm1 = CDZ(KE-1+1)*GSQRT(KE-1+1,i,j)
+       fjh1_XVZ_KEm1 = F2HW(KE-1,i,j)
+       fjh2_XVZ_KEm1 = 1.0_RP - fjh1_XVZ_KEm1
+       vz = ( 0.5_RP * ( momz(KE-1,i,j)+momz(KE-1,i,j+1) ) ) * ( f2h1_XVZ_KEm1+f2h2_XVZ_KEm1 ) &
+                  / ( f2h1_XVZ_KEm1 * 0.5_RP * ( DENS(KE,i,j)+DENS(KE,i,j+1) ) &
+                    + f2h2_XVZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i,j+1) ) )
+       vz = J33G * vz
+       dj = ( fjh1_XVZ_KEm1 * 0.5_RP * ( DENS(KE,i,j)+DENS(KE,i,j+1) ) &
+                    + fjh2_XVZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i,j+1) ) )
+       vx = ( fjh1_XVZ_KEm1 * 0.25_RP * ( momx(KE,i,j)+momx(KE,i-1,j)+momx(KE,i,j+1)+momx(KE,i-1,j+1) ) &
+                    + fjh2_XVZ_KEm1 * 0.25_RP * ( momx(KE-1,i,j)+momx(KE-1,i-1,j)+momx(KE-1,i,j+1)+momx(KE-1,i-1,j+1) ) ) &
+          / dj
+       vx = vx * J13G(KE-1,i,j)
+       vx = vx * MAPF(i,j,1)
+       vy = ( fjh1_XVZ_KEm1 * momy(KE,i,j) &
+                    + fjh2_XVZ_KEm1 * momy(KE-1,i,j) ) &
+          / dj
+       vy = vy * J23G(KE-1,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vx + vy
+       fv = merge( ( val(KE-1,i,j) &
+                              + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
+                              F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
+                              vt >= 0.0_RP )
+       flux(KE-1,i,j) = vz * fv &
+                          + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
+       fluxJ13(KE-1,i,j) = vx * fv
+       fluxJ23(KE-1,i,j) = vy * fv
+       flux   (KE,i,j) = 0.0_RP
+       fluxJ13(KE,i,j) = 0.0_RP
+       fluxJ23(KE,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    else ! TwoD: without the part of J13G
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc parallel loop collapse(3) async
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS+1, max( KE-2, KS )
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k,i,j) )
+       call CHECK( __LINE__, momz(k,i,j+1) )
+       call CHECK( __LINE__, momy(k+1,i,j) )
+       call CHECK( __LINE__, momy(k,i,j) )
+       call CHECK( __LINE__, val(k,i,j) )
+       call CHECK( __LINE__, val(k+1,i,j) )
+       call CHECK( __LINE__, val(k-1,i,j) )
+       call CHECK( __LINE__, val(k+2,i,j) )
+#endif
+       f2h1_XVZ_k = CDZ(k)*GSQRT(k,i,j)
+       f2h2_XVZ_k = CDZ(k+1)*GSQRT(k+1,i,j)
+       fjh1_XVZ_k = F2HW(k,i,j)
+       fjh2_XVZ_k = 1.0_RP - fjh1_XVZ_k
+       vz = ( 0.5_RP * ( momz(k,i,j)+momz(k,i,j+1) ) ) * ( f2h1_XVZ_k+f2h2_XVZ_k ) &
+                  / ( f2h1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+                    + f2h2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       vz = J33G * vz
+       dj = ( fjh1_XVZ_k * 0.5_RP * ( DENS(k+1,i,j)+DENS(k+1,i,j+1) ) &
+                    + fjh2_XVZ_k * 0.5_RP * ( DENS(k,i,j)+DENS(k,i,j+1) ) )
+       vy = ( fjh1_XVZ_k * momy(k+1,i,j) &
+                    + fjh2_XVZ_k * momy(k,i,j) ) &
+          / dj
+       vy = vy * J23G(k,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vy
+       fv = flux3k_upwind( vt, val(k-1,i,j), val(k,i,j), val(k+1,i,j), val(k+2,i,j) )
+       flux(k,i,j) = vz * fv &
+                          + GSQRT(k,i,j) * num_diff(k,i,j)
+       fluxJ23(k,i,j) = vy * fv
+    enddo
+    enddo
+    enddo
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels async
+    !$acc loop independent collapse(2)
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(KS,i,j) )
+       call CHECK( __LINE__, val(KS+1,i,j) )
+       call CHECK( __LINE__, val(KS,i,j) )
+       call CHECK( __LINE__, momy(KS+1,i,j) )
+       call CHECK( __LINE__, momy(KS,i,j) )
+       call CHECK( __LINE__, momy(KE,i,j) )
+       call CHECK( __LINE__, momy(KE-1,i,j) )
+#endif
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux   (KS-1,i,j) = 0.0_RP
+       fluxJ23(KS-1,i,j) = 0.0_RP
+       f2h1_XVZ_KS = CDZ(KS)*GSQRT(KS,i,j)
+       f2h2_XVZ_KS = CDZ(KS+1)*GSQRT(KS+1,i,j)
+       fjh1_XVZ_KS = F2HW(KS,i,j)
+       fjh2_XVZ_KS = 1.0_RP - fjh1_XVZ_KS
+       vz = ( 0.5_RP * ( momz(KS,i,j)+momz(KS,i,j+1) ) ) * ( f2h1_XVZ_KS+f2h2_XVZ_KS ) &
+                  / ( f2h1_XVZ_KS * 0.5_RP * ( DENS(KS+1,i,j)+DENS(KS+1,i,j+1) ) &
+                    + f2h2_XVZ_KS * 0.5_RP * ( DENS(KS,i,j)+DENS(KS,i,j+1) ) )
+       vz = J33G * vz
+       dj = ( fjh1_XVZ_KS * 0.5_RP * ( DENS(KS+1,i,j)+DENS(KS+1,i,j+1) ) &
+                    + fjh2_XVZ_KS * 0.5_RP * ( DENS(KS,i,j)+DENS(KS,i,j+1) ) )
+       vy = ( fjh1_XVZ_KS * momy(KS+1,i,j) &
+                    + fjh2_XVZ_KS * momy(KS,i,j) ) &
+          / dj
+       vy = vy * J23G(KS,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vy
+       fv = merge( F2 * ( val(KS+1,i,j)+val(KS,i,j) ), &
+                              ( val(KS+1,i,j) &
+                              + 0.5_RP * phi_dv(val(KS,i,j),val(KS+1,i,j),val(KS+2,i,j)) ), &
+                              vt >= 0.0_RP )
+       flux(KS,i,j) = vz * fv &
+                          + GSQRT(KS,i,j) * num_diff(KS,i,j)
+       fluxJ23(KS,i,j) = vy * fv
+       f2h1_XVZ_KEm1 = CDZ(KE-1)*GSQRT(KE-1,i,j)
+       f2h2_XVZ_KEm1 = CDZ(KE-1+1)*GSQRT(KE-1+1,i,j)
+       fjh1_XVZ_KEm1 = F2HW(KE-1,i,j)
+       fjh2_XVZ_KEm1 = 1.0_RP - fjh1_XVZ_KEm1
+       vz = ( 0.5_RP * ( momz(KE-1,i,j)+momz(KE-1,i,j+1) ) ) * ( f2h1_XVZ_KEm1+f2h2_XVZ_KEm1 ) &
+                  / ( f2h1_XVZ_KEm1 * 0.5_RP * ( DENS(KE,i,j)+DENS(KE,i,j+1) ) &
+                    + f2h2_XVZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i,j+1) ) )
+       vz = J33G * vz
+       dj = ( fjh1_XVZ_KEm1 * 0.5_RP * ( DENS(KE,i,j)+DENS(KE,i,j+1) ) &
+                    + fjh2_XVZ_KEm1 * 0.5_RP * ( DENS(KE-1,i,j)+DENS(KE-1,i,j+1) ) )
+       vy = ( fjh1_XVZ_KEm1 * momy(KE,i,j) &
+                    + fjh2_XVZ_KEm1 * momy(KE-1,i,j) ) &
+          / dj
+       vy = vy * J23G(KE-1,i,j)
+       vy = vy * MAPF(i,j,2)
+       vt = vz + vy
+       fv = merge( ( val(KE-1,i,j) &
+                              + 0.5_RP * phi_dv(val(KE,i,j),val(KE-1,i,j),val(KE-2,i,j)) ), &
+                              F2 * ( val(KE,i,j)+val(KE-1,i,j) ), &
+                              vt >= 0.0_RP )
+       flux(KE-1,i,j) = vz * fv &
+                          + GSQRT(KE-1,i,j) * num_diff(KE-1,i,j)
+       fluxJ23(KE-1,i,j) = vy * fv
+       flux   (KE,i,j) = 0.0_RP
+       fluxJ23(KE,i,j) = 0.0_RP
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+    end if
+
+    !$acc end data
+
+    !$omp end parallel
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    return
+  end subroutine ATMOS_DYN_FVM_fluxZJ_XVZ_ud3Koren1993
 
   !-----------------------------------------------------------------------------
   !> calculation X-flux at XV
@@ -1986,6 +3072,71 @@ contains
 
 
 
+
+  !-----------------------------------------------------------------------------
+  !> weights of the face values at the full levels KS and KE in the vertical fluxes of rho*w
+  !!
+  !! The face value at KS (KE) is extrapolated linearly from the half levels KS and KS+1 (KE-1 and KE-2):
+  !! val(KS) + wlo * ( val(KS) - val(KS+1) ), val(KE-1) + wup * ( val(KE-1) - val(KE-2) ).
+  subroutine bnd_face_weights( &
+       CDZ,     &
+       wlo, wup )
+    implicit none
+    real(RP), intent(in)  :: CDZ(KA)
+    real(RP), intent(out) :: wlo, wup
+
+    if ( KE - KS >= 2 ) then
+       wlo = 0.5_RP * CDZ(KS) / CDZ(KS+1)
+       wup = 0.5_RP * CDZ(KE) / CDZ(KE-1)
+    else
+       wlo = 0.0_RP
+       wup = 0.0_RP
+    end if
+
+    return
+  end subroutine bnd_face_weights
+
+  !-----------------------------------------------------------------------------
+  !> weights of the velocities of the metric parts of the vertical fluxes of rho*w at the full levels KS and KE
+  !!
+  !! a(KS) - 0.5 * a_b = cl(1) * a(KS) + cl(2) * a(KS+1) + cl(3) * a(KS+2), where a_b, the value at the
+  !! boundary face KS-1/2, is extrapolated quadratically (Lagrange) from the full levels KS, KS+1 and KS+2.
+  !! The same at the top with cu and the levels KE, KE-1, KE-2 and the face KE+1/2.
+  !! For a uniform grid, cl = cu = ( 1, 10, -3 ) / 16.
+  !! The extrapolation is quadratic, not linear, so that the error of the total velocity at KS is that of the
+  !! velocity at KS+1 of the inner scheme, ( mom(KS) + mom(KS+1) ) / 2, up to the third order: the leading
+  !! errors of the fluxes at KS and KS+1 then cancel in the tendency of mom(KS), which converges at the second order.
+  subroutine bnd_extrap_weights( &
+       CDZ,    &
+       cl, cu  )
+    implicit none
+    real(RP), intent(in)  :: CDZ(KA)
+    real(RP), intent(out) :: cl(3), cu(3)
+
+    real(RP) :: d0, d1, d2
+
+    if ( KE - KS >= 2 ) then
+       ! positions relative to CZ(KS): the face KS-1/2, and the full levels KS+1 and KS+2
+       d0 = - 0.5_RP * CDZ(KS)
+       d1 = 0.5_RP * ( CDZ(KS) + CDZ(KS+1) )
+       d2 = d1 + 0.5_RP * ( CDZ(KS+1) + CDZ(KS+2) )
+       cl(1) = 1.0_RP - 0.5_RP * ( d0 - d1 ) * ( d0 - d2 ) / ( d1 * d2 )
+       cl(2) =        - 0.5_RP * d0 * ( d0 - d2 ) / ( d1 * ( d1 - d2 ) )
+       cl(3) =        - 0.5_RP * d0 * ( d0 - d1 ) / ( d2 * ( d2 - d1 ) )
+       ! positions relative to CZ(KE): the face KE+1/2, and the full levels KE-1 and KE-2
+       d0 = 0.5_RP * CDZ(KE)
+       d1 = - 0.5_RP * ( CDZ(KE) + CDZ(KE-1) )
+       d2 = d1 - 0.5_RP * ( CDZ(KE-1) + CDZ(KE-2) )
+       cu(1) = 1.0_RP - 0.5_RP * ( d0 - d1 ) * ( d0 - d2 ) / ( d1 * d2 )
+       cu(2) =        - 0.5_RP * d0 * ( d0 - d2 ) / ( d1 * ( d1 - d2 ) )
+       cu(3) =        - 0.5_RP * d0 * ( d0 - d1 ) / ( d2 * ( d2 - d1 ) )
+    else
+       cl(:) = 0.0_RP
+       cu(:) = 0.0_RP
+    end if
+
+    return
+  end subroutine bnd_extrap_weights
 
 
   !-----------------------------------------------------------------------------

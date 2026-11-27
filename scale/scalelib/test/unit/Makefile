@@ -44,6 +44,7 @@ OBJS = \
 	test_comm.o             \
 	test_atmos_phy_mp_common.o \
 	test_atmos_phy_tb_smg.o \
+	test_atmos_dyn_fluxzj.o \
 	test_atmos_dyn.o
 
 all:
@@ -196,7 +197,8 @@ $(BUILD_DIR)/$(BINNAME).o  : $(BINNAME).f90  $(LIBS) $(patsubst %,$(BUILD_DIR)/%
 $(BUILD_DIR)/test_comm.o:             test_comm.f90
 $(BUILD_DIR)/test_atmos_phy_mp_common.o: test_atmos_phy_mp_common.f90
 $(BUILD_DIR)/test_atmos_phy_tb_smg.o: test_atmos_phy_tb_smg.f90
-$(BUILD_DIR)/test_atmos_dyn.o:        test_atmos_dyn.f90
+$(BUILD_DIR)/test_atmos_dyn_fluxzj.o: test_atmos_dyn_fluxzj.f90
+$(BUILD_DIR)/test_atmos_dyn.o:        test_atmos_dyn.f90 $(BUILD_DIR)/test_atmos_dyn_fluxzj.o
 $(BUILD_DIR)/unit.o:                  unit.f90 $(patsubst %,$(BUILD_DIR)/%,$(MODS))
 
 

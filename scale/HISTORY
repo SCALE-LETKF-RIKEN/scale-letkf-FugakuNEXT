@@ -1,5 +1,9 @@
 = Release History
 
+== 2026-11-27 (SCALE-LETKF local changes)
+* Bug fixes:
+  * Port the fused vertical momentum fluxes and their total-velocity upwind selection from e016ebc73 [results change] (#3754).
+
 == 2026-11-16 (SCALE-LETKF local changes)
 * Improvements:
   * Port scale-met/scale#3634 (f621b9fdb, on top of #3633 42dc673da): new
