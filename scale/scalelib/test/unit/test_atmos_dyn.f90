@@ -1,6 +1,7 @@
 module test_atmos_dyn
 
   !-----------------------------------------------------------------------------
+  use test_atmos_dyn_fluxzj, only: test_atmos_dyn_fluxzj_run
   use scale_precision
   use scale_atmos_grid_cartesC_index
   use scale_index
@@ -303,6 +304,8 @@ contains
 
   !########## test ##########
 
+
+  call test_atmos_dyn_fluxzj_run( DYN_FVM_FLUX_TYPE, DYN_FVM_FLUX_TYPE_TRACER )
 
   call test_undef
 

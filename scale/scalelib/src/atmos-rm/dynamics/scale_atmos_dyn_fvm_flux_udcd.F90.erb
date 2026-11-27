@@ -67,6 +67,21 @@ end
 def order_up(order, nh, kk=0)
   [[order-(nh-kk-1)*2,[order,2].min].max,[order-(nh-kk)*2,[order,2].min].max]
 end
+# face value at the full level KS (top=false) or KE (top=true) in the vertical fluxes of rho*w
+# (flux{Z,J13,J23}_XYW): extrapolated linearly from the two nearest half levels, or the value at
+# the nearest half level for UD1
+def face_bnd(order, top)
+  if top
+    k0, k1, w = "KE-1", "KE-2", "wup"
+  else
+    k0, k1, w = "KS", "KS+1", "wlo"
+  end
+  if order == 1
+    "val(#{k0},i,j)"
+  else
+    "val(#{k0},i,j) + #{w} * ( val(#{k0},i,j) - val(#{k1},i,j) )"
+  end
+end
 def flux1(idx0)
   "val(#{idx0})"
 end
@@ -271,7 +286,8 @@ end
 
 def f2h_snames(dst, k)
   tag = "#{dst[0..1]}Z_#{k}".gsub("+", "p").gsub("-", "m").gsub(/[^a-zA-Z0-9_]/, "_")
-  ["f2h1_#{tag}", "f2h2_#{tag}"]
+  pre = @f2h_prefix || "f2h"
+  ["#{pre}1_#{tag}", "#{pre}2_#{tag}"]
 end
 
 def register_f2h(scalars, dst, k)
@@ -300,6 +316,35 @@ def f2h_privates(scalars, chunk=4)
   }.join("\n")
 end
 
+# Switch the F2H scalars to the un-normalized weights
+#   h1 = CDZ(k)*GSQRT(k), h2 = CDZ(k+1)*GSQRT(k+1),
+# so that the division by (h1+h2) can be cancelled in vel_div.
+# Note: GSQRT here is the array passed in by the caller (the one at the flux point,
+# I_UYW when called from hevi), so h1/(h1+h2) is NOT the dycore's F2H_UYZ, which is
+# built from the GSQRT at I_UYZ. The F2H expressions of the scalars are only markers
+# here; the generated code has no F2H macro and always uses the CDZ*GSQRT weights.
+def f2h_raw!(scalars)
+  scalars.each_value do |info|
+    # every scalar is expected to hold an F2H expression; do not skip silently if it does not match
+    unless info[:expr] =~ /\AF2H\((.*),I_\w+\)\z/
+      raise "f2h_raw!: the expression of the F2H scalar #{info[:h1]} does not match F2H(k,I_*): #{info[:expr]}"
+    end
+    k = $1
+    info[:expr]  = "CDZ(#{k})*GSQRT(#{k},i,j)"
+    info[:expr2] = "CDZ(#{k}+1)*GSQRT(#{k}+1,i,j)"
+  end
+end
+
+# vel = mom / dens with only one division. dens is interpolated to W with the weights
+# h1 (full level k+1) and h2 (full level k) of the scalars. If mom is interpolated
+# with the same weights, they are divided out. Otherwise mom is multiplied by (h1+h2).
+def vel_div(mom, dens, scalars)
+  h = scalars.each_value.find { |info| dens.match?(/\b#{Regexp.escape(info[:h1])}\b/) }
+  raise "no F2H scalar in #{dens}" if h.nil?
+  num = mom.match?(/\b#{Regexp.escape(h[:h1])}\b/) ? mom : "#{mom} * ( #{h[:h1]}+#{h[:h2]} )"
+  "#{num} &\n           / #{dens}"
+end
+
 # Assign only F2H scalars that appear in the given expression strings.
 def f2h_assigns(scalars, *exprs)
   return "" if scalars.nil? || scalars.empty? || exprs.empty?
@@ -312,7 +357,7 @@ def f2h_assigns(scalars, *exprs)
     next unless text.match?(/\b#{Regexp.escape(h1)}\b/)
     h2 = info[:h2]
     lines << "#{indent}#{h1} = #{info[:expr]}"
-    lines << "#{indent}#{h2} = 1.0_RP - #{h1}"
+    lines << "#{indent}#{h2} = #{info[:expr2] || "1.0_RP - #{h1}"}"
   end
   return "" if lines.empty?
   lines.join("\n")
@@ -377,6 +422,11 @@ use_f6  = fuse_lu && ( flux_bnd("v", order_lo(order, nh), 0) + flux_bnd("v", ord
 !! arrays, callers must wait before host access/transfers or work on another
 !! queue; calls between kernels on the same queue preserve their order.
 !!
+!! The fluxZJ routines use the boundary treatment and map factors of upstream
+!! e016ebc73 (#3754). The separate routines retain this branch's earlier formulae
+!! for the tracer and low-order FCT paths. References below to equivalent separate
+!! routines describe the upstream version.
+!!
 !! @author Team SCALE
 !!
 !<
@@ -434,6 +484,10 @@ module <%= modname %>
   public :: ATMOS_DYN_FVM_fluxJ23_XVZ_<%=@scheme%>
   public :: ATMOS_DYN_FVM_fluxX_XVZ_<%=@scheme%>
   public :: ATMOS_DYN_FVM_fluxY_XVZ_<%=@scheme%>
+
+  public :: ATMOS_DYN_FVM_fluxZJ_XYW_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxZJ_UYZ_<%=@scheme%>
+  public :: ATMOS_DYN_FVM_fluxZJ_XVZ_<%=@scheme%>
 
   !-----------------------------------------------------------------------------
   !
@@ -952,6 +1006,241 @@ contains
     return
   end subroutine ATMOS_DYN_FVM_flux<%=dir%>_XYW_<%=@scheme%>
 <% end # J13, J23 loop %>
+<%
+  # body of the fused vertical flux of rho*w at the full level k (flux index k-1) with the scheme ord;
+  # j13: with the part of J13G (3-D)
+  zj_xyw_level = lambda do |k, ord, j13, ind|
+    s = []
+    s << "vel = #{interp("momz", "XYW", "XYZ", k)} &"
+    s << "    / DENS(#{k},i,j)"
+    s << "vz = J33G * vel"
+    if j13
+      s << "vx = #{interp("momx", "UYZ", "XYZ", k)} &"
+      s << "   / DENS(#{k},i,j)"
+      s << "vx = vx * J13G(#{k},i,j)"
+      s << "vx = vx * MAPF(i,j,1)"
+    end
+    s << "vy = #{interp("momy", "XVZ", "XYZ", k)} &"
+    s << "   / DENS(#{k},i,j)"
+    s << "vy = vy * J23G(#{k},i,j)"
+    s << "vy = vy * MAPF(i,j,2)"
+    s << ( j13 ? "vt = vz + vx + vy" : "vt = vz + vy" ) if order.odd? # the face value of the central schemes does not depend on it
+    s << "fv = #{flux("vt", ord, 0, k-1)}"
+    s << "flux(#{k-1},i,j) = vz * fv #{num_diff(k)}".rstrip
+    s << "fluxJ13(#{k-1},i,j) = vx * fv" if j13
+    s << "fluxJ23(#{k-1},i,j) = vy * fv"
+    s.join("\n").gsub(/^/, ind)
+  end
+-%>
+  !-----------------------------------------------------------------------------
+  !> calculation of the vertical flux at XYW: the three parts with one face value
+  !!
+  !! The three parts of the vertical flux of rho*w, those of ATMOS_DYN_FVM_fluxZ_XYW_<%=@scheme%> (flux),
+  !! ATMOS_DYN_FVM_fluxJ13_XYW_<%=@scheme%> (fluxJ13) and ATMOS_DYN_FVM_fluxJ23_XYW_<%=@scheme%> (fluxJ23), are computed
+<% if order.odd? -%>
+  !! with one face value, whose upwind side is taken by the sign of the total contravariant vertical velocity
+  !! J33G w + m_x J13G u + m_y J23G v, the sum of the velocities that multiply the face value in the three parts
+  !! (issue #3754). The sum of the parts is then the flux of the total velocity at every level, including those
+  !! where the order is reduced, and it vanishes for flow along the coordinate surfaces.
+  !! Each part is the flux of the separate routine when its own velocity has the sign of the total one.
+<% else -%>
+  !! with one face value (issue #3754). With the central scheme the face value does not depend on the velocity,
+  !! so the parts are those of the separate routines, except for the rounding.
+<% end -%>
+  !! The orders at the levels are those of ATMOS_DYN_FVM_fluxZ_XYW_<%=@scheme%>, and the fluxes at the full levels KS and KE,
+  !! whose face value does not depend on the direction, are those of the separate routines.
+  !! With TwoD, the part of J13G is not computed (fluxJ13 is not changed), and momx is not used.
+  subroutine ATMOS_DYN_FVM_fluxZJ_XYW_<%=@scheme%>( &
+       flux, fluxJ13, fluxJ23,   &
+       momz, momx, momy, val,    &
+       DENS, GSQRT,              &
+       J33G, J13G, J23G, MAPF,   &
+       num_diff,                 &
+       CDZ, FDZ, dtrk, TwoD,     &
+       IIS, IIE, JJS, JJE        )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+    real(RP), intent(in)  :: momz    (KA,IA,JA)
+    real(RP), intent(in)  :: momx    (KA,IA,JA)
+    real(RP), intent(in)  :: momy    (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: J33G
+    real(RP), intent(in)  :: J13G    (KA,IA,JA)
+    real(RP), intent(in)  :: J23G    (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    real(RP), intent(in)  :: FDZ     (KA-1)
+    real(RP), intent(in)  :: dtrk
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vel
+    real(RP) :: vz, vx, vy ! velocities of the parts: J33G w, m_x J13G u, m_y J23G v
+<% if order.odd? -%>
+    real(RP) :: vt         ! total contravariant vertical velocity
+<% end -%>
+    real(RP) :: fv         ! face value
+<% if order > 1 -%>
+    real(RP) :: wlo, wup ! weights of the extrapolation of the face values at KS and KE
+<% end -%>
+    real(RP) :: cl(3), cu(3) ! weights of the velocities at KS and KE
+    real(RP) :: cl1, cl2, cl3, cu1, cu2, cu3 ! the same as scalars, passed to the async kernel by value
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+<% if order > 1 -%>
+    call bnd_face_weights( CDZ, wlo, wup )
+<% end -%>
+    call bnd_extrap_weights( CDZ, cl, cu )
+    cl1 = cl(1); cl2 = cl(2); cl3 = cl(3)
+    cu1 = cu(1); cu2 = cu(2); cu3 = cu(3)
+
+    !$omp parallel default(none) private(i,j,k,vel,vz,vx,vy<%= order.odd? ? ",vt" : "" %>,fv) &
+<% if order > 1 -%>
+    !$omp shared(wlo,wup) &
+<% end -%>
+    !$omp shared(cl1,cl2,cl3,cu1,cu2,cu3,TwoD) &
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,momz,momx,momy,val,DENS,GSQRT,J33G,J13G,J23G,MAPF,num_diff) &
+    !$omp shared(flux,fluxJ13,fluxJ23)
+
+    !$acc data copy(flux, fluxJ13, fluxJ23) &
+    !$acc      copyin(momz, momx, momy, val, DENS, GSQRT, J13G, J23G, MAPF, num_diff, CDZ, FDZ)
+
+<% [ [false, "if ( .not. TwoD ) then"], [true, "else ! TwoD: without the part of J13G"] ].each do |twod, cond| -%>
+    <%= cond %>
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc parallel loop collapse(3) async
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS<%=nh+1%>, max( KE<%=-(nh+1)%>, KS<%=nh%> )
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k-1,i,j) )
+       call CHECK( __LINE__, momz(k  ,i,j) )
+<% unless twod -%>
+       call CHECK( __LINE__, momx(k,i  ,j) )
+       call CHECK( __LINE__, momx(k,i-1,j) )
+<% end -%>
+       call CHECK( __LINE__, momy(k,i,j  ) )
+       call CHECK( __LINE__, momy(k,i,j-1) )
+<% (nh+1).times do |k| -%>
+       call CHECK( __LINE__, val(k<%=-k-1%>,i,j) )
+       call CHECK( __LINE__, val(k<%=k%>,i,j) )
+<% end -%>
+#endif
+<%= zj_xyw_level.call("k", order, !twod, "       ") %>
+    enddo
+    enddo
+    enddo
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels async
+    !$acc loop independent collapse(2)
+    do j = JJS, JJE
+    do i = IIS, IIE
+#ifdef DEBUG
+<% if nh >= 1 -%>
+<%- 0.upto(2*nh-1+order%2) do |k| -%>
+       call CHECK( __LINE__, val(KS<%=k%>,i,j) )
+<%- end -%>
+<%- (2*nh-1+order%2).downto(0) do |k| -%>
+       call CHECK( __LINE__, val(KE<%=-k-1%>,i,j) )
+<%- end -%>
+<% end -%>
+#endif
+       ! The fluxes at KS and KE are set last: the boundary levels overlap them when KMAX is small.
+<% nh.times do |k| -%>
+       ! k = KS<%=k+1%>
+<%= zj_xyw_level.call("KS"+(k+1), order_lo(order, nh, k), !twod, "       ") %>
+<% end -%>
+<% (nh-1).downto(0) do |k| -%>
+<%   if k == nh-1 -%>
+       ! this level is left to the bottom block when the blocks overlap (KMAX < <%=format("%d",2*nh+2)%>)
+       if ( KE<%=-(nh+1)%> > KS<%=nh-1%> ) then
+          ! k = KE<%=-(k+1)%>
+<%= zj_xyw_level.call("KE"-(k+1), order_up(order, nh, k), !twod, "          ") %>
+       end if
+<%   else -%>
+       ! k = KE<%=-(k+1)%>
+<%= zj_xyw_level.call("KE"-(k+1), order_up(order, nh, k), !twod, "       ") %>
+<%   end -%>
+<% end -%>
+       ! k = KS and KE: as ATMOS_DYN_FVM_fluxZ_XYW_<%=@scheme%> and ATMOS_DYN_FVM_fluxJ13_XYW_<%=@scheme%>
+       if ( KE - KS >= 2 ) then
+#ifdef DEBUG
+          call CHECK( __LINE__, momz(KS  ,i,j) )
+          call CHECK( __LINE__, momz(KE-1,i,j) )
+          call CHECK( __LINE__, val(KS  ,i,j) )
+          call CHECK( __LINE__, val(KS+1,i,j) )
+          call CHECK( __LINE__, val(KE-1,i,j) )
+          call CHECK( __LINE__, val(KE-2,i,j) )
+#endif
+          fv = <%= face_bnd(order, false) %>
+          vel = 0.5_RP * momz(KS,i,j) / DENS(KS,i,j)
+          flux(KS-1,i,j) = J33G * vel * fv ! k = KS
+<% unless twod -%>
+          vel = ( cl1 * J13G(KS  ,i,j) * <%= interp("momx", "UYZ", "XYZ", "KS") %> &
+                + cl2 * J13G(KS+1,i,j) * <%= interp("momx", "UYZ", "XYZ", "KS+1") %> &
+                + cl3 * J13G(KS+2,i,j) * <%= interp("momx", "UYZ", "XYZ", "KS+2") %> ) &
+              / DENS(KS,i,j)
+          fluxJ13(KS-1,i,j) = vel * MAPF(i,j,1) * fv
+<% end -%>
+          vel = ( cl1 * J23G(KS  ,i,j) * <%= interp("momy", "XVZ", "XYZ", "KS") %> &
+                + cl2 * J23G(KS+1,i,j) * <%= interp("momy", "XVZ", "XYZ", "KS+1") %> &
+                + cl3 * J23G(KS+2,i,j) * <%= interp("momy", "XVZ", "XYZ", "KS+2") %> ) &
+              / DENS(KS,i,j)
+          fluxJ23(KS-1,i,j) = vel * MAPF(i,j,2) * fv
+          fv = <%= face_bnd(order, true) %>
+          vel = 0.5_RP * momz(KE-1,i,j) / DENS(KE,i,j)
+          flux(KE-1,i,j) = J33G * vel * fv ! k = KE
+<% unless twod -%>
+          vel = ( cu1 * J13G(KE  ,i,j) * <%= interp("momx", "UYZ", "XYZ", "KE") %> &
+                + cu2 * J13G(KE-1,i,j) * <%= interp("momx", "UYZ", "XYZ", "KE-1") %> &
+                + cu3 * J13G(KE-2,i,j) * <%= interp("momx", "UYZ", "XYZ", "KE-2") %> ) &
+              / DENS(KE,i,j)
+          fluxJ13(KE-1,i,j) = vel * MAPF(i,j,1) * fv
+<% end -%>
+          vel = ( cu1 * J23G(KE  ,i,j) * <%= interp("momy", "XVZ", "XYZ", "KE") %> &
+                + cu2 * J23G(KE-1,i,j) * <%= interp("momy", "XVZ", "XYZ", "KE-1") %> &
+                + cu3 * J23G(KE-2,i,j) * <%= interp("momy", "XVZ", "XYZ", "KE-2") %> ) &
+              / DENS(KE,i,j)
+          fluxJ23(KE-1,i,j) = vel * MAPF(i,j,2) * fv
+       else
+          flux   (KS-1,i,j) = 0.0_RP ! k = KS
+          flux   (KE-1,i,j) = 0.0_RP ! k = KE
+<% unless twod -%>
+          fluxJ13(KS-1,i,j) = 0.0_RP
+          fluxJ13(KE-1,i,j) = 0.0_RP
+<% end -%>
+          fluxJ23(KS-1,i,j) = 0.0_RP
+          fluxJ23(KE-1,i,j) = 0.0_RP
+       end if
+       flux(KE  ,i,j) = 0.0_RP ! k = KE+1
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+
+<% end -%>
+    end if
+
+    !$acc end data
+
+    !$omp end parallel
+
+    return
+  end subroutine ATMOS_DYN_FVM_fluxZJ_XYW_<%=@scheme%>
+
 
 <% [
      ["X", "UY", 1, 0],
@@ -1509,6 +1798,283 @@ contains
     return
   end subroutine ATMOS_DYN_FVM_flux<%=dir%>_<%=uv%>Z_<%=@scheme%>
 <% end # J13 J23 loop %>
+<%
+  # F2H scalars of the part of J33G (zs: the weights CDZ*GSQRT, as in fluxZ) and of the metric parts
+  # (js: F2HW, as in fluxJ13 and fluxJ23), which have other names (prefix fjh)
+  zs = {}
+  js = {}
+  # velocities of the parts at the half level k; twod: without the part of J13G (and, for UYZ, at XYW as fluxZ_UYZ in 2-D)
+  zj_uvz_exprs = lambda do |k, twod|
+    dst = ( twod && i == 1 ) ? "XYW" : uv+"W"
+    e = {}
+    e[:mz] = interp("momz", "XYW", dst, k, "i", "j", zs)
+    e[:dz] = interp("DENS", "XYZ", dst, k, "i", "j", zs)
+    @f2h_prefix = "fjh"
+    e[:mx] = twod ? nil : interp("momx", "UYZ", dst, k, "i", "j", js)
+    e[:my] = interp("momy", "XVZ", dst, k, "i", "j", js)
+    e[:dj] = interp("DENS", "XYZ", dst, k, "i", "j", js)
+    @f2h_prefix = nil
+    e
+  end
+  zj_k = {}
+  [false, true].each do |twod|
+    (["k"] + (0...nh).map{|kk| ["KS"+kk, "KE"-(kk+1)]}.flatten).each do |k|
+      zj_k[[k, twod]] = zj_uvz_exprs.call(k, twod)
+    end
+  end
+  f2h_raw!(zs)
+  js.each_value { |info| info[:expr] = info[:expr].sub(/F2H\(([^,]+),[^)]*\)/) { "F2HW(#{$1},i,j)" } }
+  # velocities of the parts and the total velocity at the half level k
+  zj_uvz_vel = lambda do |k, twod, ind|
+    e = zj_k[[k, twod]]
+    s = []
+    a = f2h_assigns(zs, e[:mz], e[:dz])
+    s << a.lines.map(&:strip).join("\n") unless a.empty?
+    a = f2h_assigns(js, *[e[:mx], e[:my], e[:dj]].compact)
+    s << a.lines.map(&:strip).join("\n") unless a.empty?
+    s << "vz = #{vel_div(e[:mz], e[:dz], zs)}"
+    s << "vz = J33G * vz"
+    s << "dj = #{e[:dj]}"
+    unless twod
+      s << "vx = #{e[:mx]} &"
+      s << "   / dj"
+      s << "vx = vx * J13G(#{k},i,j)"
+      s << "vx = vx * MAPF(i,j,1)"
+    end
+    s << "vy = #{e[:my]} &"
+    s << "   / dj"
+    s << "vy = vy * J23G(#{k},i,j)"
+    s << "vy = vy * MAPF(i,j,2)"
+    s << ( twod ? "vt = vz + vy" : "vt = vz + vx + vy" ) if order.odd? # the face value of the central schemes does not depend on it
+    s.join("\n").gsub(/^/, ind).gsub(/^\s+$/, "")
+  end
+  # DEBUG checks of the points of momx and momy read for the velocities of the metric parts at the half levels ks
+  zj_uvz_mom_checks = lambda do |ks, twod, ind|
+    refs = []
+    ks.each do |k|
+      e = zj_k[[k, twod]]
+      [e[:mx], e[:my]].compact.each { |x| refs.concat( x.scan(/mom[xy]\([^()]*\)/) ) }
+    end
+    refs.uniq.map { |r| "#{ind}call CHECK( __LINE__, #{r} )" }.join("\n")
+  end
+  # fluxes of the parts at the half level k with the scheme ord
+  zj_uvz_level = lambda do |k, ord, twod, ind|
+    s = []
+    s << "fv = #{flux("vt", ord, 0, k)}"
+    s << "flux(#{k},i,j) = vz * fv #{num_diff(k)}".rstrip
+    s << "fluxJ13(#{k},i,j) = vx * fv" unless twod
+    s << "fluxJ23(#{k},i,j) = vy * fv"
+    zj_uvz_vel.call(k, twod, ind) + "\n" + s.join("\n").gsub(/^/, ind)
+  end
+-%>
+  !-----------------------------------------------------------------------------
+  !> calculation of the vertical flux at <%=uv%>Z: the three parts with one face value
+  !!
+  !! The three parts of the vertical flux, those of ATMOS_DYN_FVM_fluxZ_<%=uv%>Z_<%=@scheme%> (flux),
+  !! ATMOS_DYN_FVM_fluxJ13_<%=uv%>Z_<%=@scheme%> (fluxJ13) and ATMOS_DYN_FVM_fluxJ23_<%=uv%>Z_<%=@scheme%> (fluxJ23), are computed
+<% if order.odd? -%>
+  !! with one face value, whose upwind side is taken by the sign of the total contravariant vertical velocity
+  !! J33G w + m_x J13G u + m_y J23G v, the sum of the velocities that multiply the face value in the three parts
+  !! (issue #3754): with GSQRT (the weights of J33G w) and F2HW (those of the metric parts) as passed to the separate routines.
+  !! Each part is the flux of the separate routine when its own velocity has the sign of the total one.
+<% else -%>
+  !! with one face value (issue #3754). With the central scheme the face value does not depend on the velocity,
+  !! so the parts are those of the separate routines, except for the rounding.
+<% end -%>
+  !! With TwoD, the part of J13G is not computed (fluxJ13 is not changed), and momx is not used<% if i == 1 %>;
+  !! the velocities are those of the separate routines in 2-D<% end %>.
+  subroutine ATMOS_DYN_FVM_fluxZJ_<%=uv%>Z_<%=@scheme%>( &
+       flux, fluxJ13, fluxJ23,   &
+       momz, momx, momy, val,    &
+       DENS, GSQRT, F2HW,        &
+       J33G, J13G, J23G, MAPF,   &
+       num_diff,                 &
+       CDZ, TwoD,                &
+       IIS, IIE, JJS, JJE        )
+    implicit none
+
+    real(RP), intent(inout) :: flux    (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+    real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+    real(RP), intent(in)  :: momz    (KA,IA,JA)
+    real(RP), intent(in)  :: momx    (KA,IA,JA)
+    real(RP), intent(in)  :: momy    (KA,IA,JA)
+    real(RP), intent(in)  :: val     (KA,IA,JA)
+    real(RP), intent(in)  :: DENS    (KA,IA,JA)
+    real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+    real(RP), intent(in)  :: F2HW    (KA,IA,JA) !< F2H weight of the full level k+1 (metric parts)
+    real(RP), intent(in)  :: J33G
+    real(RP), intent(in)  :: J13G    (KA,IA,JA)
+    real(RP), intent(in)  :: J23G    (KA,IA,JA)
+    real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+    real(RP), intent(in)  :: num_diff(KA,IA,JA)
+    real(RP), intent(in)  :: CDZ     (KA)
+    logical,  intent(in)  :: TwoD
+    integer,  intent(in)  :: IIS, IIE, JJS, JJE
+
+    real(RP) :: vz, vx, vy ! velocities of the parts: J33G w, m_x J13G u, m_y J23G v
+<% if order.odd? -%>
+    real(RP) :: vt         ! total contravariant vertical velocity
+<% end -%>
+    real(RP) :: dj         ! density of the metric parts
+    real(RP) :: fv         ! face value
+<%- if fuse_lu -%>
+#ifdef _OPENACC
+    real(RP) :: flo, fup, fin
+#endif
+<%- end -%>
+<%= f2h_decls(zs) %>
+<%= f2h_decls(js) %>
+    integer  :: k, i, j
+    !---------------------------------------------------------------------------
+
+    !$omp parallel default(none) private(i,j,k,vz,vx,vy<%= order.odd? ? ",vt" : "" %>,dj,fv) &
+<%= f2h_privates(zs) %>
+<%= f2h_privates(js) %>
+    !$omp shared(JJS,JJE,IIS,IIE,KS,KE,momz,momx,momy,val,DENS,GSQRT,F2HW,J33G,J13G,J23G,MAPF,num_diff) &
+    !$omp shared(flux,fluxJ13,fluxJ23,CDZ,TwoD)
+
+    !$acc data copy(flux, fluxJ13, fluxJ23) &
+    !$acc      copyin(momz, momx, momy, val, DENS, GSQRT, F2HW, J13G, J23G, MAPF, num_diff, CDZ)
+
+<% [ [false, "if ( .not. TwoD ) then"], [true, "else ! TwoD: without the part of J13G"] ].each do |twod, cond| -%>
+    <%= cond %>
+
+<%   if twod && i == 1 -%>
+    !$omp do OMP_SCHEDULE_
+    !$acc kernels async
+    !$acc loop independent collapse(2) private(i)
+    do j = JJS, JJE
+    do k = KS<%=nh%>, max( KE<%=-nh-1%>, KS<%=nh-1%> )
+       i = IIS
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k,i,j) )
+<%= zj_uvz_mom_checks.call(["k"], twod, "       ") %>
+<% (nh+1).times do |k| -%>
+       call CHECK( __LINE__, val(k<%=-k%>,i,j) )
+       call CHECK( __LINE__, val(k<%=k+1%>,i,j) )
+<% end -%>
+#endif
+<%= zj_uvz_level.call("k", order, twod, "       ") %>
+    enddo
+    enddo
+    !$acc end kernels
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_
+    !$acc kernels async
+    !$acc loop independent private(i)
+    do j = JJS, JJE
+       i = IIS
+<%   else -%>
+<%-    if fuse_lu -%>
+#ifdef _OPENACC
+    ! The fluxes at the boundary levels are selected with merge() in the kernel for
+    ! the inner levels (see fluxZ_XYZ).
+    ! The values in the halo are read but not used.
+    !$acc parallel loop collapse(3) async
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS-1, KE
+<%= zj_uvz_vel.call("k", twod, "       ") %>
+       flo = <%= flux_bnd("vt", order_lo(order, nh), 0) %>
+       fup = <%= flux_bnd("vt", order_up(order, nh), 0) %>
+       fin = <%= flux("vt", order, 0) %>
+       fv = merge( fup, merge( flo, fin, k == KS ), k == KE-1 )
+       flux(k,i,j) = merge( vz * fv <%= num_diff() %>, &
+                            0.0_RP, KS <= k .and. k <= KE-1 )
+<%     unless twod -%>
+       fluxJ13(k,i,j) = merge( vx * fv, 0.0_RP, KS <= k .and. k <= KE-1 )
+<%     end -%>
+       fluxJ23(k,i,j) = merge( vy * fv, 0.0_RP, KS <= k .and. k <= KE-1 )
+    enddo
+    enddo
+    enddo
+#else
+<%-    end -%>
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc parallel loop collapse(3) async
+    do j = JJS, JJE
+    do i = IIS, IIE
+    do k = KS<%=nh%>, max( KE<%=-nh-1%>, KS<%=nh-1%> )
+#ifdef DEBUG
+       call CHECK( __LINE__, momz(k,i,j) )
+       call CHECK( __LINE__, momz(k,i<%=i%>,j<%=j%>) )
+<%= zj_uvz_mom_checks.call(["k"], twod, "       ") %>
+<% (nh+1).times do |k| -%>
+       call CHECK( __LINE__, val(k<%=-k%>,i,j) )
+       call CHECK( __LINE__, val(k<%=k+1%>,i,j) )
+<% end -%>
+#endif
+<%= zj_uvz_level.call("k", order, twod, "       ") %>
+    enddo
+    enddo
+    enddo
+    !$omp end do nowait
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    !$omp do OMP_SCHEDULE_ collapse(2)
+    !$acc kernels async
+    !$acc loop independent collapse(2)
+    do j = JJS, JJE
+    do i = IIS, IIE
+<%   end -%>
+#ifdef DEBUG
+<% nh.times do |k| -%>
+       call CHECK( __LINE__, momz(KS<%=k%>,i,j) )
+       call CHECK( __LINE__, val(KS<%=k*2+1%>,i,j) )
+       call CHECK( __LINE__, val(KS<%=k*2%>,i,j) )
+<% end -%>
+<% if nh > 0 -%>
+<%= zj_uvz_mom_checks.call((0...nh).map{|kk| ["KS"+kk, "KE"-(kk+1)]}.flatten, twod, "       ") %>
+<% end -%>
+#endif
+       ! The boundary condition is qflx_hi + qflxJ13 + qfluxJ23 = 0 at KS-1.
+       ! The flux at KS-1 can be non-zero.
+       ! To reduce calculations, all the fluxes are set to zero.
+       flux   (KS-1,i,j) = 0.0_RP
+<%   unless twod -%>
+       fluxJ13(KS-1,i,j) = 0.0_RP
+<%   end -%>
+       fluxJ23(KS-1,i,j) = 0.0_RP
+<%   nh.times do |kk| -%>
+<%= zj_uvz_level.call("KS"+kk, order_lo(order, nh, kk), twod, "       ") %>
+<%= zj_uvz_level.call("KE"-(kk+1), order_up(order, nh, kk), twod, "       ") %>
+<%   end -%>
+       flux   (KE,i,j) = 0.0_RP
+<%   unless twod -%>
+       fluxJ13(KE,i,j) = 0.0_RP
+<%   end -%>
+       fluxJ23(KE,i,j) = 0.0_RP
+<%   if twod && i == 1 -%>
+    enddo
+<%   else -%>
+    enddo
+    enddo
+<%   end -%>
+    !$acc end kernels
+    !$omp end do nowait
+<%-  if fuse_lu && !( twod && i == 1 ) -%>
+#endif
+<%-  end -%>
+
+<% end -%>
+    end if
+
+    !$acc end data
+
+    !$omp end parallel
+#ifdef DEBUG
+    k = IUNDEF; i = IUNDEF; j = IUNDEF
+#endif
+
+    return
+  end subroutine ATMOS_DYN_FVM_fluxZJ_<%=uv%>Z_<%=@scheme%>
 <% [
      ["X", 1, 0],
      ["Y", 0, 1]
@@ -1630,6 +2196,71 @@ contains
 <%# -- X Y loop ------- %>
 <% end %>
 <%# -- U V loop ------- %>
+
+  !-----------------------------------------------------------------------------
+  !> weights of the face values at the full levels KS and KE in the vertical fluxes of rho*w
+  !!
+  !! The face value at KS (KE) is extrapolated linearly from the half levels KS and KS+1 (KE-1 and KE-2):
+  !! val(KS) + wlo * ( val(KS) - val(KS+1) ), val(KE-1) + wup * ( val(KE-1) - val(KE-2) ).
+  subroutine bnd_face_weights( &
+       CDZ,     &
+       wlo, wup )
+    implicit none
+    real(RP), intent(in)  :: CDZ(KA)
+    real(RP), intent(out) :: wlo, wup
+
+    if ( KE - KS >= 2 ) then
+       wlo = 0.5_RP * CDZ(KS) / CDZ(KS+1)
+       wup = 0.5_RP * CDZ(KE) / CDZ(KE-1)
+    else
+       wlo = 0.0_RP
+       wup = 0.0_RP
+    end if
+
+    return
+  end subroutine bnd_face_weights
+
+  !-----------------------------------------------------------------------------
+  !> weights of the velocities of the metric parts of the vertical fluxes of rho*w at the full levels KS and KE
+  !!
+  !! a(KS) - 0.5 * a_b = cl(1) * a(KS) + cl(2) * a(KS+1) + cl(3) * a(KS+2), where a_b, the value at the
+  !! boundary face KS-1/2, is extrapolated quadratically (Lagrange) from the full levels KS, KS+1 and KS+2.
+  !! The same at the top with cu and the levels KE, KE-1, KE-2 and the face KE+1/2.
+  !! For a uniform grid, cl = cu = ( 1, 10, -3 ) / 16.
+  !! The extrapolation is quadratic, not linear, so that the error of the total velocity at KS is that of the
+  !! velocity at KS+1 of the inner scheme, ( mom(KS) + mom(KS+1) ) / 2, up to the third order: the leading
+  !! errors of the fluxes at KS and KS+1 then cancel in the tendency of mom(KS), which converges at the second order.
+  subroutine bnd_extrap_weights( &
+       CDZ,    &
+       cl, cu  )
+    implicit none
+    real(RP), intent(in)  :: CDZ(KA)
+    real(RP), intent(out) :: cl(3), cu(3)
+
+    real(RP) :: d0, d1, d2
+
+    if ( KE - KS >= 2 ) then
+       ! positions relative to CZ(KS): the face KS-1/2, and the full levels KS+1 and KS+2
+       d0 = - 0.5_RP * CDZ(KS)
+       d1 = 0.5_RP * ( CDZ(KS) + CDZ(KS+1) )
+       d2 = d1 + 0.5_RP * ( CDZ(KS+1) + CDZ(KS+2) )
+       cl(1) = 1.0_RP - 0.5_RP * ( d0 - d1 ) * ( d0 - d2 ) / ( d1 * d2 )
+       cl(2) =        - 0.5_RP * d0 * ( d0 - d2 ) / ( d1 * ( d1 - d2 ) )
+       cl(3) =        - 0.5_RP * d0 * ( d0 - d1 ) / ( d2 * ( d2 - d1 ) )
+       ! positions relative to CZ(KE): the face KE+1/2, and the full levels KE-1 and KE-2
+       d0 = 0.5_RP * CDZ(KE)
+       d1 = - 0.5_RP * ( CDZ(KE) + CDZ(KE-1) )
+       d2 = d1 - 0.5_RP * ( CDZ(KE-1) + CDZ(KE-2) )
+       cu(1) = 1.0_RP - 0.5_RP * ( d0 - d1 ) * ( d0 - d2 ) / ( d1 * d2 )
+       cu(2) =        - 0.5_RP * d0 * ( d0 - d2 ) / ( d1 * ( d1 - d2 ) )
+       cu(3) =        - 0.5_RP * d0 * ( d0 - d1 ) / ( d2 * ( d2 - d1 ) )
+    else
+       cl(:) = 0.0_RP
+       cu(:) = 0.0_RP
+    end if
+
+    return
+  end subroutine bnd_extrap_weights
 
 <% if @scheme == "ud3Koren1993" %>
   !-----------------------------------------------------------------------------

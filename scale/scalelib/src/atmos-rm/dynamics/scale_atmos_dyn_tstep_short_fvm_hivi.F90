@@ -195,19 +195,13 @@ contains
        ATMOS_DYN_FVM_fluxZ_XYZ,     &
        ATMOS_DYN_FVM_fluxX_XYZ,     &
        ATMOS_DYN_FVM_fluxY_XYZ,     &
-       ATMOS_DYN_FVM_fluxZ_XYW,     &
-       ATMOS_DYN_FVM_fluxJ13_XYW,   &
-       ATMOS_DYN_FVM_fluxJ23_XYW,   &
+       ATMOS_DYN_FVM_fluxZJ_XYW,    &
        ATMOS_DYN_FVM_fluxX_XYW,     &
        ATMOS_DYN_FVM_fluxY_XYW,     &
-       ATMOS_DYN_FVM_fluxZ_UYZ,     &
-       ATMOS_DYN_FVM_fluxJ13_UYZ,   &
-       ATMOS_DYN_FVM_fluxJ23_UYZ,   &
+       ATMOS_DYN_FVM_fluxZJ_UYZ,    &
        ATMOS_DYN_FVM_fluxX_UYZ,     &
        ATMOS_DYN_FVM_fluxY_UYZ,     &
-       ATMOS_DYN_FVM_fluxZ_XVZ,     &
-       ATMOS_DYN_FVM_fluxJ13_XVZ,   &
-       ATMOS_DYN_FVM_fluxJ23_XVZ,   &
+       ATMOS_DYN_FVM_fluxZJ_XVZ,    &
        ATMOS_DYN_FVM_fluxX_XVZ,     &
        ATMOS_DYN_FVM_fluxY_XVZ
     implicit none
@@ -523,22 +517,12 @@ contains
 
        ! at (x, y, z)
        ! note than z-index is added by -1
-       call ATMOS_DYN_FVM_fluxZ_XYW( qflx_hi(:,:,:,ZDIR), & ! (out)
-            MOMZ, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), J33G, & ! (in)
+       call ATMOS_DYN_FVM_fluxZJ_XYW( qflx_hi(:,:,:,ZDIR), qflx_J13, qflx_J23, & ! (out)
+            MOMZ, MOMX, MOMY, MOMZ, DENS, & ! (in)
+            GSQRT(:,:,:,I_XYZ), & ! (in)
+            J33G, J13G(:,:,:,I_XYZ), J23G(:,:,:,I_XYZ), MAPF(:,:,:,I_XY), & ! (in)
             num_diff(:,:,:,I_MOMZ,ZDIR), & ! (in)
-            CDZ, FDZ, dtrk, &
-            IIS, IIE, JJS, JJE ) ! (in)
-       if ( .not. TwoD ) &
-       call ATMOS_DYN_FVM_fluxJ13_XYW( qflx_J13, & ! (out)
-            MOMX, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), J13G(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
-            CDZ, TwoD, &
-            IIS, IIE, JJS, JJE ) ! (in)
-       call ATMOS_DYN_FVM_fluxJ23_XYW( qflx_J23, & ! (out)
-            MOMY, MOMZ, DENS, & ! (in)
-            GSQRT(:,:,:,I_XYZ), J23G(:,:,:,I_XYZ), RMAPF(:,:,:,I_XY), & ! (in)
-            CDZ, TwoD, &
+            CDZ, FDZ, dtrk, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
        if ( .not. TwoD ) &
@@ -638,21 +622,11 @@ contains
        !##### momentum equation (x) #####
 
        ! at (u, y, w)
-       call ATMOS_DYN_FVM_fluxZ_UYZ( qflx_hi(:,:,:,ZDIR), & ! (out)
-            MOMZ, MOMX, DENS, & ! (in)
-            GSQRT(:,:,:,I_UYW), J33G, & ! (in)
+       call ATMOS_DYN_FVM_fluxZJ_UYZ( qflx_hi(:,:,:,ZDIR), qflx_J13, qflx_J23, & ! (out)
+            MOMZ, MOMX, MOMY, MOMX, DENS, & ! (in)
+            GSQRT(:,:,:,I_UYW), F2H_UYZ, & ! (in)
+            J33G, J13G(:,:,:,I_UYW), J23G(:,:,:,I_UYW), MAPF(:,:,:,I_UY), & ! (in)
             num_diff(:,:,:,I_MOMX,ZDIR), & ! (in)
-            CDZ, TwoD, & ! (in)
-            IIS, IIE, JJS, JJE ) ! (in)
-       if ( .not. TwoD ) &
-       call ATMOS_DYN_FVM_fluxJ13_UYZ( qflx_J13, & ! (out)
-            MOMX, MOMX, DENS, & ! (in)
-            F2H_UYZ, J13G(:,:,:,I_UYW), RMAPF(:,:,:,I_UY), & ! (in)
-            CDZ, TwoD, & ! (in)
-            IIS, IIE, JJS, JJE ) ! (in)
-       call ATMOS_DYN_FVM_fluxJ23_UYZ( qflx_J23, & ! (out)
-            MOMY, MOMX, DENS, & ! (in)
-            F2H_UYZ, J23G(:,:,:,I_UYW), RMAPF(:,:,:,I_UY), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 
@@ -750,21 +724,11 @@ contains
        !##### momentum equation (y) #####
 
        ! at (x, v, w)
-       call ATMOS_DYN_FVM_fluxZ_XVZ( qflx_hi(:,:,:,ZDIR), & ! (out)
-            MOMZ, MOMY, DENS, & ! (in)
-            GSQRT(:,:,:,I_XVW), J33G, & ! (in)
+       call ATMOS_DYN_FVM_fluxZJ_XVZ( qflx_hi(:,:,:,ZDIR), qflx_J13, qflx_J23, & ! (out)
+            MOMZ, MOMX, MOMY, MOMY, DENS, & ! (in)
+            GSQRT(:,:,:,I_XVW), F2H_XVZ, & ! (in)
+            J33G, J13G(:,:,:,I_XVW), J23G(:,:,:,I_XVW), MAPF(:,:,:,I_XV), & ! (in)
             num_diff(:,:,:,I_MOMY,ZDIR), & ! (in)
-            CDZ, TwoD, & ! (in)
-            IIS, IIE, JJS, JJE ) ! (in)
-       if ( .not. TwoD ) &
-       call ATMOS_DYN_FVM_fluxJ13_XVZ( qflx_J13, & ! (out)
-            MOMX, MOMY, DENS, & ! (in)
-            F2H_XVZ, J13G(:,:,:,I_XVW), RMAPF(:,:,:,I_XV), & ! (in)
-            CDZ, TwoD, & ! (in)
-            IIS, IIE, JJS, JJE ) ! (in)
-       call ATMOS_DYN_FVM_fluxJ23_XVZ( qflx_J23, & ! (out)
-            MOMY, MOMY, DENS, & ! (in)
-            F2H_XVZ, J23G(:,:,:,I_XVW), RMAPF(:,:,:,I_XV), & ! (in)
             CDZ, TwoD, & ! (in)
             IIS, IIE, JJS, JJE ) ! (in)
 

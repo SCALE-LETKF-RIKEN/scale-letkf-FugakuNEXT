@@ -154,6 +154,67 @@ module scale_atmos_dyn_fvm_flux
        logical,  intent(in)  :: TwoD
        integer,  intent(in)  :: IIS, IIE, JJS, JJE
      end subroutine flux_j
+     subroutine flux_zj_w( &
+          flux, fluxJ13, fluxJ23, &
+          momz, momx, momy, val, &
+          DENS, GSQRT, &
+          J33G, J13G, J23G, MAPF, &
+          num_diff, &
+          CDZ, FDZ, dtrk, TwoD, &
+          IIS, IIE, JJS, JJE )
+       use scale_precision
+       use scale_atmos_grid_cartesC_index
+       implicit none
+       real(RP), intent(inout) :: flux    (KA,IA,JA)
+       real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+       real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+       real(RP), intent(in)  :: momz    (KA,IA,JA)
+       real(RP), intent(in)  :: momx    (KA,IA,JA)
+       real(RP), intent(in)  :: momy    (KA,IA,JA)
+       real(RP), intent(in)  :: val     (KA,IA,JA)
+       real(RP), intent(in)  :: DENS    (KA,IA,JA)
+       real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+       real(RP), intent(in)  :: J33G
+       real(RP), intent(in)  :: J13G    (KA,IA,JA)
+       real(RP), intent(in)  :: J23G    (KA,IA,JA)
+       real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+       real(RP), intent(in)  :: num_diff(KA,IA,JA)
+       real(RP), intent(in)  :: CDZ(KA)
+       real(RP), intent(in)  :: FDZ(KA-1)
+       real(RP), intent(in)  :: dtrk
+       logical,  intent(in)  :: TwoD
+       integer,  intent(in)  :: IIS, IIE, JJS, JJE
+     end subroutine flux_zj_w
+     subroutine flux_zj( &
+          flux, fluxJ13, fluxJ23, &
+          momz, momx, momy, val, &
+          DENS, GSQRT, F2HW, &
+          J33G, J13G, J23G, MAPF, &
+          num_diff, &
+          CDZ, TwoD, &
+          IIS, IIE, JJS, JJE )
+       use scale_precision
+       use scale_atmos_grid_cartesC_index
+       implicit none
+       real(RP), intent(inout) :: flux    (KA,IA,JA)
+       real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+       real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+       real(RP), intent(in)  :: momz    (KA,IA,JA)
+       real(RP), intent(in)  :: momx    (KA,IA,JA)
+       real(RP), intent(in)  :: momy    (KA,IA,JA)
+       real(RP), intent(in)  :: val     (KA,IA,JA)
+       real(RP), intent(in)  :: DENS    (KA,IA,JA)
+       real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+       real(RP), intent(in)  :: F2HW    (KA,IA,JA)
+       real(RP), intent(in)  :: J33G
+       real(RP), intent(in)  :: J13G    (KA,IA,JA)
+       real(RP), intent(in)  :: J23G    (KA,IA,JA)
+       real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+       real(RP), intent(in)  :: num_diff(KA,IA,JA)
+       real(RP), intent(in)  :: CDZ(KA)
+       logical,  intent(in)  :: TwoD
+       integer,  intent(in)  :: IIS, IIE, JJS, JJE
+     end subroutine flux_zj
   end interface
 
 #ifndef _OPENACC
@@ -178,9 +239,17 @@ module scale_atmos_dyn_fvm_flux
   public :: ATMOS_DYN_FVM_fluxY_XYZ_tracer
 
 
+  ! The vertical fluxes of the momenta (the parts of J33G, J13G and J23G at XYW, UYZ and XVZ) are computed
+  ! together by ATMOS_DYN_FVM_fluxZJ_XYW, ATMOS_DYN_FVM_fluxZJ_UYZ and ATMOS_DYN_FVM_fluxZJ_XVZ (issue #3754).
+  ! With TwoD, fluxJ13 is not computed and momx is not used.
+  ! For UYZ and XVZ, GSQRT is used by the part of J33G w, F2HW by the metric parts.
+  procedure(flux_zj_w), pointer :: ATMOS_DYN_FVM_fluxZJ_XYW => NULL()
+  public :: ATMOS_DYN_FVM_fluxZJ_XYW
+  procedure(flux_zj),   pointer :: ATMOS_DYN_FVM_fluxZJ_UYZ => NULL()
+  public :: ATMOS_DYN_FVM_fluxZJ_UYZ
+  procedure(flux_zj),   pointer :: ATMOS_DYN_FVM_fluxZJ_XVZ => NULL()
+  public :: ATMOS_DYN_FVM_fluxZJ_XVZ
 
-  procedure(flux_wz), pointer :: ATMOS_DYN_FVM_fluxZ_XYW => NULL()
-  public :: ATMOS_DYN_FVM_fluxZ_XYW
   procedure(flux_wz), pointer :: ATMOS_DYN_FVM_fluxZ_XYW_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxZ_XYW_tracer
 
@@ -195,19 +264,13 @@ module scale_atmos_dyn_fvm_flux
   public :: ATMOS_DYN_FVM_fluxY_XYW_tracer
 
 
-  procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ13_XYW => NULL()
-  public :: ATMOS_DYN_FVM_fluxJ13_XYW
   procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ13_XYW_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxJ13_XYW_tracer
 
-  procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ23_XYW => NULL()
-  public :: ATMOS_DYN_FVM_fluxJ23_XYW
   procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ23_XYW_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxJ23_XYW_tracer
 
 
-  procedure(flux_z), pointer :: ATMOS_DYN_FVM_fluxZ_UYZ => NULL()
-  public :: ATMOS_DYN_FVM_fluxZ_UYZ
   procedure(flux_z), pointer :: ATMOS_DYN_FVM_fluxZ_UYZ_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxZ_UYZ_tracer
 
@@ -222,19 +285,13 @@ module scale_atmos_dyn_fvm_flux
   public :: ATMOS_DYN_FVM_fluxY_UYZ_tracer
 
 
-  procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ13_UYZ => NULL()
-  public :: ATMOS_DYN_FVM_fluxJ13_UYZ
   procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ13_UYZ_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxJ13_UYZ_tracer
 
-  procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ23_UYZ => NULL()
-  public :: ATMOS_DYN_FVM_fluxJ23_UYZ
   procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ23_UYZ_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxJ23_UYZ_tracer
 
 
-  procedure(flux_z), pointer :: ATMOS_DYN_FVM_fluxZ_XVZ => NULL()
-  public :: ATMOS_DYN_FVM_fluxZ_XVZ
   procedure(flux_z), pointer :: ATMOS_DYN_FVM_fluxZ_XVZ_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxZ_XVZ_tracer
 
@@ -249,13 +306,9 @@ module scale_atmos_dyn_fvm_flux
   public :: ATMOS_DYN_FVM_fluxY_XVZ_tracer
 
 
-  procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ13_XVZ => NULL()
-  public :: ATMOS_DYN_FVM_fluxJ13_XVZ
   procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ13_XVZ_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxJ13_XVZ_tracer
 
-  procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ23_XVZ => NULL()
-  public :: ATMOS_DYN_FVM_fluxJ23_XVZ
   procedure(flux_j), pointer :: ATMOS_DYN_FVM_fluxJ23_XVZ_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxJ23_XVZ_tracer
 
@@ -328,7 +381,10 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_ud1, &
       ATMOS_DYN_FVM_fluxY_XVZ_ud1, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_ud1, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_ud1
+      ATMOS_DYN_FVM_fluxJ23_XVZ_ud1, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_ud1, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_ud1, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_ud1
 
    use scale_atmos_dyn_fvm_flux_cd2, only: &
       ATMOS_DYN_FVM_flux_valueW_Z_cd2, &
@@ -349,7 +405,10 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_cd2, &
       ATMOS_DYN_FVM_fluxY_XVZ_cd2, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_cd2, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_cd2
+      ATMOS_DYN_FVM_fluxJ23_XVZ_cd2, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_cd2, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_cd2, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_cd2
 
    use scale_atmos_dyn_fvm_flux_ud3, only: &
       ATMOS_DYN_FVM_flux_valueW_Z_ud3, &
@@ -370,7 +429,10 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_ud3, &
       ATMOS_DYN_FVM_fluxY_XVZ_ud3, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_ud3, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_ud3
+      ATMOS_DYN_FVM_fluxJ23_XVZ_ud3, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_ud3, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_ud3, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_ud3
 
    use scale_atmos_dyn_fvm_flux_ud3Koren1993, only: &
       ATMOS_DYN_FVM_flux_valueW_Z_ud3Koren1993, &
@@ -391,7 +453,10 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_ud3Koren1993, &
       ATMOS_DYN_FVM_fluxY_XVZ_ud3Koren1993, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_ud3Koren1993, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_ud3Koren1993
+      ATMOS_DYN_FVM_fluxJ23_XVZ_ud3Koren1993, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_ud3Koren1993, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_ud3Koren1993, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_ud3Koren1993
 
    use scale_atmos_dyn_fvm_flux_cd4, only: &
       ATMOS_DYN_FVM_flux_valueW_Z_cd4, &
@@ -412,7 +477,10 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_cd4, &
       ATMOS_DYN_FVM_fluxY_XVZ_cd4, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_cd4, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_cd4
+      ATMOS_DYN_FVM_fluxJ23_XVZ_cd4, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_cd4, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_cd4, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_cd4
 
    use scale_atmos_dyn_fvm_flux_ud5, only: &
       ATMOS_DYN_FVM_flux_valueW_Z_ud5, &
@@ -433,7 +501,10 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_ud5, &
       ATMOS_DYN_FVM_fluxY_XVZ_ud5, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_ud5, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_ud5
+      ATMOS_DYN_FVM_fluxJ23_XVZ_ud5, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_ud5, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_ud5, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_ud5
 
    use scale_atmos_dyn_fvm_flux_cd6, only: &
       ATMOS_DYN_FVM_flux_valueW_Z_cd6, &
@@ -454,7 +525,10 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_cd6, &
       ATMOS_DYN_FVM_fluxY_XVZ_cd6, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_cd6, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_cd6
+      ATMOS_DYN_FVM_fluxJ23_XVZ_cd6, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_cd6, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_cd6, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_cd6
 
    use scale_atmos_dyn_fvm_flux_ud7, only: &
       ATMOS_DYN_FVM_flux_valueW_Z_ud7, &
@@ -475,7 +549,10 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_ud7, &
       ATMOS_DYN_FVM_fluxY_XVZ_ud7, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_ud7, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_ud7
+      ATMOS_DYN_FVM_fluxJ23_XVZ_ud7, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_ud7, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_ud7, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_ud7
 
    use scale_atmos_dyn_fvm_flux_cd8, only: &
       ATMOS_DYN_FVM_flux_valueW_Z_cd8, &
@@ -496,11 +573,17 @@ contains
       ATMOS_DYN_FVM_fluxX_XVZ_cd8, &
       ATMOS_DYN_FVM_fluxY_XVZ_cd8, &
       ATMOS_DYN_FVM_fluxJ13_XVZ_cd8, &
-      ATMOS_DYN_FVM_fluxJ23_XVZ_cd8
+      ATMOS_DYN_FVM_fluxJ23_XVZ_cd8, &
+      ATMOS_DYN_FVM_fluxZJ_XYW_cd8, &
+      ATMOS_DYN_FVM_fluxZJ_UYZ_cd8, &
+      ATMOS_DYN_FVM_fluxZJ_XVZ_cd8
 
     implicit none
     character(len=*), intent(in) :: scheme
     character(len=*), intent(in) :: scheme_tracer
+    !---------------------------------------------------------------------------
+
+    nullify( ATMOS_DYN_FVM_fluxZJ_XYW, ATMOS_DYN_FVM_fluxZJ_UYZ, ATMOS_DYN_FVM_fluxZJ_XVZ )
 
     select case( scheme )
 
@@ -521,36 +604,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_ud1
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_ud1
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_ud1
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_ud1
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_ud1
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_ud1
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_ud1
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_ud1
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_ud1
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_ud1
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_ud1
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_ud1
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_ud1
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_ud1
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_ud1
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_ud1
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_ud1
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_ud1
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_ud1
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 1 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 1
@@ -579,36 +647,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_cd2
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_cd2
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_cd2
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_cd2
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_cd2
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_cd2
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_cd2
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_cd2
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_cd2
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_cd2
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_cd2
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_cd2
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_cd2
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_cd2
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_cd2
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_cd2
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_cd2
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_cd2
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_cd2
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 1 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 1
@@ -637,36 +690,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_ud3
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_ud3
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_ud3
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_ud3
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_ud3
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_ud3
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_ud3
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_ud3
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_ud3
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_ud3
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_ud3
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_ud3
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_ud3
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_ud3
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_ud3
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_ud3
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_ud3
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_ud3
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_ud3
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 2 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 2
@@ -695,36 +733,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_ud3Koren1993
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_ud3Koren1993
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_ud3Koren1993
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_ud3Koren1993
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_ud3Koren1993
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_ud3Koren1993
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_ud3Koren1993
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_ud3Koren1993
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_ud3Koren1993
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_ud3Koren1993
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_ud3Koren1993
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_ud3Koren1993
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_ud3Koren1993
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_ud3Koren1993
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_ud3Koren1993
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_ud3Koren1993
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_ud3Koren1993
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_ud3Koren1993
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_ud3Koren1993
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 2 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 2
@@ -753,36 +776,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_cd4
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_cd4
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_cd4
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_cd4
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_cd4
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_cd4
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_cd4
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_cd4
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_cd4
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_cd4
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_cd4
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_cd4
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_cd4
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_cd4
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_cd4
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_cd4
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_cd4
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_cd4
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_cd4
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 2 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 2
@@ -811,36 +819,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_ud5
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_ud5
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_ud5
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_ud5
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_ud5
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_ud5
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_ud5
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_ud5
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_ud5
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_ud5
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_ud5
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_ud5
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_ud5
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_ud5
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_ud5
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_ud5
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_ud5
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_ud5
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_ud5
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 3 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 3
@@ -869,36 +862,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_cd6
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_cd6
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_cd6
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_cd6
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_cd6
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_cd6
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_cd6
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_cd6
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_cd6
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_cd6
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_cd6
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_cd6
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_cd6
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_cd6
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_cd6
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_cd6
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_cd6
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_cd6
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_cd6
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 3 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 3
@@ -927,36 +905,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_ud7
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_ud7
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_ud7
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_ud7
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_ud7
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_ud7
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_ud7
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_ud7
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_ud7
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_ud7
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_ud7
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_ud7
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_ud7
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_ud7
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_ud7
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_ud7
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_ud7
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_ud7
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_ud7
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 4 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 4
@@ -964,6 +927,11 @@ contains
       end if
       if ( JHALO < 4 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'JHALO must be >= ', 4
+         call PRC_abort
+      end if
+
+      if ( KMAX >= 3 .and. KMAX < 5 ) then
+         LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'KMAX must be 1, 2, or >= ', 5, ' for UD7: ', KMAX
          call PRC_abort
       end if
 
@@ -985,36 +953,21 @@ contains
 
       ATMOS_DYN_FVM_fluxY_XYZ => ATMOS_DYN_FVM_fluxY_XYZ_cd8
 
-      ATMOS_DYN_FVM_fluxZ_XYW => ATMOS_DYN_FVM_fluxZ_XYW_cd8
-
       ATMOS_DYN_FVM_fluxX_XYW => ATMOS_DYN_FVM_fluxX_XYW_cd8
 
       ATMOS_DYN_FVM_fluxY_XYW => ATMOS_DYN_FVM_fluxY_XYW_cd8
-
-      ATMOS_DYN_FVM_fluxJ13_XYW => ATMOS_DYN_FVM_fluxJ13_XYW_cd8
-
-      ATMOS_DYN_FVM_fluxJ23_XYW => ATMOS_DYN_FVM_fluxJ23_XYW_cd8
-
-      ATMOS_DYN_FVM_fluxZ_UYZ => ATMOS_DYN_FVM_fluxZ_UYZ_cd8
 
       ATMOS_DYN_FVM_fluxX_UYZ => ATMOS_DYN_FVM_fluxX_UYZ_cd8
 
       ATMOS_DYN_FVM_fluxY_UYZ => ATMOS_DYN_FVM_fluxY_UYZ_cd8
 
-      ATMOS_DYN_FVM_fluxJ13_UYZ => ATMOS_DYN_FVM_fluxJ13_UYZ_cd8
-
-      ATMOS_DYN_FVM_fluxJ23_UYZ => ATMOS_DYN_FVM_fluxJ23_UYZ_cd8
-
-      ATMOS_DYN_FVM_fluxZ_XVZ => ATMOS_DYN_FVM_fluxZ_XVZ_cd8
-
       ATMOS_DYN_FVM_fluxX_XVZ => ATMOS_DYN_FVM_fluxX_XVZ_cd8
 
       ATMOS_DYN_FVM_fluxY_XVZ => ATMOS_DYN_FVM_fluxY_XVZ_cd8
 
-      ATMOS_DYN_FVM_fluxJ13_XVZ => ATMOS_DYN_FVM_fluxJ13_XVZ_cd8
-
-      ATMOS_DYN_FVM_fluxJ23_XVZ => ATMOS_DYN_FVM_fluxJ23_XVZ_cd8
-
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_cd8
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_cd8
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_cd8
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < 4 ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', 4
@@ -1025,6 +978,11 @@ contains
          call PRC_abort
       end if
 
+      if ( KMAX >= 3 .and. KMAX < 4 ) then
+         LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'KMAX must be 1, 2, or >= ', 4, ' for CD8: ', KMAX
+         call PRC_abort
+      end if
+
 
     case default
        LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'scheme is invalid: ', scheme
@@ -1032,6 +990,13 @@ contains
     end select
 
     !$acc update device(i_scheme)
+
+    if ( .not. ( associated( ATMOS_DYN_FVM_fluxZJ_XYW ) .and. &
+                 associated( ATMOS_DYN_FVM_fluxZJ_UYZ ) .and. &
+                 associated( ATMOS_DYN_FVM_fluxZJ_XVZ ) ) ) then
+       LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'the vertical momentum fluxes are not set for ', trim(scheme)
+       call PRC_abort
+    end if
 
     select case( scheme_tracer )
 

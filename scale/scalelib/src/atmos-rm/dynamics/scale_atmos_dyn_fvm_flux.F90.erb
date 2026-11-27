@@ -2,6 +2,8 @@
 % # vi: set sw=4 ts=8:
 <%
  order = [ ["ud1",1], ["cd2",1], ["ud3",2], ["ud3Koren1993",2], ["cd4",2], ["ud5",3], ["cd6",3], ["ud7",4], ["cd8",4] ]
+ # The fused vertical momentum stencils require these minimum column depths.
+ kmax_min = { "ud7" => 5, "cd8" => 4 }
 %>
 !-------------------------------------------------------------------------------
 !> module scale_atmos_dyn_fvm_flux
@@ -158,6 +160,67 @@ module scale_atmos_dyn_fvm_flux
        logical,  intent(in)  :: TwoD
        integer,  intent(in)  :: IIS, IIE, JJS, JJE
      end subroutine flux_j
+     subroutine flux_zj_w( &
+          flux, fluxJ13, fluxJ23, &
+          momz, momx, momy, val, &
+          DENS, GSQRT, &
+          J33G, J13G, J23G, MAPF, &
+          num_diff, &
+          CDZ, FDZ, dtrk, TwoD, &
+          IIS, IIE, JJS, JJE )
+       use scale_precision
+       use scale_atmos_grid_cartesC_index
+       implicit none
+       real(RP), intent(inout) :: flux    (KA,IA,JA)
+       real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+       real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+       real(RP), intent(in)  :: momz    (KA,IA,JA)
+       real(RP), intent(in)  :: momx    (KA,IA,JA)
+       real(RP), intent(in)  :: momy    (KA,IA,JA)
+       real(RP), intent(in)  :: val     (KA,IA,JA)
+       real(RP), intent(in)  :: DENS    (KA,IA,JA)
+       real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+       real(RP), intent(in)  :: J33G
+       real(RP), intent(in)  :: J13G    (KA,IA,JA)
+       real(RP), intent(in)  :: J23G    (KA,IA,JA)
+       real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+       real(RP), intent(in)  :: num_diff(KA,IA,JA)
+       real(RP), intent(in)  :: CDZ(KA)
+       real(RP), intent(in)  :: FDZ(KA-1)
+       real(RP), intent(in)  :: dtrk
+       logical,  intent(in)  :: TwoD
+       integer,  intent(in)  :: IIS, IIE, JJS, JJE
+     end subroutine flux_zj_w
+     subroutine flux_zj( &
+          flux, fluxJ13, fluxJ23, &
+          momz, momx, momy, val, &
+          DENS, GSQRT, F2HW, &
+          J33G, J13G, J23G, MAPF, &
+          num_diff, &
+          CDZ, TwoD, &
+          IIS, IIE, JJS, JJE )
+       use scale_precision
+       use scale_atmos_grid_cartesC_index
+       implicit none
+       real(RP), intent(inout) :: flux    (KA,IA,JA)
+       real(RP), intent(inout) :: fluxJ13 (KA,IA,JA)
+       real(RP), intent(inout) :: fluxJ23 (KA,IA,JA)
+       real(RP), intent(in)  :: momz    (KA,IA,JA)
+       real(RP), intent(in)  :: momx    (KA,IA,JA)
+       real(RP), intent(in)  :: momy    (KA,IA,JA)
+       real(RP), intent(in)  :: val     (KA,IA,JA)
+       real(RP), intent(in)  :: DENS    (KA,IA,JA)
+       real(RP), intent(in)  :: GSQRT   (KA,IA,JA)
+       real(RP), intent(in)  :: F2HW    (KA,IA,JA)
+       real(RP), intent(in)  :: J33G
+       real(RP), intent(in)  :: J13G    (KA,IA,JA)
+       real(RP), intent(in)  :: J23G    (KA,IA,JA)
+       real(RP), intent(in)  :: MAPF    (   IA,JA,2) !< map factor
+       real(RP), intent(in)  :: num_diff(KA,IA,JA)
+       real(RP), intent(in)  :: CDZ(KA)
+       logical,  intent(in)  :: TwoD
+       integer,  intent(in)  :: IIS, IIE, JJS, JJE
+     end subroutine flux_zj
   end interface
 
 #ifndef _OPENACC
@@ -172,9 +235,17 @@ module scale_atmos_dyn_fvm_flux
   public :: ATMOS_DYN_FVM_flux<%=dir%>_XYZ_tracer
 <% end %>
 
+  ! The vertical fluxes of the momenta (the parts of J33G, J13G and J23G at XYW, UYZ and XVZ) are computed
+  ! together by ATMOS_DYN_FVM_fluxZJ_XYW, ATMOS_DYN_FVM_fluxZJ_UYZ and ATMOS_DYN_FVM_fluxZJ_XVZ (issue #3754).
+  ! With TwoD, fluxJ13 is not computed and momx is not used.
+  ! For UYZ and XVZ, GSQRT is used by the part of J33G w, F2HW by the metric parts.
+  procedure(flux_zj_w), pointer :: ATMOS_DYN_FVM_fluxZJ_XYW => NULL()
+  public :: ATMOS_DYN_FVM_fluxZJ_XYW
+  procedure(flux_zj),   pointer :: ATMOS_DYN_FVM_fluxZJ_UYZ => NULL()
+  public :: ATMOS_DYN_FVM_fluxZJ_UYZ
+  procedure(flux_zj),   pointer :: ATMOS_DYN_FVM_fluxZJ_XVZ => NULL()
+  public :: ATMOS_DYN_FVM_fluxZJ_XVZ
 <% ["XYW", "UYZ", "XVZ"].each do |uvw| %>
-  procedure(<%= uvw=="XYW" ? "flux_wz" : "flux_z" %>), pointer :: ATMOS_DYN_FVM_fluxZ_<%=uvw%> => NULL()
-  public :: ATMOS_DYN_FVM_fluxZ_<%=uvw%>
   procedure(<%= uvw=="XYW" ? "flux_wz" : "flux_z" %>), pointer :: ATMOS_DYN_FVM_fluxZ_<%=uvw%>_tracer => NULL()
   public :: ATMOS_DYN_FVM_fluxZ_<%=uvw%>_tracer
 <% ["X", "Y"].each do |dir| %>
@@ -184,8 +255,6 @@ module scale_atmos_dyn_fvm_flux
   public :: ATMOS_DYN_FVM_flux<%=dir%>_<%=uvw%>_tracer
 <% end %>
 <% ["J13", "J23"].each do |dir| %>
-  procedure(flux_j), pointer :: ATMOS_DYN_FVM_flux<%=dir%>_<%=uvw%> => NULL()
-  public :: ATMOS_DYN_FVM_flux<%=dir%>_<%=uvw%>
   procedure(flux_j), pointer :: ATMOS_DYN_FVM_flux<%=dir%>_<%=uvw%>_tracer => NULL()
   public :: ATMOS_DYN_FVM_flux<%=dir%>_<%=uvw%>_tracer
 <% end %>
@@ -238,14 +307,26 @@ contains
       funcs.push [ "ATMOS_DYN_FVM_flux#{dir}_#{uvw}", nil ]
     end
   end
+  # the vertical momentum fluxes: only for the tracers (the three parts are computed together by funcs_zj)
+  funcs_tracer_only = Array.new
+  ["XYW", "UYZ", "XVZ"].each do |uvw|
+    ["Z", "J13", "J23"].each do |dir|
+      funcs_tracer_only.push "ATMOS_DYN_FVM_flux#{dir}_#{uvw}"
+    end
+  end
+  # not in funcs: neither for the tracers nor for the OpenACC wrappers
+  funcs_zj = [ "ATMOS_DYN_FVM_fluxZJ_XYW", "ATMOS_DYN_FVM_fluxZJ_UYZ", "ATMOS_DYN_FVM_fluxZJ_XVZ" ]
 %>
 <% order.each do |o, nh| %>
    use scale_atmos_dyn_fvm_flux_<%=o%>, only: &
-      <%= funcs.map{|a| "#{a[0]}_#{o}"}.join(", &\n      ") %>
+      <%= ( funcs.map{|a| "#{a[0]}_#{o}"} + funcs_zj.map{|f| "#{f}_#{o}"} ).join(", &\n      ") %>
 <% end %>
     implicit none
     character(len=*), intent(in) :: scheme
     character(len=*), intent(in) :: scheme_tracer
+    !---------------------------------------------------------------------------
+
+    nullify( ATMOS_DYN_FVM_fluxZJ_XYW, ATMOS_DYN_FVM_fluxZJ_UYZ, ATMOS_DYN_FVM_fluxZJ_XVZ )
 
     select case( scheme )
 <%   order.each_with_index do |ary, i|
@@ -255,6 +336,7 @@ contains
     case( "<%= o.upcase %>" )
       LOG_INFO("ATMOS_DYN_FVM_flux_setup",*) 'the <%=o%> scheme is used for flux calculation'
 <% funcs.each do |func, args|
+     next if funcs_tracer_only.include?(func)
      if args %>
 #ifdef _OPENACC
       i_scheme = <%= i+1 %>
@@ -265,6 +347,9 @@ contains
 #endif
 <%   end
    end %>
+      ATMOS_DYN_FVM_fluxZJ_XYW => ATMOS_DYN_FVM_fluxZJ_XYW_<%= o %>
+      ATMOS_DYN_FVM_fluxZJ_UYZ => ATMOS_DYN_FVM_fluxZJ_UYZ_<%= o %>
+      ATMOS_DYN_FVM_fluxZJ_XVZ => ATMOS_DYN_FVM_fluxZJ_XVZ_<%= o %>
 
       if ( ( .not. PRC_TwoD ) .and. IHALO < <%=nh%> ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'IHALO must be >= ', <%=nh%>
@@ -273,7 +358,12 @@ contains
       if ( JHALO < <%=nh%> ) then
          LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'JHALO must be >= ', <%=nh%>
          call PRC_abort
-      end if
+      end if<% if kmax_min[o] %>
+
+      if ( KMAX >= 3 .and. KMAX < <%=kmax_min[o]%> ) then
+         LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'KMAX must be 1, 2, or >= ', <%=kmax_min[o]%>, ' for <%=o.upcase%>: ', KMAX
+         call PRC_abort
+      end if<% end %>
 
 <% end %>
     case default
@@ -282,6 +372,13 @@ contains
     end select
 
     !$acc update device(i_scheme)
+
+    if ( .not. ( associated( ATMOS_DYN_FVM_fluxZJ_XYW ) .and. &
+                 associated( ATMOS_DYN_FVM_fluxZJ_UYZ ) .and. &
+                 associated( ATMOS_DYN_FVM_fluxZJ_XVZ ) ) ) then
+       LOG_ERROR("ATMOS_DYN_FVM_flux_setup",*) 'the vertical momentum fluxes are not set for ', trim(scheme)
+       call PRC_abort
+    end if
 
     select case( scheme_tracer )
 <%   order.each do |o, nh| %>
